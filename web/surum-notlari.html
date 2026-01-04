@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sürüm Notları - Kamp Defterim</title>
+  <link rel="icon" href="./assets/images/icon.png">
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8fafc; color: #222; margin: 0; }
+    .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 12px #0001; padding: 32px; }
+    h1 { text-align: center; color: #0e7490; margin-bottom: 24px; }
+    .accordion { background: #e0f2fe; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 1px 6px #0ea5e933; }
+    .accordion-header { cursor: pointer; padding: 18px 24px; font-size: 1.15em; font-weight: 600; color: #0e7490; border-radius: 12px 12px 0 0; display: flex; align-items: center; justify-content: space-between; }
+    .accordion-content { padding: 0 24px 18px 24px; display: none; font-size: 1.05em; color: #222; }
+    .accordion.open .accordion-content { display: block; }
+    .accordion.open .accordion-header { background: #0e7490; color: #fff; }
+    .accordion-header .arrow { transition: transform 0.2s; }
+    .accordion.open .accordion-header .arrow { transform: rotate(90deg); }
+    ul { margin: 12px 0 0 18px; }
+    li { margin-bottom: 8px; }
+  </style>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var acc = document.querySelector('.accordion');
+      var header = acc.querySelector('.accordion-header');
+      header.addEventListener('click', function() {
+        acc.classList.toggle('open');
+      });
+    });
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h1>Sürüm Notları</h1>
+    <div class="accordion">
+      <div class="accordion-header">
+        Kamp Defterim v1.3_R4
+        <span class="arrow">▶</span>
+      </div>
+      <div class="accordion-content">
+        <br>
+        <strong>Geliştirmeler:</strong>
+        <ul>
+          <li>Kamera ile Etkinlik alanı fotoğrafı ekleme özelliği sağlandı.</li>
+          <li>Arkadaş ve Topluluk Üyeleri Kamp Alanı Paylaşımları için bildirim eklendi.</li>
+          <li>Arkadaş Checklist paylaşımları için bildirim eklendi.</li>
+        </ul>
+        <strong>Düzeltmeler:</strong>
+        <ul>
+          <li>Checklist sayfasındaki boş checklist uyarısı kaldırıldı.</li>
+          <li>Sağ / Sol gestures fonksiyonu ile uygulamanın kapanması sorunu giderildi.</li>
+          <li>Yönetici ekranında standart checklist oluşturamama sorunu düzeltildi.</li>
+          <li>Etkinlik alanı kaydı sırasında uzak sunucu eşitleme sorunu düzeltildi.</li>
+        </ul>
+        <strong>Kamp Alanları Modülü:</strong>
+        <ul>
+          <li>Kamp Alanları Ekranı: Sürekli güncellenen Kamp Alanları Listesi (02.01.2026: Türkiye genelinde 1246 Lokasyon)</li>
+          <li>Kişisel Kamp Alanı Oluşturma (Ekleme / Silme / Paylaşma)</li>
+          <li>Topluluk Lideri Kamp Alanı Oluşturma (Ekleme / Silme / Paylaşma)</li>
+        </ul>
+        <strong>Duyuru Modülü:</strong>
+        <ul>
+          <li>Lokasyon Kontrollü Valilik Duyuruları</li>
+          <li>Lokasyon Kontrollü Meteoroloji Duyuruları</li>
+          <li>Uygulama Duyuruları</li>
+          <li>Topluluk Lideri Duyuru Oluşturma (Ekleme / Silme)</li>
+        </ul>
+        <strong>Etkinlik Modülü:</strong>
+        <ul>
+          <li>Topluluk Lideri Etkinlik Oluşturma (Ekleme / Silme)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="accordion">
+      <div class="accordion-header">
+        Kamp Defterim v1.3_R3
+        <span class="arrow">▶</span>
+      </div>
+      <div class="accordion-content">
+        <br>
+        <strong>Geliştirmeler:</strong>
+        <ul>
+          <li>Kamp alanları için Liste Görünümü eklendi.</li>
+          <li>Kamp alanları için kapsamlı filtreleme seçenekleri eklendi.</li>
+          <li>Arkadaşlarla paylaşılan kişisel checklistler, uzak sunucu ile yedekleme eklendi.</li>
+          <li>Paylaşılan checklistler kullanıcı bilgisi eklendi.</li>
+          <li>Yeni Kamp Türleri eklendi.</li>
+          <li>Profil sayfasında Topluluk üyeliği başvuru alanı eklendi.</li>
+        </ul>
+        <strong>Düzeltmeler:</strong>
+        <ul>
+          <li>Harita üzerinde butonların üstte kalma sorunu düzeltildi.</li>
+          <li>Açılış saatleri görüntüleme hatası düzeltildi.</li>
+          <li>Hatalı duyuru bildirim sayısı hatası düzeltildi.</li>
+          <li>Profil sayfasında kullanılmayan künyeler kaldırıldı.</li>
+        </ul>
+        <strong>Kamp Alanları Modülü:</strong>
+        <ul>
+          <li>Kamp Alanları Ekranı: Sürekli güncellenen Kamp Alanları Listesi (04.12.2025: Türkiye genelinde 1000 Lokasyon)</li>
+          <li>Kişisel Kamp Alanı Oluşturma (Ekleme / Silme / Paylaşma)</li>
+          <li>Topluluk Lideri Kamp Alanı Oluşturma (Ekleme / Silme / Paylaşma)</li>
+        </ul>
+        <strong>Duyuru Modülü:</strong>
+        <ul>
+          <li>Lokasyon Kontrollü Valilik Duyuruları</li>
+          <li>Lokasyon Kontrollü Meteoroloji Duyuruları</li>
+          <li>Uygulama Duyuruları</li>
+          <li>Topluluk Lideri Duyuru Oluşturma (Ekleme / Silme)</li>
+        </ul>
+        <strong>Etkinlik Modülü:</strong>
+        <ul>
+          <li>Topluluk Lideri Etkinlik Oluşturma (Ekleme / Silme)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="accordion">
+      <div class="accordion-header">
+        Kamp Defterim v1.3_R2
+        <span class="arrow">▶</span>
+      </div>
+      <div class="accordion-content">
+        <br>
+        <strong>Geliştirmeler:</strong>
+        <ul>
+          <li>Uygulamadan çıkılsa bile checklist hatırlama özelliği eklendi.</li>
+          <li>Şifremi unuttum eposta ile sıfırlama eklendi.</li>
+          <li>Eklediğiniz veya paylaştığınız kamp alanları için detay sayfasında kullanıcı adı bilgisi eklendi.</li>
+          <li>Kamp alanı fotoğrafları için tam ekran görüntüleme eklendi.</li>
+        </ul>
+        <strong>Düzeltmeler:</strong>
+        <ul>
+          <li>Ani kapanma problemi düzeltildi.</li>
+          <li>Şifre ekranı gözükmeme problemi giderildi.</li>
+        </ul>
+        <strong>Kamp Alanları Modülü:</strong>
+        <ul>
+          <li>Kamp Alanları Ekranı: Sürekli güncellenen Kamp Alanları Listesi (04.12.2025: Türkiye genelinde 1000 Lokasyon)</li>
+          <li>Kişisel Kamp Alanı Oluşturma (Ekleme / Silme / Paylaşma)</li>
+          <li>Topluluk Lideri Kamp Alanı Oluşturma (Ekleme / Silme / Paylaşma)</li>
+        </ul>
+        <strong>Duyuru Modülü:</strong>
+        <ul>
+          <li>Lokasyon Kontrollü Valilik Duyuruları</li>
+          <li>Lokasyon Kontrollü Meteoroloji Duyuruları</li>
+          <li>Uygulama Duyuruları</li>
+          <li>Topluluk Lideri Duyuru Oluşturma (Ekleme / Silme)</li>
+        </ul>
+        <strong>Etkinlik Modülü:</strong>
+        <ul>
+          <li>Topluluk Lideri Etkinlik Oluşturma (Ekleme / Silme)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

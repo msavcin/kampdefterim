@@ -1,0 +1,69 @@
+{
+  "expo": {
+    "name": "Kamp Defterim",
+    "slug": "bolt-expo-nativewind",
+    "platforms": [
+      "android",
+      "web"
+    ],
+    "version": "1.3_R4",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "kampdefterim",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "versionCode": 14,
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_MEDIA_LOCATION"
+      ],
+      "package": "com.spondylus.boltexponativewind"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-file-system",
+        {
+          "requestLegacyExternalStorage": true
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Yedek dosyalarını Downloads klasörüne kaydetmek için izin gerekli.",
+          "savePhotosPermission": "Yedek dosyalarını Downloads klasörüne kaydetmek için izin gerekli.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      "expo-sqlite",
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "5712d230-4b8e-4709-b3b2-31694cee2237"
+      }
+    }
+  }
+}
