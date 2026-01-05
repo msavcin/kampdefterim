@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity, Image, Modal } from 'react-native';
+import GuestInfoModal from '../../components/GuestInfoModal';
 import { loginUser, getMe, listCommunityMembers } from '../../lib/userCommunityApi';
 import { saveToken } from '../../lib/auth';
 import { API_URL } from '../../lib/config';
@@ -13,7 +14,35 @@ export default function LoginScreen() {
   const [forgotModalVisible, setForgotModalVisible] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
+
+  const [guestModalVisible, setGuestModalVisible] = useState(false);
+  const guestLoginPendingRedirect = useRef(false);
   const router = useRouter();
+
+    // Misafir giriş fonksiyonu
+  // Misafir girişinde modalı sadece başarılı giriş sonrası açmak için callback ile handleLogin'i çağırıyoruz
+  const handleGuestLogin = async () => {
+    setLoading(true);
+    try {
+      // Misafir login bilgileriyle doğrudan loginUser çağrılır
+      const result = await loginUser({ identifier: 'misafir', password: 'Gg123.' });
+      if (result && result.token) {
+        await saveToken(result.token);
+        const me = await getMe();
+        try {
+          await AsyncStorage.setItem('localUser', JSON.stringify(me));
+        } catch {}
+        guestLoginPendingRedirect.current = true;
+        setGuestModalVisible(true);
+      } else {
+        Alert.alert('Hata', result && result.error ? result.error : 'Giriş başarısız.');
+      }
+    } catch (error: any) {
+      Alert.alert('Hata', error?.message || 'Giriş başarısız.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleForgotPassword = async () => {
     if (!forgotEmail) return;
@@ -39,9 +68,17 @@ export default function LoginScreen() {
     }
   };
 
-  const handleLogin = async () => {
+  // handleLogin opsiyonel olarak bir callback alır, başarılı giriş sonrası çalışır
+  const handleLogin = async (onGuestLoginSuccess?: () => void) => {
     setLoading(true);
     try {
+      // Misafir girişi ise zorunlu alan kontrolü atlanır
+      const isGuest = identifier === 'misafir' && password === 'Gg123.';
+      if (!isGuest && (!identifier || !password)) {
+        Alert.alert('Hata', 'Kullanıcı adı/eposta ve şifre zorunludur.');
+        setLoading(false);
+        return;
+      }
       console.log('[LOGIN] identifier:', identifier, '| password:', password ? '[GİZLİ]' : '[BOŞ]');
       const result = await loginUser({ identifier, password });
       console.log('[LOGIN] loginUser sonucu:', result);
@@ -82,6 +119,10 @@ export default function LoginScreen() {
           }
         }
         if (canLogin) {
+          // Eğer misafir girişi ise modalı göster
+          if (isGuest && typeof onGuestLoginSuccess === 'function') {
+            onGuestLoginSuccess();
+          }
           console.log('[LOGIN] Giriş başarılı, yönlendiriliyor.');
           router.replace('/(auth)/community');
         } else {
@@ -136,13 +177,30 @@ export default function LoginScreen() {
         onChangeText={setPassword}
         placeholderTextColor="#64748b"
       />
-      <Button title={loading ? 'Giriş Yapılıyor...' : 'Giriş Yap'} onPress={handleLogin} disabled={loading} />
+      <Button title={loading ? 'Giriş Yapılıyor...' : 'Giriş Yap'} onPress={() => handleLogin()} disabled={loading} />
       <TouchableOpacity onPress={() => setForgotModalVisible(true)} style={styles.forgotContainer}>
         <Text style={styles.forgotText}>Şifremi Unuttum</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => router.replace('/(auth)/register')} style={styles.linkContainer}>
         <Text style={styles.link}>Hesabınız yok mu? Kayıt olun</Text>
       </TouchableOpacity>
+
+      {/* Misafir olarak giriş */}
+      <TouchableOpacity onPress={handleGuestLogin} style={[styles.linkContainer, { marginTop: 8 }]}> 
+        <Text style={[styles.link, { color: '#facc15' }]}>Misafir olarak oturum aç</Text>
+      </TouchableOpacity>
+
+      {/* Misafir bilgilendirme modalı */}
+      <GuestInfoModal
+        visible={guestModalVisible}
+        onClose={() => {
+          setGuestModalVisible(false);
+          if (guestLoginPendingRedirect.current) {
+            guestLoginPendingRedirect.current = false;
+            router.replace('/(auth)/community');
+          }
+        }}
+      />
 
       {/* Şifremi Unuttum Modalı */}
       <Modal

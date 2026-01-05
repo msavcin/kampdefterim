@@ -624,9 +624,14 @@ export default function ChecklistScreen({ navigation }: any) {
             body,
             token
           });
-          Alert.alert('Checklist Hatası', `Sunucudan veri alınamadı: ${res.status}\n${body}`);
+          // Guest kullanıcı ise Alert gösterme, sadece logla
+          if (!(userRole === 'guest' && res.status === 403 && body.includes('yetkisi yok'))) {
+            Alert.alert('Checklist Hatası', `Sunucudan veri alınamadı: ${res.status}\n${body}`);
+          }
         } else {
-          Alert.alert('Checklist Hatası', 'Sunucudan veri alınamadı.');
+          if (userRole !== 'guest') {
+            Alert.alert('Checklist Hatası', 'Sunucudan veri alınamadı.');
+          }
         }
         throw err;
       }
@@ -778,11 +783,12 @@ const removeSharedChecklist = async (shareId: string) => {
   }
 };
 
+  // isLoggingOut zaten yukarıda tanımlı, tekrar tanımlama!
   useEffect(() => {
-    if (userRole !== 'guest') {
+    if (userRole !== 'guest' && !isLoggingOut) {
       fetchCustomChecklists();
     }
-  }, [userRole]);
+  }, [userRole, isLoggingOut]);
 
   // Kişisel checklist oluşturma fonksiyonu
   async function createCustomChecklist(name: string, isShared: boolean): Promise<string | null> {

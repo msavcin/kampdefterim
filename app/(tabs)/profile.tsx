@@ -666,17 +666,28 @@ export default function ProfileScreen(props: any) {
               </View>
               {/* Deneme süresi kalan gün/bilgi satırı (sadece user rolünde trial_user: true ise) */}
               {isTrialUser && user?.created_at && (
-                <View style={{ marginTop: 8, marginBottom: 2, backgroundColor: trialExpired ? '#fee2e2' : '#fef3c7', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}>
-                  {trialExpired ? (
-                    <Text style={{ color: '#dc2626', fontWeight: 'bold', fontSize: 14 }}>
-                      Deneme süreniz doldu. Artık sadece misafir olarak devam edebilirsiniz.
-                    </Text>
-                  ) : (
+                trialExpired ? (
+                  // Deneme süresi dolduysa otomatik logout
+                  useEffect(() => {
+                    Alert.alert('Deneme Süresi Doldu', 'Deneme süreniz sona erdi. Oturumunuz kapatılıyor.', [
+                      {
+                        text: 'Tamam',
+                        onPress: async () => {
+                          await removeToken();
+                          setUser(null);
+                          router.replace('/login');
+                        }
+                      }
+                    ]);
+                  }, []),
+                  null
+                ) : (
+                  <View style={{ marginTop: 8, marginBottom: 2, backgroundColor: '#fef3c7', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}>
                     <Text style={{ color: '#b45309', fontWeight: 'bold', fontSize: 14 }}>
                       Deneme süresi: {trialDaysLeft} gün kaldı
                     </Text>
-                  )}
-                </View>
+                  </View>
+                )
               )}
               {/* Guest ise kısıtlı erişim mesajı */}
               {isGuest && (
