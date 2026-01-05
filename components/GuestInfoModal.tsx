@@ -18,9 +18,25 @@ const GuestInfoModal: React.FC<GuestInfoModalProps> = ({ visible, onClose }) => 
         <View style={styles.container}>
           <Text style={styles.title}>Hoşgeldiniz</Text>
           <Text style={styles.text}>
-            Misafir olarak giriş yaptınız. Uygulamamızdaki tüm özellikleri "Misafir" oturumunda test edebilirsiniz.{"\n\n"}
-            Uygulamayı beğendiyseniz, kendi hesabınızı oluşturup 1 ay ücretsiz üyeliğinizi başlatabilirsiniz. Ücretsiz süre sonunda kısıtlı kullanımla uygulamayı kullanmaya devam edebilirsiniz.{"\n\n"}
-            * Misafir oturumunda yaptığınız değişikler her ay başında resetlenmektedir.
+            Misafir olarak giriş yapıyorsunuz. Uygulamamızdaki tüm özellikleri test edebilirsiniz.{"\n\n"}
+            Uygulamayı beğendiğiniz taktirde, kendi hesabınızı oluşturup 1 ay ücretsiz üyeliğinizi başlatabilirsiniz.{"\n\n"} 
+            Ücretsiz üyeliğinizin sonunda{' '}
+            <Text
+              style={styles.link}
+              onPress={() => {
+                // WebView veya Linking ile açılabilir
+                // import { Linking } from 'react-native';
+                // Linking.openURL('https://kampdefterim.com/kisitli-erisim.html');
+                require('react-native').Linking.openURL('https://kampdefterim.com/kisitli-erisim.html');
+              }}
+            >
+              <Text style={{ fontWeight: 'bold', fontStyle: 'italic', color: '#3730a3', textDecorationLine: 'underline' }}>
+              kısıtlı kullanımla
+              </Text>
+            </Text>
+            &nbsp;uygulamayı kullanmaya devam edebilirsiniz.{"\n\n"}
+            * Misafir oturumunda yapılan değişiklikler her ay başında sıfırlanmaktadır.{"\n\n"} 
+            Kişisel alanlarınızı oluşturmak için lütfen hesap oluşturun.{"\n\n"}
           </Text>
           <TouchableOpacity style={styles.button} onPress={onClose}>
             <Text style={styles.buttonText}>Tamam</Text>
@@ -68,6 +84,9 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 15,
+  },
+  link: {
+    // Ekstra stil istenirse buraya eklenebilir
   },
 });
 

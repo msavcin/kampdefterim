@@ -342,7 +342,12 @@ export default function MapScreen() {
     try {
       if (location && location.coords) {
         setMapMoveQuery(null); // Varsayılan konuma dön
-        // Haritayı yeniden render ettirir, mevcut konuma odaklanır
+        setTimeout(() => {
+          setMapCenter({ latitude: location.coords.latitude, longitude: location.coords.longitude }); // Haritayı kullanıcı konumuna odakla
+          if (webViewRef.current) {
+            webViewRef.current.injectJavaScript(`map.setView([${location.coords.latitude}, ${location.coords.longitude}], 13); true;`);
+          }
+        }, 100);
         await refreshData();
       } else {
         // Konum alınamıyorsa tekrar iste
