@@ -216,6 +216,15 @@ async function syncPendingImages(userId) {
 
 // Tüm senkronizasyonu başlatan ana fonksiyon
 export async function syncAll({ userId }) {
+  // 0. Sunucudan kamp alanlarını çek ve lokal veritabanı ile senkronize et (çoklu cihaz desteği için)
+  try {
+    const db = getDatabase();
+    await db.fetchAndStoreCampingAreasFromAPI(API_URL + '/campgrounds');
+    console.log('[syncAll] Kamp alanları sunucu ile senkronize edildi.');
+  } catch (error) {
+    console.error('[syncAll] Kamp alanları senkronize edilemedi:', error);
+  }
+  
   // 1. Fotoğraflar
   await syncPendingImages(userId);
   // 2. Checklist

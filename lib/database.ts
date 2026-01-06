@@ -50,7 +50,18 @@ export interface Favorite {
   created_at: string;
 }
 
-class DatabaseManager {
+export class DatabaseManager {
+    // Singleton instance
+    private static instance: DatabaseManager | null = null;
+    
+    // Singleton getter
+    static getInstance(): DatabaseManager {
+      if (!DatabaseManager.instance) {
+        DatabaseManager.instance = new DatabaseManager();
+      }
+      return DatabaseManager.instance;
+    }
+    
     // Tüm tabloları drop eden yardımcı fonksiyon (public)
     async dropAllTables() {
       if (!this.db) await this.init();
@@ -759,6 +770,35 @@ class DatabaseManager {
         }
       }
   // ...existing code...
+      
+      // Sunucuda olmayan lokal kamp alanlarını sil (çoklu cihaz senkronizasyonu için)
+      // API'den gelen external_id listesi
+      const serverExternalIds = new Set<string>();
+      for (const item of data) {
+        if (item.external_id) {
+          serverExternalIds.add(String(item.external_id));
+        }
+      }
+      
+      // Lokal veritabanındaki tüm external_id'li kayıtları al
+      const localAreasWithExtId = await this.db!.getAllAsync(
+        'SELECT id, external_id FROM camping_areas WHERE external_id IS NOT NULL AND external_id != ""'
+      ) as { id: number; external_id: string }[];
+      
+      let deletedCount = 0;
+      for (const localArea of localAreasWithExtId) {
+        // Eğer sunucuda yoksa lokal veritabanından sil
+        if (!serverExternalIds.has(String(localArea.external_id))) {
+          await this.db!.runAsync('DELETE FROM camping_areas WHERE id = ?', [localArea.id]);
+          deletedCount++;
+          console.log(`[fetchAndStoreCampingAreasFromAPI] Sunucuda olmayan lokal alan silindi: external_id=${localArea.external_id}, id=${localArea.id}`);
+        }
+      }
+      
+      if (deletedCount > 0) {
+        console.log(`[fetchAndStoreCampingAreasFromAPI] Toplam ${deletedCount} sunucuda olmayan lokal alan silindi.`);
+      }
+      
       // Ekledikten sonra toplam kayıt sayısını logla
       const allAreas = await this.getAllCampingAreas();
   // ...existing code...
@@ -1041,18 +1081,23 @@ class DatabaseManager {
         // opening_hours için string hazırla (object veya array ise stringify)
         let openingHoursStr = '';
         if (area.opening_hours) {
-          // Eğer hem weekday hem weekend tamamen kapalıysa (open ve close boş), hiç kaydetme
-          if (
-            typeof area.opening_hours === 'object' &&
-            area.opening_hours.weekday && area.opening_hours.weekend &&
-            !area.opening_hours.weekday.open && !area.opening_hours.weekday.close &&
-            !area.opening_hours.weekend.open && !area.opening_hours.weekend.close
-          ) {
-            openingHoursStr = '';
+          if (typeof area.opening_hours === 'string') {
+            openingHoursStr = area.opening_hours;
+          } else if (typeof area.opening_hours === 'object' && !Array.isArray(area.opening_hours)) {
+            // Object tipinde - weekday/weekend kontrolü yap
+            const hoursObj = area.opening_hours as any;
+            // Eğer hem weekday hem weekend tamamen kapalıysa (open ve close boş), hiç kaydetme
+            if (
+              hoursObj.weekday && hoursObj.weekend &&
+              !hoursObj.weekday.open && !hoursObj.weekday.close &&
+              !hoursObj.weekend.open && !hoursObj.weekend.close
+            ) {
+              openingHoursStr = '';
+            } else {
+              openingHoursStr = JSON.stringify(area.opening_hours);
+            }
           } else if (typeof area.opening_hours === 'object') {
             openingHoursStr = JSON.stringify(area.opening_hours);
-          } else if (typeof area.opening_hours === 'string') {
-            openingHoursStr = area.opening_hours;
           }
         }
         console.log('[DB][insertOrUpdateCampingArea] opening_hours:', { raw: area.opening_hours, stringified: openingHoursStr });
@@ -1605,12 +1650,7 @@ class DatabaseManager {
   }
 }
 
-// Getter function to ensure database is initialized when accessed
-let databaseInstance: DatabaseManager | null = null;
-
+// Getter function to ensure database is initialized when accessed (backward compatibility)
 export function getDatabase(): DatabaseManager {
-  if (!databaseInstance) {
-    databaseInstance = new DatabaseManager();
-  }
-  return databaseInstance;
+  return DatabaseManager.getInstance();
 }
