@@ -1,7 +1,3 @@
-        // open/close değerlerinin boş olup olmadığını güvenli şekilde kontrol eden yardımcı fonksiyon
-        const isEmptyOpening = (obj: any) =>
-          (!obj.open && obj.open !== 0 && obj.open !== false) &&
-          (!obj.close && obj.close !== 0 && obj.close !== false);
 import { API_URL } from './config';
 import { apiFetch } from './apiFetch';
 import { getToken } from './auth';
@@ -54,7 +50,18 @@ export interface Favorite {
   created_at: string;
 }
 
-class DatabaseManager {
+export class DatabaseManager {
+    // Singleton instance
+    private static instance: DatabaseManager | null = null;
+    
+    // Singleton getter
+    static getInstance(): DatabaseManager {
+      if (!DatabaseManager.instance) {
+        DatabaseManager.instance = new DatabaseManager();
+      }
+      return DatabaseManager.instance;
+    }
+    
     // Tüm tabloları drop eden yardımcı fonksiyon (public)
     async dropAllTables() {
       if (!this.db) await this.init();
@@ -438,16 +445,28 @@ class DatabaseManager {
         [campground_id]
       );
       if (existing) {
-      // ...existing code...
+        // ...existing code...
         return;
       }
     }
     const now = new Date().toISOString();
-    const result = await this.db!.runAsync(
-      `INSERT INTO pending_changes (type, campground_id, data, created_at, status) VALUES (?, ?, ?, ?, 'pending')`,
-      [type, campground_id, JSON.stringify(data), now]
-    );
-  // ...existing code...
+    try {
+      const result = await this.db!.runAsync(
+        `INSERT INTO pending_changes (type, campground_id, data, created_at, status) VALUES (?, ?, ?, ?, 'pending')`,
+        [type, campground_id, JSON.stringify(data), now]
+      );
+      return result;
+    } catch (err) {
+      // [DEBUG] runAsync error log
+      console.error('[DB][insertPendingChange] runAsync error:', err, {
+        type,
+        campground_id,
+        data,
+        dataString: (() => { try { return JSON.stringify(data); } catch (e) { return '[stringify error]'; } })(),
+        now
+      });
+      throw err;
+    }
   }
 
   async getPendingChanges() {
@@ -554,6 +573,12 @@ class DatabaseManager {
           const amenitiesStr = Array.isArray(item.amenities) ? JSON.stringify(item.amenities) : (item.amenities || '[]');
           const tagsStr = typeof item.tags === 'object' ? JSON.stringify(item.tags) : (item.tags || '{}');
           const imagesStr = Array.isArray(images) ? JSON.stringify(images) : (images || '[]');
+          // opening_hours string'e çevir
+          const openingHoursStr = typeof item.opening_hours === 'object' && item.opening_hours !== null
+            ? JSON.stringify(item.opening_hours)
+            : (item.opening_hours || '');
+          // owner_id string'e çevir
+          const ownerIdStr = item.owner_id !== undefined && item.owner_id !== null ? String(item.owner_id) : '';
 
           let updateResult = { changes: 0 };
           if (item.external_id) {
@@ -579,7 +604,7 @@ class DatabaseManager {
                 item.description ?? '',
                 item.website ?? '',
                 item.phone ?? '',
-                Array.isArray(item.opening_hours) ? JSON.stringify(item.opening_hours) : (item.opening_hours ?? ''),
+                openingHoursStr,
                 item.capacity ?? 0,
                 item.fee === true ? 1 : (item.fee === false ? 0 : null),
                 item.status ?? 'active',
@@ -593,7 +618,7 @@ class DatabaseManager {
                 item.contact_email ?? '',
                 item.last_verified ?? '',
                 item.visibility ?? '',
-                item.owner_id ?? '',
+                ownerIdStr,
                 item.owner_username ?? '',
                 item.source_id ?? '',
                 photoLinksStr,
@@ -632,7 +657,7 @@ class DatabaseManager {
                     item.description ?? '',
                     item.website ?? '',
                     item.phone ?? '',
-                    Array.isArray(item.opening_hours) ? JSON.stringify(item.opening_hours) : (item.opening_hours ?? ''),
+                    openingHoursStr,
                     item.capacity ?? 0,
                     item.fee === true ? 1 : (item.fee === false ? 0 : null),
                     item.status ?? 'active',
@@ -646,7 +671,7 @@ class DatabaseManager {
                     item.contact_email ?? '',
                     item.last_verified ?? '',
                     item.visibility ?? '',
-                    item.owner_id ?? '',
+                    ownerIdStr,
                     item.owner_username ?? '',
                     item.source_id ?? '',
                     photoLinksStr,
@@ -682,7 +707,7 @@ class DatabaseManager {
                       item.description ?? '',
                       item.website ?? '',
                       item.phone ?? '',
-                      Array.isArray(item.opening_hours) ? JSON.stringify(item.opening_hours) : (item.opening_hours ?? ''),
+                      openingHoursStr,
                       item.capacity ?? 0,
                       item.fee === true ? 1 : (item.fee === false ? 0 : null),
                       item.status ?? 'active',
@@ -696,7 +721,7 @@ class DatabaseManager {
                       item.contact_email ?? '',
                       item.last_verified ?? '',
                       item.visibility ?? '',
-                      item.owner_id ?? '',
+                      ownerIdStr,
                       item.owner_username ?? '',
                       item.source_id ?? '',
                       photoLinksStr,
@@ -724,7 +749,7 @@ class DatabaseManager {
                 item.description ?? '',
                 item.website ?? '',
                 item.phone ?? '',
-                Array.isArray(item.opening_hours) ? JSON.stringify(item.opening_hours) : (item.opening_hours ?? ''),
+                openingHoursStr,
                 item.capacity ?? 0,
                 item.fee === true ? 1 : (item.fee === false ? 0 : null),
                 item.status ?? 'active',
@@ -738,7 +763,7 @@ class DatabaseManager {
                 item.contact_email ?? '',
                 item.last_verified ?? '',
                 item.visibility ?? '',
-                item.owner_id ?? '',
+                ownerIdStr,
                 item.owner_username ?? '',
                 item.external_id ?? '',
                 item.source_id ?? '',
@@ -762,42 +787,36 @@ class DatabaseManager {
           console.error('Kamp alanı ekleme/güncelleme hatası:', err, item);
         }
       }
-
-      // ===== YENİ: API'dan gelmeyen kayıtları sil =====
-      // API'dan gelen tüm external_id'leri topla
-      const apiExternalIds = new Set<string>();
-      data.forEach((item: any) => {
-        if (item.external_id) {
-          apiExternalIds.add(String(item.external_id));
-        }
-      });
-
-      // Lokal DB'de external_id olan ama API'dan gelmeyen kayıtları bul ve sil
-      const localAreasWithExternalId = await this.db!.getAllAsync(
-        'SELECT id, external_id, name FROM camping_areas WHERE external_id IS NOT NULL AND external_id != "" AND deleted = 0'
-      ) as { id: number, external_id: string, name: string }[];
-
-      let deletedCount = 0;
-      for (const localArea of localAreasWithExternalId) {
-        if (!apiExternalIds.has(String(localArea.external_id))) {
-          // Bu kayıt API'dan gelmedi, demek ki sunucuda silinmiş
-          // Ancak pending delete varsa atlama (çünkü bu cihazdan silinip henüz sync olmamış olabilir)
-          const isPendingDelete = deletedIds.has(String(localArea.external_id)) || deletedIds.has(String(localArea.id));
-          if (!isPendingDelete) {
-            console.log(`[fetchAndStoreCampingAreasFromAPI] 🗑️ Sunucuda olmayan kayıt siliniyor: ${localArea.name} (external_id: ${localArea.external_id})`);
-            await this.db!.runAsync(
-              'UPDATE camping_areas SET deleted = 1, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-              ['deleted', localArea.id]
-            );
-            deletedCount++;
-          }
-        }
-      }
-
-      if (deletedCount > 0) {
-        console.log(`[fetchAndStoreCampingAreasFromAPI] ✅ Sunucuda olmayan ${deletedCount} kayıt lokalden silindi.`);
-      }
   // ...existing code...
+      
+      // Sunucuda olmayan lokal kamp alanlarını sil (çoklu cihaz senkronizasyonu için)
+      // API'den gelen external_id listesi
+      const serverExternalIds = new Set<string>();
+      for (const item of data) {
+        if (item.external_id) {
+          serverExternalIds.add(String(item.external_id));
+        }
+      }
+      
+      // Lokal veritabanındaki tüm external_id'li kayıtları al
+      const localAreasWithExtId = await this.db!.getAllAsync(
+        'SELECT id, external_id FROM camping_areas WHERE external_id IS NOT NULL AND external_id != ""'
+      ) as { id: number; external_id: string }[];
+      
+      let deletedCount = 0;
+      for (const localArea of localAreasWithExtId) {
+        // Eğer sunucuda yoksa lokal veritabanından sil
+        if (!serverExternalIds.has(String(localArea.external_id))) {
+          await this.db!.runAsync('DELETE FROM camping_areas WHERE id = ?', [localArea.id]);
+          deletedCount++;
+          console.log(`[fetchAndStoreCampingAreasFromAPI] Sunucuda olmayan lokal alan silindi: external_id=${localArea.external_id}, id=${localArea.id}`);
+        }
+      }
+      
+      if (deletedCount > 0) {
+        console.log(`[fetchAndStoreCampingAreasFromAPI] Toplam ${deletedCount} sunucuda olmayan lokal alan silindi.`);
+      }
+      
       // Ekledikten sonra toplam kayıt sayısını logla
       const allAreas = await this.getAllCampingAreas();
   // ...existing code...
@@ -1080,29 +1099,23 @@ class DatabaseManager {
         // opening_hours için string hazırla (object veya array ise stringify)
         let openingHoursStr = '';
         if (area.opening_hours) {
-          // opening_hours bir obje ve null değilse, weekday/weekend alanları varsa kontrol et
-          if (
-            typeof area.opening_hours === 'object' &&
-            area.opening_hours !== null &&
-            !Array.isArray(area.opening_hours)
-          ) {
-            const oh: any = area.opening_hours;
-            const hasWeekday = Object.prototype.hasOwnProperty.call(oh, 'weekday');
-            const hasWeekend = Object.prototype.hasOwnProperty.call(oh, 'weekend');
-            const weekdayObj = hasWeekday && typeof oh.weekday === 'object' && oh.weekday !== null ? oh.weekday : null;
-            const weekendObj = hasWeekend && typeof oh.weekend === 'object' && oh.weekend !== null ? oh.weekend : null;
+          if (typeof area.opening_hours === 'string') {
+            openingHoursStr = area.opening_hours;
+          } else if (typeof area.opening_hours === 'object' && !Array.isArray(area.opening_hours)) {
+            // Object tipinde - weekday/weekend kontrolü yap
+            const hoursObj = area.opening_hours as any;
+            // Eğer hem weekday hem weekend tamamen kapalıysa (open ve close boş), hiç kaydetme
             if (
-              weekdayObj && weekendObj &&
-              typeof isEmptyOpening === 'function' &&
-              isEmptyOpening(weekdayObj) &&
-              isEmptyOpening(weekendObj)
+              hoursObj.weekday && hoursObj.weekend &&
+              !hoursObj.weekday.open && !hoursObj.weekday.close &&
+              !hoursObj.weekend.open && !hoursObj.weekend.close
             ) {
               openingHoursStr = '';
             } else {
               openingHoursStr = JSON.stringify(area.opening_hours);
             }
-          } else if (typeof area.opening_hours === 'string') {
-            openingHoursStr = area.opening_hours;
+          } else if (typeof area.opening_hours === 'object') {
+            openingHoursStr = JSON.stringify(area.opening_hours);
           }
         }
         console.log('[DB][insertOrUpdateCampingArea] opening_hours:', { raw: area.opening_hours, stringified: openingHoursStr });
@@ -1281,14 +1294,21 @@ class DatabaseManager {
     `;
   // ...existing code...
 
+    // LOG EKLENDİ
+    console.log('[DB][searchCampingAreasByLocation] Query:', query);
+    console.log('[DB][searchCampingAreasByLocation] Params:', params);
     try {
       const result = await this.db!.getAllAsync(query, params);
-      
-  // ...existing code...
-      
-      // Debug: Kullanıcı alanlarını logla
-  // Kullanıcı alanı loglaması kaldırıldı (rentech_id yok)
-      
+      console.log('[DB][searchCampingAreasByLocation] Result count:', result.length);
+      // Kullanıcı tarafından eklenen alanları ayrıca logla
+      const userSubmitted = (result as any[]).filter(row => {
+        let tagsObj = row.tags;
+        if (typeof tagsObj === 'string') {
+          try { tagsObj = JSON.parse(tagsObj); } catch { tagsObj = {}; }
+        }
+        return tagsObj && tagsObj.user_submitted === 'yes';
+      });
+      console.log('[DB][searchCampingAreasByLocation] User submitted count:', userSubmitted.length, userSubmitted.map(r => r.id || r.name));
       // Calculate distance in JavaScript using Haversine formula
       const areasWithDistance = (result as any[]).map(row => {
         const distance = this.calculateDistance(latitude, longitude, row.latitude, row.longitude);
@@ -1655,12 +1675,7 @@ class DatabaseManager {
   }
 }
 
-// Getter function to ensure database is initialized when accessed
-let databaseInstance: DatabaseManager | null = null;
-
+// Getter function to ensure database is initialized when accessed (backward compatibility)
 export function getDatabase(): DatabaseManager {
-  if (!databaseInstance) {
-    databaseInstance = new DatabaseManager();
-  }
-  return databaseInstance;
+  return DatabaseManager.getInstance();
 }
