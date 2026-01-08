@@ -785,8 +785,8 @@ export default function MapScreen() {
           const hasPermission = status === 'granted';
           console.log('[DEBUG] Focus - Konum izni durumu:', status);
           setHasLocationPermission(hasPermission);
-          // İzin verildiyse veriyi yenile
-          if (hasPermission && !location) {
+          // İzin verildiyse her zaman veriyi yenile
+          if (hasPermission) {
             await refreshData();
           }
         } catch {
@@ -2281,10 +2281,10 @@ const styles = StyleSheet.create({
   },
   locationPermissionContainer: {
     position: 'absolute',
-    top: 80,
+    bottom: 180,
     left: 20,
     right: 20,
-    alignItems: 'center',
+    alignItems: 'flex-start',
     zIndex: 999,
     elevation: 10,
   },
