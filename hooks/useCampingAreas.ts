@@ -67,7 +67,22 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
 
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        throw new Error('Konum izni reddedildi');
+        // Konum izni reddedildi, Türkiye'nin merkezi (Ankara - Anıtkabir) varsayılan olarak ayarla
+        const defaultLocation: Location.LocationObject = {
+          coords: {
+            latitude: 39.9251,
+            longitude: 32.8375,
+            altitude: null,
+            accuracy: null,
+            altitudeAccuracy: null,
+            heading: null,
+            speed: null,
+          },
+          timestamp: Date.now(),
+        };
+        setLocation(defaultLocation);
+        setLoading(false);
+        return;
       }
 
       const currentLocation = await Location.getCurrentPositionAsync({
@@ -76,7 +91,21 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
       
       setLocation(currentLocation);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Konum alınamadı');
+      // Hata durumunda da varsayılan konumu ayarla
+      const defaultLocation: Location.LocationObject = {
+        coords: {
+          latitude: 39.0,
+          longitude: 35.0,
+          altitude: null,
+          accuracy: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        timestamp: Date.now(),
+      };
+      setLocation(defaultLocation);
+      setError(err instanceof Error ? err.message : 'Konum alınamadı, varsayılan konum kullanılıyor');
     } finally {
       setLoading(false);
     }

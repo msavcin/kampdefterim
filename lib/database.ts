@@ -1,3 +1,7 @@
+        // open/close değerlerinin boş olup olmadığını güvenli şekilde kontrol eden yardımcı fonksiyon
+        const isEmptyOpening = (obj: any) =>
+          (!obj.open && obj.open !== 0 && obj.open !== false) &&
+          (!obj.close && obj.close !== 0 && obj.close !== false);
 import { API_URL } from './config';
 import { apiFetch } from './apiFetch';
 import { getToken } from './auth';
@@ -758,6 +762,41 @@ class DatabaseManager {
           console.error('Kamp alanı ekleme/güncelleme hatası:', err, item);
         }
       }
+
+      // ===== YENİ: API'dan gelmeyen kayıtları sil =====
+      // API'dan gelen tüm external_id'leri topla
+      const apiExternalIds = new Set<string>();
+      data.forEach((item: any) => {
+        if (item.external_id) {
+          apiExternalIds.add(String(item.external_id));
+        }
+      });
+
+      // Lokal DB'de external_id olan ama API'dan gelmeyen kayıtları bul ve sil
+      const localAreasWithExternalId = await this.db!.getAllAsync(
+        'SELECT id, external_id, name FROM camping_areas WHERE external_id IS NOT NULL AND external_id != "" AND deleted = 0'
+      ) as { id: number, external_id: string, name: string }[];
+
+      let deletedCount = 0;
+      for (const localArea of localAreasWithExternalId) {
+        if (!apiExternalIds.has(String(localArea.external_id))) {
+          // Bu kayıt API'dan gelmedi, demek ki sunucuda silinmiş
+          // Ancak pending delete varsa atlama (çünkü bu cihazdan silinip henüz sync olmamış olabilir)
+          const isPendingDelete = deletedIds.has(String(localArea.external_id)) || deletedIds.has(String(localArea.id));
+          if (!isPendingDelete) {
+            console.log(`[fetchAndStoreCampingAreasFromAPI] 🗑️ Sunucuda olmayan kayıt siliniyor: ${localArea.name} (external_id: ${localArea.external_id})`);
+            await this.db!.runAsync(
+              'UPDATE camping_areas SET deleted = 1, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+              ['deleted', localArea.id]
+            );
+            deletedCount++;
+          }
+        }
+      }
+
+      if (deletedCount > 0) {
+        console.log(`[fetchAndStoreCampingAreasFromAPI] ✅ Sunucuda olmayan ${deletedCount} kayıt lokalden silindi.`);
+      }
   // ...existing code...
       // Ekledikten sonra toplam kayıt sayısını logla
       const allAreas = await this.getAllCampingAreas();
@@ -1041,16 +1080,27 @@ class DatabaseManager {
         // opening_hours için string hazırla (object veya array ise stringify)
         let openingHoursStr = '';
         if (area.opening_hours) {
-          // Eğer hem weekday hem weekend tamamen kapalıysa (open ve close boş), hiç kaydetme
+          // opening_hours bir obje ve null değilse, weekday/weekend alanları varsa kontrol et
           if (
             typeof area.opening_hours === 'object' &&
-            area.opening_hours.weekday && area.opening_hours.weekend &&
-            !area.opening_hours.weekday.open && !area.opening_hours.weekday.close &&
-            !area.opening_hours.weekend.open && !area.opening_hours.weekend.close
+            area.opening_hours !== null &&
+            !Array.isArray(area.opening_hours)
           ) {
-            openingHoursStr = '';
-          } else if (typeof area.opening_hours === 'object') {
-            openingHoursStr = JSON.stringify(area.opening_hours);
+            const oh: any = area.opening_hours;
+            const hasWeekday = Object.prototype.hasOwnProperty.call(oh, 'weekday');
+            const hasWeekend = Object.prototype.hasOwnProperty.call(oh, 'weekend');
+            const weekdayObj = hasWeekday && typeof oh.weekday === 'object' && oh.weekday !== null ? oh.weekday : null;
+            const weekendObj = hasWeekend && typeof oh.weekend === 'object' && oh.weekend !== null ? oh.weekend : null;
+            if (
+              weekdayObj && weekendObj &&
+              typeof isEmptyOpening === 'function' &&
+              isEmptyOpening(weekdayObj) &&
+              isEmptyOpening(weekendObj)
+            ) {
+              openingHoursStr = '';
+            } else {
+              openingHoursStr = JSON.stringify(area.opening_hours);
+            }
           } else if (typeof area.opening_hours === 'string') {
             openingHoursStr = area.opening_hours;
           }

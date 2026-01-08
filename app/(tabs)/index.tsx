@@ -80,16 +80,28 @@ export default function MapScreen() {
 
   // Component mount durumunu takip etmek için ref
   const isMounted = useRef(true);
+  const timeoutRefs = useRef<number[]>([]);
+  
   useEffect(() => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
+      // Tüm timeout'ları temizle
+      timeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+      timeoutRefs.current = [];
     };
   }, []);
   // WebView ref
   const webViewRef = useRef<WebView>(null);
+  const [isWebViewReady, setIsWebViewReady] = useState(false);
   // Harita WebView'ı yeniden render etmek için bir key
   const [mapKey, setMapKey] = useState(0);
+  
+  // mapKey değiştiğinde WebView ready state'ini sıfırla
+  useEffect(() => {
+    setIsWebViewReady(false);
+  }, [mapKey]);
+  
   // Görünüm modu: 'map', 'list' veya 'search'
   const [viewMode, setViewMode] = useState<'map' | 'list' | 'search'>('map');
   // Video reklam aç/kapa kontrolü
@@ -116,7 +128,6 @@ export default function MapScreen() {
   // Duyurular ve checklist arka plan fetch fonksiyonları
   // Yeni duyuru bildirimi için localde gösterilen duyuru id'lerini sakla
   const fetchAnnouncementsSilently = async (router: any) => {
-    console.log('[DEBUG] fetchAnnouncementsSilently çağrıldı');
     try {
       // Kullanıcıyı çek
       const user = await getMe();
@@ -143,8 +154,6 @@ export default function MapScreen() {
       } catch {}
       // Aktif duyuruları çek
       let allAnnouncements = await db.listAnnouncementsLocal({ onlyActive: true });
-      console.log('[DEBUG] Konum bazlı valilik_id:', matchedValilikIdLocal);
-      console.log('[DEBUG] Local veritabanındaki tüm aktif duyurular (filtre öncesi):', allAnnouncements.length, allAnnouncements.map(a => ({ id: a.id, title: a.title, community_id: a.community_id, valilik_id: a.valilik_id })));
       // Valilik_id filtresi sadece genel duyurular (community_id === 0) için uygula
       // Topluluk duyuruları (community_id !== 0) direkt kabul edilir
       if (matchedValilikIdLocal) {
@@ -159,19 +168,13 @@ export default function MapScreen() {
       }
       const valilikAnnouncements = allAnnouncements.filter(a => a.community_id === 0);
       const communityAnnouncements = allAnnouncements.filter(a => a.community_id !== 0);
-      console.log('[DEBUG] Konum filtresinden sonra valilik duyuruları:', valilikAnnouncements.length, valilikAnnouncements.map(a => ({ id: a.id, title: a.title, valilik_id: a.valilik_id })));
-      console.log('[DEBUG] Konum filtresinden sonra topluluk duyuruları:', communityAnnouncements.length, communityAnnouncements.map(a => ({ id: a.id, title: a.title, community_id: a.community_id })));
       // Son güncelleme sonrası eşitlenen duyurulara göre yeni duyuruları bul
       let newAnnouncements = Array.isArray(allAnnouncements)
         ? allAnnouncements.filter((a: any) => !shownAnnouncementIds.includes(a.id))
         : [];
-      console.log('[DEBUG] Tüm aktif duyurular (filtre sonrası):', allAnnouncements.length, allAnnouncements.map(a => ({ id: a.id, title: a.title, community_id: a.community_id, valilik_id: a.valilik_id })));
-      console.log('[DEBUG] Daha önce gösterilen duyuru id\'leri:', shownAnnouncementIds);
-      console.log('[DEBUG] Yeni (gösterilmemiş) duyurular:', newAnnouncements.length, newAnnouncements.map(a => ({ id: a.id, title: a.title, community_id: a.community_id })));
       // Eğer localde yoksa API'den çek
       if (!Array.isArray(allAnnouncements) || allAnnouncements.length === 0) {
         try {
-          console.log('[DEBUG] API\'den duyurular çekiliyor... user?.community_id:', user?.community_id);
           // Hem valilik duyurularını (community_id=0) hem de topluluk duyurularını çek
           const promises = [listAnnouncements(0)]; // Valilik duyuruları
           if (user?.community_id && user.community_id !== 0) {
@@ -186,7 +189,6 @@ export default function MapScreen() {
             seen.add(a.id);
             return true;
           });
-          console.log('[DEBUG] API\'den gelen duyurular:', allAnnouncements);
         } catch (e) {
           console.warn('Duyurular fetch hatası:', e);
           allAnnouncements = [];
@@ -204,16 +206,12 @@ export default function MapScreen() {
           });
         }
         // API'den gelen duyuruların logu
-        console.log('[DEBUG][API] API\'den gelen duyurular (filtre sonrası):', allAnnouncements.length, allAnnouncements.map(a => ({ id: a.id, title: a.title, community_id: a.community_id, valilik_id: a.valilik_id })));
         const apiValilikAnnouncements = allAnnouncements.filter(a => a.community_id === 0);
         const apiCommunityAnnouncements = allAnnouncements.filter(a => a.community_id !== 0);
-        console.log('[DEBUG][API] Filtre sonrası valilik duyuruları:', apiValilikAnnouncements.length, apiValilikAnnouncements.map(a => ({ id: a.id, title: a.title, valilik_id: a.valilik_id })));
-        console.log('[DEBUG][API] Filtre sonrası topluluk duyuruları:', apiCommunityAnnouncements.length, apiCommunityAnnouncements.map(a => ({ id: a.id, title: a.title, community_id: a.community_id })));
         // API'den sonra yeni (gösterilmemiş) duyuruların logu
         newAnnouncements = Array.isArray(allAnnouncements)
           ? allAnnouncements.filter((a: any) => !shownAnnouncementIds.includes(a.id))
           : [];
-        console.log('[DEBUG][API] Yeni (gösterilmemiş) duyurular:', newAnnouncements.length, newAnnouncements.map(a => ({ id: a.id, title: a.title, community_id: a.community_id })));
       }
       if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0) {
         // Yeni duyuru id'lerini hemen kaydet
@@ -325,29 +323,84 @@ export default function MapScreen() {
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Konum izni reddedildi', 'Konum bilgisi alınamıyor.');
+        // Konum izni reddedildi, varsayılan olarak Türkiye'nin merkezi kullanılacak
+        // useCampingAreas hook'u otomatik olarak varsayılan konumu ayarlayacak
+        setHasLocationPermission(false);
+        await refreshData();
         return;
       }
       const loc = await Location.getCurrentPositionAsync({});
+      setHasLocationPermission(true);
       // Eğer useCampingAreas gibi bir hook ile location state yönetiliyorsa, burada bir şekilde location'ı güncellemelisiniz.
       // Eğer location doğrudan değiştirilemiyorsa, refreshData ile yeniden çekilmesini sağlayabilirsiniz.
       await refreshData();
     } catch (e) {
-      Alert.alert('Konum alınamadı', 'Konum bilgisi alınırken bir hata oluştu.');
+      // Hata durumunda da varsayılan konum kullanılacak
+      setHasLocationPermission(false);
+      await refreshData();
+    }
+  };
+
+  // Konum izni isteme fonksiyonu
+  const requestLocationPermission = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        setHasLocationPermission(true);
+        await refreshData();
+        if (Platform.OS === 'android') {
+          ToastAndroid.show('Konum izni verildi', ToastAndroid.SHORT);
+        } else {
+          Alert.alert('Başarılı', 'Konum izni verildi');
+        }
+      } else {
+        setHasLocationPermission(false);
+        // İzin reddedildi - kullanıcıyı ayarlara yönlendir
+        Alert.alert(
+          'Konum İzni Gerekli',
+          'Konum özelliklerini kullanmak için lütfen cihaz ayarlarından konum iznini açın.',
+          [
+            { text: 'İptal', style: 'cancel' },
+            { 
+              text: 'Ayarlara Git', 
+              onPress: () => {
+                Linking.openSettings();
+              }
+            }
+          ]
+        );
+      }
+    } catch (e) {
+      console.error('[DEBUG] Konum izni hatası:', e);
+      setHasLocationPermission(false);
     }
   };
 
   // Mevcut konuma odaklanma fonksiyonu
   const handleShowCurrentLocation = async () => {
     try {
+      if (!isMounted.current) return;
+      
       if (location && location.coords) {
         setMapMoveQuery(null); // Varsayılan konuma dön
-        setTimeout(() => {
-          setMapCenter({ latitude: location.coords.latitude, longitude: location.coords.longitude }); // Haritayı kullanıcı konumuna odakla
-          if (webViewRef.current) {
-            webViewRef.current.injectJavaScript(`map.setView([${location.coords.latitude}, ${location.coords.longitude}], 13); true;`);
+        setMapCenter({ latitude: location.coords.latitude, longitude: location.coords.longitude }); // Haritayı kullanıcı konumuna odakla
+        
+        const timeoutId = setTimeout(() => {
+          if (!isMounted.current || !webViewRef.current || !isWebViewReady) return;
+          
+          // WebView'ın yüklendiğinden emin ol
+          try {
+            webViewRef.current.injectJavaScript(`
+              if (typeof map !== 'undefined') {
+                map.setView([${location.coords.latitude}, ${location.coords.longitude}], 13);
+              }
+              true;
+            `);
+          } catch (err) {
+            console.warn('[DEBUG] WebView JavaScript injection failed:', err);
           }
-        }, 100);
+        }, 300);
+        timeoutRefs.current.push(timeoutId);
         await refreshData();
       } else {
         // Konum alınamıyorsa tekrar iste
@@ -359,7 +412,6 @@ export default function MapScreen() {
     }
   };
   const [showSyncBanner, setShowSyncBanner] = useState(false);
-  console.log('[DEBUG] MapScreen render, isConnected:', isConnected);
     // DEBUG: Veritabanındaki tags/type dağılımını logla (sadece ana kamp türleri)
     useEffect(() => {
       (async () => {
@@ -404,7 +456,6 @@ export default function MapScreen() {
               typeDist[t] = (typeDist[t] || 0) + 1;
             });
           });
-          console.log('[DEBUG] Type distribution (tags-based):', typeDist);
         } catch (e){}
       })();
     }, []);
@@ -423,7 +474,6 @@ export default function MapScreen() {
                 // Mevcut konum ile yeni konum arasında anlamlı fark varsa (>0.01 derece ~1km)
                 if (location && (Math.abs(location.coords.latitude - newLocation.coords.latitude) > 0.01 || 
                     Math.abs(location.coords.longitude - newLocation.coords.longitude) > 0.01)) {
-                  console.log('[SYNC] Konum değişti, harita güncelleniyor...');
                   setMapMoveQuery(null); // Haritayı yeni konuma döndür
                 }
               }
@@ -435,7 +485,6 @@ export default function MapScreen() {
           const user = await getMe();
           await syncAll({ userId: user?.id });
         } else {
-          console.log('[SYNC] Kullanıcı login değil, syncAll çağrılmayacak.');
         }
       }
     })();
@@ -447,9 +496,6 @@ export default function MapScreen() {
   // Arkadaş sayısını logla
   useEffect(() => {
     if (user && Array.isArray(user.friends)) {
-      console.log('[DEBUG ARKADAŞ] user.friends.length:', user.friends.length, user.friends);
-    } else {
-      console.log('[DEBUG ARKADAŞ] user.friends yok veya dizi değil:', user?.friends);
     }
   }, [user?.friends]);
   const [communityMember, setCommunityMember] = useState<any>(null);
@@ -613,22 +659,27 @@ export default function MapScreen() {
                     const lat = (firstArea as any).latitude;
                     const lng = (firstArea as any).longitude;
                     if (lat && lng) {
-                      setTimeout(() => {
+                      const timeoutId1 = setTimeout(() => {
                         if (!isMounted.current) return;
                         setMapCenter({ latitude: lat, longitude: lng });
                         setMapMoveQuery({ latitude: lat, longitude: lng });
                         // Marker popup'ını aç
-                        setTimeout(() => {
-                          if (webViewRef.current) {
+                        const timeoutId2 = setTimeout(() => {
+                          if (!isMounted.current || !webViewRef.current || !isWebViewReady) return;
+                          try {
                             webViewRef.current.injectJavaScript(`
                               if (window.openMarkerPopup) {
                                 window.openMarkerPopup(${lat}, ${lng});
                               }
                               true;
                             `);
+                          } catch (err) {
+                            console.warn('[DEBUG] WebView marker popup injection failed:', err);
                           }
                         }, 800);
+                        timeoutRefs.current.push(timeoutId2);
                       }, 100);
+                      timeoutRefs.current.push(timeoutId1);
                     }
                   },
                 },
@@ -671,6 +722,7 @@ export default function MapScreen() {
   const [selectedLocation, setSelectedLocation] = useState<{latitude: number, longitude: number} | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
   // Artık filtreler merkezi kategori yönetiminden geliyor
   const [selectedTags, setSelectedTags] = useState(campingTypes.map(t => t.id));
 
@@ -708,6 +760,41 @@ export default function MapScreen() {
     currentUserId: user?.id ?? undefined,
     isSuperAdmin,
   });
+
+  // Konum izni durumunu kontrol et
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        const hasPermission = status === 'granted';
+        console.log('[DEBUG] Konum izni durumu:', status, 'hasPermission:', hasPermission);
+        setHasLocationPermission(hasPermission);
+      } catch {
+        console.log('[DEBUG] Konum izni kontrol hatası');
+        setHasLocationPermission(false);
+      }
+    })();
+  }, [location]);
+
+  // Ekran focus'a geldiğinde konum izni durumunu kontrol et
+  useFocusEffect(
+    React.useCallback(() => {
+      (async () => {
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          const hasPermission = status === 'granted';
+          console.log('[DEBUG] Focus - Konum izni durumu:', status);
+          setHasLocationPermission(hasPermission);
+          // İzin verildiyse veriyi yenile
+          if (hasPermission && !location) {
+            await refreshData();
+          }
+        } catch {
+          setHasLocationPermission(false);
+        }
+      })();
+    }, [])
+  );
 
   // Guest kullanıcılar sadece kendi oluşturduğu kamp alanlarını görebilsin
   const isGuest = user?.role === 'guest';
@@ -1654,23 +1741,28 @@ export default function MapScreen() {
               const lat = (area as any).latitude;
               const lng = (area as any).longitude;
               if (lat && lng) {
-                setTimeout(() => {
+                const timeoutId1 = setTimeout(() => {
                   if (!isMounted.current) return;
                   setMapCenter({ latitude: lat, longitude: lng });
                   setMapMoveQuery({ latitude: lat, longitude: lng });
                   setViewMode('map');
                   // Haritaya geçtikten sonra popup'ı aç
-                  setTimeout(() => {
-                    if (webViewRef.current) {
+                  const timeoutId2 = setTimeout(() => {
+                    if (!isMounted.current || !webViewRef.current || !isWebViewReady) return;
+                    try {
                       webViewRef.current.injectJavaScript(`
                         if (window.openMarkerPopup) {
                           window.openMarkerPopup(${lat}, ${lng});
                         }
                         true;
                       `);
+                    } catch (err) {
+                      console.warn('[DEBUG] WebView popup injection failed:', err);
                     }
                   }, 500);
+                  timeoutRefs.current.push(timeoutId2);
                 }, 100);
+                timeoutRefs.current.push(timeoutId1);
               }
             }}
             user={user}
@@ -1695,6 +1787,13 @@ export default function MapScreen() {
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
                 onMessage={handleWebViewMessage}
+                onLoadStart={() => setIsWebViewReady(false)}
+                onLoadEnd={() => {
+                  if (isMounted.current) {
+                    setIsWebViewReady(true);
+                  }
+                }}
+                onError={() => setIsWebViewReady(false)}
               />
             )}
             {/* Harita kaydırıldığında çıkan buton */}
@@ -1718,6 +1817,29 @@ export default function MapScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.fab} onPress={handleShowCurrentLocation} disabled={isBusy}>
                 <LocateFixed size={24} color="white" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Konum İzni Butonu - Sadece izin verilmediğinde göster */}
+          {(console.log('[DEBUG] Buton render koşulları:', {
+            hasLocationPermission,
+            isLocationPickerMode,
+            showMapPopup,
+            shouldRender: hasLocationPermission === false && !isLocationPickerMode && !showMapPopup
+          }), hasLocationPermission === false && !isLocationPickerMode && !showMapPopup) && (
+            <View style={styles.locationPermissionContainer} pointerEvents="box-none">
+              <TouchableOpacity
+                style={styles.locationPermissionButton}
+                onPress={() => {
+                  console.log('[DEBUG] Buton onPress tetiklendi');
+                  requestLocationPermission();
+                }}
+                disabled={isBusy}
+                activeOpacity={0.7}
+              >
+                <Navigation size={20} color="white" style={{ marginRight: 8 }} />
+                <Text style={styles.locationPermissionText}>Konum İznini Aç</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -2157,6 +2279,33 @@ const styles = StyleSheet.create({
     color: '#059669',
     fontWeight: '600',
   },
+  locationPermissionContainer: {
+    position: 'absolute',
+    top: 80,
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    zIndex: 999,
+    elevation: 10,
+  },
+  locationPermissionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#059669',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+  },
+  locationPermissionText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   locationPickerBanner: {
     backgroundColor: '#fef3c7',
     borderBottomWidth: 1,
@@ -2208,5 +2357,3 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 });
-
-
