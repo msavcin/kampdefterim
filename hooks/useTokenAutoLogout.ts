@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
 import { getToken, removeToken } from '../lib/auth';
 import { useRouter } from 'expo-router';
-import jwtDecode from 'jwt-decode';
+import { jwtDecode } from 'jwt-decode';
 
 export default function useTokenAutoLogout() {
   const router = useRouter();
   useEffect(() => {
-    let timeout: NodeJS.Timeout;
+    let timeout: ReturnType<typeof setTimeout>;
     async function checkToken() {
       const token = await getToken();
       if (!token) return;

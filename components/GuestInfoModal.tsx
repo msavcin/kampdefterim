@@ -19,7 +19,7 @@ const GuestInfoModal: React.FC<GuestInfoModalProps> = ({ visible, onClose }) => 
           <Text style={styles.title}>Hoşgeldiniz</Text>
           <Text style={styles.text}>
             Misafir olarak giriş yapıyorsunuz. Uygulamamızdaki tüm özellikleri test edebilirsiniz.{"\n\n"}
-            Uygulamayı beğendiğiniz taktirde, kendi hesabınızı oluşturup 1 ay ücretsiz üyeliğinizi başlatabilirsiniz.{"\n\n"} 
+            Uygulamayı beğendiğiniz takdirde, kendi hesabınızı oluşturup 1 ay ücretsiz üyeliğinizi başlatabilirsiniz.{"\n\n"} 
             Ücretsiz üyeliğinizin sonunda{' '}
             <Text
               style={styles.link}
