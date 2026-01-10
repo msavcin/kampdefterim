@@ -9,7 +9,6 @@ import { getDatabase } from '@/lib/database';
 // currentUserId parametresi eklendi
 export async function syncPendingChanges(currentUserId?: string | number) {
   console.log('[syncPendingChanges] başlatıldı');
-  // ...existing code...
   // DEBUG: Localde adı 'B7' geçen kamp alanı var mı?
   try {
     const allAreas = await getDatabase().getAllCampingAreas();
@@ -21,13 +20,18 @@ export async function syncPendingChanges(currentUserId?: string | number) {
   const pending = await getPendingChanges();
   console.log('[syncPendingChanges] pending değişiklikler:', pending.length);
   // ...existing code...
+  
+  let syncedCount = 0; // Değişkeni dışarı taşı
+  
   if (pending.length === 0) {
     console.log('[syncPendingChanges] Senkronize edilecek değişiklik yok.');
+    // Pending değişiklik olmasa da Delta Sync yapılacak, return etme!
     // ...existing code...
-    return;
   }
-  let syncedCount = 0;
-  for (const change of pending) {
+  
+  // Pending değişiklik işleme - sadece pending.length > 0 ise
+  if (pending.length > 0) {
+    for (const change of pending) {
     console.log('[syncPendingChanges] İşleniyor:', (change as any).id, (change as any).type);
     if (
       typeof change === 'object' &&
@@ -199,16 +203,27 @@ export async function syncPendingChanges(currentUserId?: string | number) {
     }
     console.log('[syncPendingChanges] Döngü sonu:', (change as any).id);
   }
+  
   if (syncedCount > 0) {
     try {
-      // Sync sonrası local veritabanını güncelle (isteğe bağlı)
+      // Sync sonrası local veritabanını güncelle (Delta Sync ile sadece değişenleri çek)
       console.log('[syncPendingChanges] Tüm değişiklikler işlendi, local veritabanı güncelleniyor...');
-      await getDatabase().fetchAndStoreCampingAreasFromAPI();
+      await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
       console.log('[syncPendingChanges] tamamlandı.');
     } catch (e) {
       console.log('[syncPendingChanges] SONDA HATA:', e);
       throw e;
     }
   }
-  // ...existing code...
+  } // pending.length > 0 bloğunun sonu
+  
+  // Her durumda Delta Sync çağrısı (pending değişiklik olmasa da)
+  try {
+    console.log('[syncPendingChanges] Local değişiklik olmasa da Delta Sync başlatılıyor...');
+    await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
+    console.log('[syncPendingChanges] Delta Sync tamamlandı.');
+  } catch (e) {
+    console.log('[syncPendingChanges] Delta Sync HATASI:', e);
+    throw e;
+  }
 }

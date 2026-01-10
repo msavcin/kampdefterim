@@ -841,8 +841,9 @@ export default function MapScreen() {
               isSyncingRef.current = false;
               return;
             }
-            const count = await getDatabase().fetchAndStoreCampingAreasFromAPI();
-            if (__DEV__) console.log('API ile eklenen kamp alanı sayısı:', count);
+            // Delta Sync: İlk açılışta forceFull: true, sonraki açılışlarda delta sync
+            const count = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
+            if (__DEV__) console.log('API ile senkronize edilen kamp alanı sayısı:', count);
             await refreshData();
             // Harita sync sonrası tekrar fetch
             fetchAnnouncementsSilently(router);

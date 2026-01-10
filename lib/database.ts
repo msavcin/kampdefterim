@@ -2,6 +2,7 @@ import { API_URL } from './config';
 import { apiFetch } from './apiFetch';
 import { getToken } from './auth';
 import { generateUUID } from './uuid';
+import { getLastCampingAreaSync, setLastCampingAreaSync } from './deltaSyncStorage';
 import * as SQLite from 'expo-sqlite';
 
 import type { CampingTypeId } from './categories';
@@ -493,18 +494,34 @@ export class DatabaseManager {
   }
   // fetchAndStoreCampingAreasFromAPI fonksiyonu statement/connection hatalarını önleyecek şekilde güncellendi
   async fetchAndStoreCampingAreasFromAPI(
-    apiUrl: string = API_URL + '/campgrounds'
+    apiUrl: string = API_URL + '/campgrounds',
+    options: { forceFull?: boolean } = {}
   ): Promise<number> {
     // Merkezi queue ile tüm yazma işlemleri sıraya alınır
     return DatabaseManager.enqueue(async () => {
       try {
-        console.log('[fetchAndStoreCampingAreasFromAPI] BAŞLANGIÇ');
+        // Delta Sync: Son senkronizasyon zamanını al
+        const lastSync = options.forceFull ? null : await getLastCampingAreaSync();
+        const isDeltaSync = !!lastSync;
+        
+        // updated_after parametresi varsa ekle
+        let url = apiUrl;
+        if (lastSync) {
+          const separator = apiUrl.includes('?') ? '&' : '?';
+          // Delta Sync'te silinen kayıtları da dahil et
+          url = `${apiUrl}${separator}updated_after=${encodeURIComponent(lastSync)}&include_deleted=true`;
+          console.log('[fetchAndStoreCampingAreasFromAPI] 🔄 Delta Sync aktif, son sync:', lastSync);
+        } else {
+          console.log('[fetchAndStoreCampingAreasFromAPI] 📥 Full Sync (ilk senkronizasyon veya force)');
+        }
+        
+        console.log('[fetchAndStoreCampingAreasFromAPI] BAŞLANGIÇ - URL:', url);
         const headers: Record<string, string> = {};
         const token = await getToken();
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
         }
-        const response = await apiFetch(apiUrl, { headers });
+        const response = await apiFetch(url, { headers });
         if (!response.ok) throw new Error('API yanıtı başarısız: ' + response.status);
         const data = await response.json();
         console.log('[fetchAndStoreCampingAreasFromAPI] API response örnek:', Array.isArray(data) && data.length > 0 ? data[0] : data);
@@ -551,11 +568,24 @@ export class DatabaseManager {
         });
 
         let processed = 0;
+        let deletedByServerCount = 0;
         for (const item of data) {
           processed++;
           if (processed % 100 === 0) {
             console.log(`[fetchAndStoreCampingAreasFromAPI] ${processed} kayıt işlendi...`);
           }
+          
+          // Sunucuda silinen kayıt kontrolü (Delta Sync için)
+          if (item.deleted === true || item.deleted === 1 || item.deleted === '1') {
+            // Sunucuda silinmiş, lokal veritabanından da sil
+            if (item.external_id) {
+              await this.db!.runAsync('DELETE FROM camping_areas WHERE external_id = ?', [item.external_id]);
+              deletedByServerCount++;
+              console.log(`[fetchAndStoreCampingAreasFromAPI] Sunucuda silinen kayıt lokal veritabanından silindi: external_id=${item.external_id}`);
+            }
+            continue; // Bu kaydı ekleme/güncelleme
+          }
+          
           // Silinmeyi bekleyenler listesinde ise atla
           if (item.id && deletedIds.has(String(item.id))) continue;
           if (item.external_id && deletedIds.has(String(item.external_id))) continue;
@@ -582,11 +612,14 @@ export class DatabaseManager {
 
           let updateResult = { changes: 0 };
           if (item.external_id) {
-            // Eğer kayıt zaten varsa ve değişmemişse güncelleme
-            const existing = existingMap.get(item.external_id);
-            if (existing && existing.updated_at === item.updated_at) {
-              // Kayıt zaten güncel, güncelleme yapma
-              continue;
+            // Delta Sync'te backend zaten sadece değişenleri gönderiyor, bu kontrolü atlayalım
+            // Full Sync'te ise gereksiz UPDATE'lerden kaçınmak için kontrol edelim
+            if (!isDeltaSync) {
+              const existing = existingMap.get(item.external_id);
+              if (existing && existing.updated_at === item.updated_at) {
+                // Kayıt zaten güncel, güncelleme yapma
+                continue;
+              }
             }
             // [DEBUG][API->LOCAL] Güncellenen alan owner_id: logu kaldırıldı
             updateResult = await this.db!.runAsync(
@@ -790,32 +823,40 @@ export class DatabaseManager {
   // ...existing code...
       
       // Sunucuda olmayan lokal kamp alanlarını sil (çoklu cihaz senkronizasyonu için)
-      // API'den gelen external_id listesi
-      const serverExternalIds = new Set<string>();
-      for (const item of data) {
-        if (item.external_id) {
-          serverExternalIds.add(String(item.external_id));
+      // Sadece Full Sync'te yapılır, Delta Sync'te yapılmaz
+      if (!isDeltaSync) {
+        // API'den gelen external_id listesi
+        const serverExternalIds = new Set<string>();
+        for (const item of data) {
+          if (item.external_id) {
+            serverExternalIds.add(String(item.external_id));
+          }
+        }
+        
+        // Lokal veritabanındaki tüm external_id'li kayıtları al
+        const localAreasWithExtId = await this.db!.getAllAsync(
+          'SELECT id, external_id FROM camping_areas WHERE external_id IS NOT NULL AND external_id != ""'
+        ) as { id: number; external_id: string }[];
+        
+        let deletedCount = 0;
+        for (const localArea of localAreasWithExtId) {
+          // Eğer sunucuda yoksa lokal veritabanından sil
+          if (!serverExternalIds.has(String(localArea.external_id))) {
+            await this.db!.runAsync('DELETE FROM camping_areas WHERE id = ?', [localArea.id]);
+            deletedCount++;
+            console.log(`[fetchAndStoreCampingAreasFromAPI] Sunucuda olmayan lokal alan silindi: external_id=${localArea.external_id}, id=${localArea.id}`);
+          }
+        }
+        
+        if (deletedCount > 0) {
+          console.log(`[fetchAndStoreCampingAreasFromAPI] Toplam ${deletedCount} sunucuda olmayan lokal alan silindi.`);
         }
       }
       
-      // Lokal veritabanındaki tüm external_id'li kayıtları al
-      const localAreasWithExtId = await this.db!.getAllAsync(
-        'SELECT id, external_id FROM camping_areas WHERE external_id IS NOT NULL AND external_id != ""'
-      ) as { id: number; external_id: string }[];
-      
-      let deletedCount = 0;
-      for (const localArea of localAreasWithExtId) {
-        // Eğer sunucuda yoksa lokal veritabanından sil
-        if (!serverExternalIds.has(String(localArea.external_id))) {
-          await this.db!.runAsync('DELETE FROM camping_areas WHERE id = ?', [localArea.id]);
-          deletedCount++;
-          console.log(`[fetchAndStoreCampingAreasFromAPI] Sunucuda olmayan lokal alan silindi: external_id=${localArea.external_id}, id=${localArea.id}`);
-        }
-      }
-      
-      if (deletedCount > 0) {
-        console.log(`[fetchAndStoreCampingAreasFromAPI] Toplam ${deletedCount} sunucuda olmayan lokal alan silindi.`);
-      }
+      // Son senkronizasyon zamanını kaydet
+      const currentTime = new Date().toISOString();
+      await setLastCampingAreaSync(currentTime);
+      console.log('[fetchAndStoreCampingAreasFromAPI] Senkronizasyon tamamlandı. İşlenen:', insertCount + updateCount, 'Eklenen:', insertCount, 'Güncellenen:', updateCount, 'Sunucuda Silinen:', deletedByServerCount);
       
       // Ekledikten sonra toplam kayıt sayısını logla
       const allAreas = await this.getAllCampingAreas();
