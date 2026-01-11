@@ -5,20 +5,55 @@ import { getMe } from '../../lib/userCommunityApi';
 import { checkAndHandleAppVersion } from '../../lib/appVersion';
 import { getDatabase } from '../../lib/database';
 import { Map, Heart, User, SquareCheck as CheckSquare, Bell } from 'lucide-react-native';
-import { View, TouchableOpacity, Text } from 'react-native';
+import { View, TouchableOpacity, Text, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isLoggedIn, removeToken } from '../../lib/auth';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   useEffect(() => {
     (async () => {
-      // Uygulama ilk açılış veya güncelleme ise veritabanını temizle
-      await checkAndHandleAppVersion(async () => {
-        // Artık veritabanı silme veya drop işlemi yapılmıyor.
+      // Uygulama ilk açılış veya güncelleme ise ve kullanıcı login olmuşsa
+      const isUpdated = await checkAndHandleAppVersion(async () => {
+        const loggedIn = await isLoggedIn();
+        if (loggedIn) {
+          // Kullanıcıya bilgi mesajı göster
+          Alert.alert(
+            'Uygulama Güncellendi',
+            'Yeni sürüm için verileriniz sıfırlanacak ve yeniden giriş yapmanız gerekecek.',
+            [
+              {
+                text: 'Tamam',
+                onPress: async () => {
+                  try {
+                    // Veritabanını temizle
+                    const db = getDatabase();
+                    await db.dropAllTables();
+                    console.log('[VERSION_UPDATE] Veritabanı temizlendi');
+                    
+                    // Logout yap
+                    await removeToken();
+                    console.log('[VERSION_UPDATE] Kullanıcı çıkış yaptırıldı');
+                    
+                    // Login sayfasına yönlendir
+                    router.replace('/(auth)/login');
+                  } catch (error) {
+                    console.error('[VERSION_UPDATE] Hata:', error);
+                    Alert.alert('Hata', 'Güncelleme işlemi sırasında bir hata oluştu. Lütfen uygulamayı yeniden başlatın.');
+                  }
+                },
+              },
+            ],
+            { cancelable: false }
+          );
+          return;
+        }
       });
+
       try {
         await getDatabase().init();
       } catch (e) {

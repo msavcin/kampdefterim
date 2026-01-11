@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Edit } from 'lucide-react-native';
 import * as React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, BackHandler } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, BackHandler, RefreshControl, Platform, ToastAndroid } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 // Logout adımlarını göstermek için yardımcı fonksiyon
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,6 +29,7 @@ import AddChecklistItemModal from '../../components/AddChecklistItemModal';
 import { getToken } from '../../lib/auth';
 import { API_URL } from '../../lib/config';
 import { getMe } from '../../lib/userCommunityApi';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 interface ChecklistItem {
   id: string;
@@ -79,6 +80,17 @@ interface CustomChecklistItem {
 import { useFocusEffect } from '@react-navigation/native';
 
 export default function ChecklistScreen({ navigation }: any) {
+  // State'ler en üstte tanımlanmalı
+  const [userRole, setUserRole] = useState<string>('');
+  
+  // Sezon ve kamp türü state'leri
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [campingTypes, setCampingTypes] = useState<CampingType[]>([]);
+  const [seasonIdMap, setSeasonIdMap] = useState<Record<string, number>>({});
+  const [campingTypeIdMap, setCampingTypeIdMap] = useState<Record<string, number>>({});
+  const [selectedSeason, setSelectedSeason] = useState<string>('spring');
+  const [selectedCampingType, setSelectedCampingType] = useState<string>('tent');
+  
       // Ekranın sağ ve solundan kaydırınca geri gitmeyi engelle
       useFocusEffect(
         React.useCallback(() => {
@@ -220,10 +232,145 @@ export default function ChecklistScreen({ navigation }: any) {
     }
   }
 
+  // Network status kontrolü
+  const isConnected = useNetworkStatus();
+
+  // Pull-to-refresh için state ve ref
+  const [refreshing, setRefreshing] = useState(false);
+  const lastSyncTimeRef = React.useRef<number>(0);
+
   // İlk yüklemede arkadaş listesini çek
   useEffect(() => {
     fetchFriends();
   }, []);
+
+  // Pull-to-refresh handler - dakikada 1 kez sınırlaması ile
+  const handleRefresh = async () => {
+    const now = Date.now();
+    const timeSinceLastSync = now - lastSyncTimeRef.current;
+    const oneMinuteInMs = 60000;
+
+    // Son senkronizasyondan 1 dakika geçmemişse atla
+    if (timeSinceLastSync < oneMinuteInMs) {
+      const remainingSeconds = Math.ceil((oneMinuteInMs - timeSinceLastSync) / 1000);
+      if (__DEV__) console.log(`[CHECKLIST_REFRESH] Çok erken, ${remainingSeconds} saniye sonra tekrar deneyin.`);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(`Lütfen ${remainingSeconds} saniye sonra tekrar deneyin.`, ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Çok Sık Güncelleme', `Lütfen ${remainingSeconds} saniye sonra tekrar deneyin.`);
+      }
+      return;
+    }
+
+    if (!isConnected) {
+      if (__DEV__) console.log('[CHECKLIST_REFRESH] Offline, senkronizasyon atlanıyor.');
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('İnternet bağlantısı yok.', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('İnternet Bağlantısı Yok', 'Checklist güncellemesi için internet bağlantısı gerekli.');
+      }
+      return;
+    }
+    
+    if (userRole === 'guest') {
+      if (__DEV__) console.log('[CHECKLIST_REFRESH] Guest kullanıcı, atlanıyor.');
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Misafir kullanıcılar senkronizasyon yapamaz.', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Misafir Kullanıcı', 'Misafir kullanıcılar checklist senkronizasyonu yapamaz.');
+      }
+      return;
+    }
+    
+    setRefreshing(true);
+    
+    try {
+      const token = await getToken();
+      if (!token) {
+        if (__DEV__) console.log('[CHECKLIST_REFRESH] Token yok, atlanıyor.');
+        if (Platform.OS === 'android') {
+          ToastAndroid.show('Lütfen tekrar giriş yapın.', ToastAndroid.SHORT);
+        } else {
+          Alert.alert('Oturum Hatası', 'Lütfen tekrar giriş yapın.');
+        }
+        setRefreshing(false);
+        return;
+      }
+      
+      if (__DEV__) console.log('[CHECKLIST_REFRESH] Senkronizasyon başlatılıyor...');
+      
+      // Kişisel ve paylaşılan checklistleri güncelle
+      await fetchCustomChecklists();
+      
+      // Standart checklist de güncelle (eğer map'ler hazırsa)
+      if (Object.keys(seasonIdMap).length > 0 && Object.keys(campingTypeIdMap).length > 0) {
+        await fetchStandardChecklist();
+        if (__DEV__) console.log('[CHECKLIST_REFRESH] Standart checklist güncellendi');
+      }
+      
+      lastSyncTimeRef.current = now;
+      if (__DEV__) console.log('[CHECKLIST_REFRESH] Senkronizasyon tamamlandı');
+      
+      // Başarılı güncelleme bildirimi
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Checklist güncellendi ✓', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('✓ Güncellendi', 'Checklist verileriniz başarıyla güncellendi.');
+      }
+    } catch (err) {
+      if (__DEV__) console.error('[CHECKLIST_REFRESH] Hata:', err);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Güncelleme hatası. Tekrar deneyin.', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Güncelleme Hatası', 'Checklist güncellenirken bir hata oluştu. Lütfen tekrar deneyin.');
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Sayfa açıldığında senkronizasyon yap
+  useFocusEffect(
+    React.useCallback(() => {
+      async function syncOnFocus() {
+        if (!isConnected) {
+          if (__DEV__) console.log('[CHECKLIST_FOCUS_SYNC] Offline, senkronizasyon atlanıyor.');
+          return;
+        }
+        
+        if (userRole === 'guest') {
+          if (__DEV__) console.log('[CHECKLIST_FOCUS_SYNC] Guest kullanıcı, atlanıyor.');
+          return;
+        }
+        
+        try {
+          const token = await getToken();
+          if (!token) {
+            if (__DEV__) console.log('[CHECKLIST_FOCUS_SYNC] Token yok, atlanıyor.');
+            return;
+          }
+          
+          if (__DEV__) console.log('[CHECKLIST_FOCUS_SYNC] Senkronizasyon başlatılıyor...');
+          
+          // Kişisel ve paylaşılan checklistleri güncelle
+          await fetchCustomChecklists();
+          
+          // Standart checklist de güncelle (eğer map'ler hazırsa)
+          if (Object.keys(seasonIdMap).length > 0 && Object.keys(campingTypeIdMap).length > 0) {
+            await fetchStandardChecklist();
+            if (__DEV__) console.log('[CHECKLIST_FOCUS_SYNC] Standart checklist güncellendi');
+          }
+          
+          lastSyncTimeRef.current = Date.now();
+          if (__DEV__) console.log('[CHECKLIST_FOCUS_SYNC] Senkronizasyon tamamlandı');
+        } catch (err) {
+          if (__DEV__) console.error('[CHECKLIST_FOCUS_SYNC] Hata:', err);
+        }
+      }
+      
+      syncOnFocus();
+    }, [isConnected, userRole, seasonIdMap, campingTypeIdMap])
+  );
 
   // Paylaşım bilgilerini AsyncStorage'dan yükle ve kaydetme kodları kaldırıldı
   // Artık paylaşım bilgileri sadece API'den çekilecek, local storage kullanılmıyor
@@ -354,15 +501,6 @@ export default function ChecklistScreen({ navigation }: any) {
     }
   };
 
-  // Dinamik olarak veritabanından çekilecek sezon ve kamp türleri
-  const [userRole, setUserRole] = useState<string>('');
-  const [seasons, setSeasons] = useState<Season[]>([]);
-  const [campingTypes, setCampingTypes] = useState<CampingType[]>([]);
-
-  // Kod eşlemesi için
-  const [seasonIdMap, setSeasonIdMap] = useState<Record<string, number>>({});
-  const [campingTypeIdMap, setCampingTypeIdMap] = useState<Record<string, number>>({});
-
   // Sezon ve kamp türlerini ve kullanıcı rolünü API'den çek
   useEffect(() => {
     async function fetchSeasonsAndTypesAndRole() {
@@ -483,8 +621,7 @@ export default function ChecklistScreen({ navigation }: any) {
     }
     fetchSeasonsAndTypesAndRole();
   }, []);
-  const [selectedSeason, setSelectedSeason] = useState<string>('spring');
-  const [selectedCampingType, setSelectedCampingType] = useState<string>('tent');
+  
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [sharedCheckedItems, setSharedCheckedItems] = useState<Record<string, boolean>>({});
 
@@ -1156,7 +1293,17 @@ const removeSharedChecklist = async (shareId: string) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#059669']}
+            tintColor="#059669"
+          />
+        }
+      >
         <View style={styles.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View>
@@ -1164,9 +1311,21 @@ const removeSharedChecklist = async (shareId: string) => {
               <Text style={styles.headerSubtitle}>Kamp hazırlığınızı organize edin</Text>
             </View>
             {Object.values(checkedItems).some(v => v) && (
-              <TouchableOpacity onPress={clearChecklist} style={{ backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, marginLeft: 12 }}>
-                <Text style={{ color: 'white', fontWeight: 'bold' }}>Tümünü Temizle</Text>
-              </TouchableOpacity>
+              <View style={{ flex: 1, alignItems: 'flex-end', maxWidth: '50%' }}>
+                <TouchableOpacity
+                  onPress={clearChecklist}
+                  style={{ backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 8, borderRadius: 8, maxWidth: '100%' }}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={{ color: 'white', fontWeight: 'bold', fontSize: 12, letterSpacing: 0.1 }}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    Tümünü Temizle
+                  </Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         </View>

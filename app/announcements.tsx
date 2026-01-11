@@ -63,7 +63,7 @@ import { Shield, Tag, Info, AlertTriangle, Bell } from 'lucide-react-native';
 import { API_URL } from '@/lib/config';
 import { getDatabase } from '@/lib/database';
 import { getProvinceFromOSM } from '@/lib/osmReverseGeocode';
-import { View, Text, ScrollView, ActivityIndicator, TouchableOpacity, Alert, Image, Modal, BackHandler } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, TouchableOpacity, Alert, Image, Modal, BackHandler, Platform, ToastAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getToken } from '@/lib/auth';
 import { getMe, getCommunityById } from '@/lib/userCommunityApi';
@@ -74,7 +74,6 @@ import AnnouncementEditScreen from './announcement-edit/[id]';
 import { getSVGIcon } from './icons/svgIcons';
 import Svg, { SvgXml } from 'react-native-svg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 function capitalizeTurkish(str: string) {
@@ -118,7 +117,7 @@ export default function AnnouncementsScreen() {
 
       // Yenileme throttling için
       const [refreshing, setRefreshing] = useState(false);
-      const [lastRefreshTime, setLastRefreshTime] = useState<number>(0);
+      const lastRefreshTimeRef = React.useRef<number>(0);
       // Local ve API işlemleri bitene kadar yükleniyor mesajı için state
       const [localLoading, setLocalLoading] = useState(true);
       const [apiLoading, setApiLoading] = useState(false);
@@ -182,18 +181,30 @@ export default function AnnouncementsScreen() {
   const refreshAnnouncements = async () => {
         // Throttle: 1 dakikada birden fazla yenileme engellenir
         const now = Date.now();
-        if (now - lastRefreshTime < 60000) {
-          // 1 dakika dolmadan tekrar yenileme yapılmaz
+        const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
+        const oneMinuteInMs = 60000;
+        
+        if (timeSinceLastRefresh < oneMinuteInMs) {
+          const remainingSeconds = Math.ceil((oneMinuteInMs - timeSinceLastRefresh) / 1000);
+          if (__DEV__) console.log(`[ANNOUNCEMENTS_REFRESH] Çok erken, ${remainingSeconds} saniye sonra tekrar deneyin.`);
+          
+          if (Platform.OS === 'android') {
+            ToastAndroid.show(`Lütfen ${remainingSeconds} saniye sonra tekrar deneyin.`, ToastAndroid.SHORT);
+          } else {
+            Alert.alert('Çok Sık Güncelleme', `Lütfen ${remainingSeconds} saniye sonra tekrar deneyin.`);
+          }
+          
           setRefreshing(false);
           return;
         }
-        setLastRefreshTime(now);
+        
+        lastRefreshTimeRef.current = now;
     setAnnouncementsLoading(true);
     setRefreshing(true);
     setLocalLoading(true);
     setApiLoading(false);
     try {
-    // 1. Local veriyi hemen göster
+    // Sadece local veriyi göster (harita sayfası zaten otomatik sync yapıyor)
     const db = getDatabase();
     let localAnnouncements = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
     // Kullanıcıyı paralel çek
@@ -264,47 +275,26 @@ export default function AnnouncementsScreen() {
     setAnnouncementsLoading(false);
     setRefreshing(false);
     setLocalLoading(false);
-    // 2. Arka planda API'den güncelle (kullanıcı ve valilikId hazırsa)
-    if (isConnected && userData) {
-      setApiLoading(true);
-      (async () => {
-        try {
-          // Delta sync kullan (pending changes + API güncellemeleri)
-          console.log('[ANNOUNCEMENTS] Delta sync başlatılıyor...');
-          await db.syncAnnouncements();
-          console.log('[ANNOUNCEMENTS] Delta sync tamamlandı.');
-          
-          // Local veritabanından tekrar çek ve ekrana yansıt
-          const updatedLocal = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
-          let filteredUpdated = updatedLocal;
-          if (userData?.role !== 'superadmin' && userData) {
-            filteredUpdated = updatedLocal.filter((a: any) => {
-              if (a.community_id === 0) {
-                if (matchedValilikIdLocal && a.valilik_id) {
-                  return String(a.valilik_id) === String(matchedValilikIdLocal);
-                }
-                return false;
-              }
-              if (userData?.community_id && String(a.community_id) === String(userData.community_id)) return true;
-              return false;
-            });
-          }
-          filteredUpdated = [
-            ...filteredUpdated.filter((a: any) => a.community_id === 0),
-            ...filteredUpdated.filter((a: any) => a.community_id !== 0)
-          ];
-          filteredUpdated = sortLeaderFirst(filteredUpdated);
-          setAnnouncements(filteredUpdated);
-        } catch (err) {
-          console.error('[ANNOUNCEMENTS] Delta sync hatası:', err);
-        }
-        setApiLoading(false);
-      })();
+    setApiLoading(false);
+    
+    // Başarılı yenileme bildirimi
+    if (Platform.OS === 'android') {
+      ToastAndroid.show('Duyurular güncellendi ✓', ToastAndroid.SHORT);
     }
+    
+    // API sync kaldırıldı - harita sayfası zaten otomatik sync yapıyor (her 1 dakikada)
     } catch (error) {
       setAnnouncements([]);
       setAnnouncementsLoading(false);
       setRefreshing(false);
+      setApiLoading(false);
+      
+      // Hata bildirimi
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Güncelleme hatası', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Hata', 'Duyurular yüklenirken bir hata oluştu.');
+      }
     }
   };
 
@@ -718,7 +708,8 @@ export default function AnnouncementsScreen() {
                       ))}
                     </View>
                   )}
-                  {(a.content || a.message) && (() => {
+                  {/* Özet sadece topluluk duyurularında gösterilir (community_id !== 0) */}
+                  {a.community_id !== 0 && (a.content || a.message) && (() => {
                     let text = a.content || a.message;
                     text = text.replace(/<[^>]+>/g, ' ');
                     text = text.replace(/[#*_`~\[\]()\-!>]+/g, ' ');

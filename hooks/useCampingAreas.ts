@@ -40,11 +40,47 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
     });
   }, []);
 
-  // Get user location
+  // Get user location and start watching position
   useEffect(() => {
+    let locationSubscription: Location.LocationSubscription | null = null;
+
     if (autoFetch && !latitude && !longitude) {
-      getCurrentLocation();
+      (async () => {
+        await getCurrentLocation();
+        
+        // Konum izni varsa arka planda konum takibi başlat
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          try {
+            locationSubscription = await Location.watchPositionAsync(
+              {
+                accuracy: Location.Accuracy.Balanced,
+                distanceInterval: 100, // 100 metre hareket edince güncelle
+                timeInterval: 30000, // veya en az 30 saniyede bir kontrol et
+              },
+              (newLocation) => {
+                if (__DEV__) {
+                  console.log('[LOCATION] Konum güncellendi:', {
+                    lat: newLocation.coords.latitude.toFixed(6),
+                    lng: newLocation.coords.longitude.toFixed(6),
+                  });
+                }
+                setLocation(newLocation);
+              }
+            );
+          } catch (err) {
+            console.error('Konum takibi başlatılamadı:', err);
+          }
+        }
+      })();
     }
+
+    // Cleanup: konum takibini durdur
+    return () => {
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
   }, [autoFetch, latitude, longitude]);
 
   // Fetch camping areas when location or parameters change

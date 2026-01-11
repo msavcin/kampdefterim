@@ -112,7 +112,7 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
   const [campingAreas, setCampingAreas] = useState<CampingArea[]>([]);
   const [searchCampingAreas, setSearchCampingAreas] = useState<CampingArea[]>([]);
   const [campingAreaSearchText, setCampingAreaSearchText] = useState('');
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchTimeoutRef = useRef<number | null>(null);
   const [showCampingAreaSearch, setShowCampingAreaSearch] = useState(false);
   const [selectedCampingAreaId, setSelectedCampingAreaId] = useState<number | null>(null);
   const [baslama_zamani, setBaslamaZamani] = useState('');
@@ -277,6 +277,22 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
         })
       });
       if (res.status === 200) {
+        // Sunucuya başarıyla kaydedildiyse local veritabanını da güncelle
+        try {
+          const db = getDatabase();
+          const updatedData = await res.json();
+          // Local veritabanında güncelle (announcements tablosunda)
+          await db.insertAnnouncement({
+            ...updatedData,
+            event_photos: typeof updatedData.event_photos === 'string' 
+              ? updatedData.event_photos 
+              : JSON.stringify(updatedData.event_photos || [])
+          });
+          console.log('[ANNOUNCEMENT][UPDATE] Local veritabanı güncellendi');
+        } catch (e) {
+          console.warn('[ANNOUNCEMENT][UPDATE] Local veritabanı güncelleme hatası:', e);
+        }
+        
         Alert.alert('Başarılı', 'Duyuru güncellendi.', [
           { text: 'Tamam', onPress: () => {
               router.replace('/announcements');

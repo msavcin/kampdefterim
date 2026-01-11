@@ -1,3 +1,16 @@
+// İki koordinat arası mesafe (metre cinsinden) hesaplama
+function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const R = 6371000; // Dünya yarıçapı (metre)
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 import { campingTypes, getCampingTypeLabel, getCampingAreaBgColor } from '../../lib/categories';
 import { filterCampingAreasByUser } from '../../lib/accessControl';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
@@ -38,7 +51,7 @@ import { getMe, listCommunityMembers } from '@/lib/userCommunityApi';
 import { API_URL } from '@/lib/config';
 import { UserPlus } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import { Animated, Easing } from 'react-native';
+import { Animated, Easing, AppState } from 'react-native';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -58,6 +71,8 @@ import { Alert, ToastAndroid, Platform } from 'react-native';
 const { width, height } = Dimensions.get('window');
 
 export default function MapScreen() {
+    // Son sorgulanan konumu saklamak için ref
+    const lastQueriedLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
   const navigation = useNavigation();
 
   // Swipe-back gesture ve geri tuşunu devre dışı bırak
@@ -761,6 +776,31 @@ export default function MapScreen() {
     isSuperAdmin,
   });
 
+  // AppState listener: Uygulama arka plandan ön plana geldiğinde veri yenile
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && isMounted.current) {
+        if (__DEV__) console.log('[DEBUG] Uygulama ön plana geldi, veriler yenileniyor...');
+        
+        // Kullanıcıya görsel geri bildirim
+        if (Platform.OS === 'android') {
+          ToastAndroid.show('Veriler güncelleniyor...', ToastAndroid.SHORT);
+        }
+        
+        // Veri yenileme fonksiyonlarını tetikle
+        if (typeof refreshData === 'function') {
+          refreshData();
+        }
+        // Duyuruları da yenile
+        fetchAnnouncementsSilently(router);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [refreshData, router]);
+
   // Konum izni durumunu kontrol et
   useEffect(() => {
     (async () => {
@@ -776,7 +816,7 @@ export default function MapScreen() {
     })();
   }, [location]);
 
-  // Ekran focus'a geldiğinde konum izni durumunu kontrol et
+  // Ekran focus'a geldiğinde konum izni ve mesafe kontrolü yap
   useFocusEffect(
     React.useCallback(() => {
       (async () => {
@@ -785,15 +825,48 @@ export default function MapScreen() {
           const hasPermission = status === 'granted';
           console.log('[DEBUG] Focus - Konum izni durumu:', status);
           setHasLocationPermission(hasPermission);
-          // İzin verildiyse her zaman veriyi yenile
-          if (hasPermission) {
-            await refreshData();
+          
+          // Konum izni varsa ve ilk yüklemeden sonraysa mesafe kontrolü yap
+          if (hasPermission && hasInitialSyncRef.current) {
+            let currentLat: number | undefined;
+            let currentLng: number | undefined;
+            
+            if (mapMoveQuery) {
+              currentLat = mapMoveQuery.latitude;
+              currentLng = mapMoveQuery.longitude;
+            } else if (location?.coords) {
+              currentLat = location.coords.latitude;
+              currentLng = location.coords.longitude;
+            }
+            
+            if (currentLat !== undefined && currentLng !== undefined) {
+              // Son sorgulanan konum varsa mesafe kontrolü yap
+              if (lastQueriedLocationRef.current) {
+                const dist = getDistanceMeters(
+                  lastQueriedLocationRef.current.latitude,
+                  lastQueriedLocationRef.current.longitude,
+                  currentLat,
+                  currentLng
+                );
+                
+                // 100 metreden az değiştiyse sorgu yapma
+                if (dist < 100) {
+                  if (__DEV__) console.log('[DEBUG] Focus - Konum anlamlı değişmedi, sorgu yapılmayacak:', dist.toFixed(2), 'metre');
+                  return;
+                }
+                if (__DEV__) console.log('[DEBUG] Focus - Konum değişti, yeni sorgu yapılacak:', dist.toFixed(2), 'metre');
+              }
+              
+              // Konumu güncelle ve veriyi yenile
+              lastQueriedLocationRef.current = { latitude: currentLat, longitude: currentLng };
+              await refreshData();
+            }
           }
         } catch {
           setHasLocationPermission(false);
         }
       })();
-    }, [])
+    }, [location, mapMoveQuery])
   );
 
   // Guest kullanıcılar sadece kendi oluşturduğu kamp alanlarını görebilsin
@@ -819,14 +892,25 @@ export default function MapScreen() {
     return true;
   });
 
-  // Sayfa açıldığında API'dan kamp alanı verilerini çek (eski hali)
+  // API senkronizasyonu sadece ilk mount'ta çalışsın
   const isSyncingRef = useRef(false);
+  const hasInitialSyncRef = useRef(false);
+  
+  // İlk açılışta API'dan senkronizasyon
   useEffect(() => {
+    if (hasInitialSyncRef.current) return;
+    hasInitialSyncRef.current = true;
+    
     (async () => {
+      // Kullanıcıya bildirim göster
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Veriler güncelleniyor...', ToastAndroid.SHORT);
+      }
+      
       await refreshData();
       // Duyurular arka planda fetch
       fetchAnnouncementsSilently(router);
-      // Checklist arka plan fetch kaldırıldı
+      // API senkronizasyonu
       if (isConnected) {
         if (isSyncingRef.current) {
           if (__DEV__) console.log('[SYNC] Zaten bir sync işlemi devam ediyor, tekrar başlatılmayacak.');
@@ -847,7 +931,6 @@ export default function MapScreen() {
             await refreshData();
             // Harita sync sonrası tekrar fetch
             fetchAnnouncementsSilently(router);
-            // Checklist arka plan fetch kaldırıldı
           } catch (err) {
             console.error('API veri çekme hatası:', err);
           } finally {
@@ -858,6 +941,85 @@ export default function MapScreen() {
         if (__DEV__) console.log('Offline modda, API çağrısı yapılmayacak.');
       }
     })();
+  }, []);
+
+  // Konum değiştiğinde kontrol et ve gerekirse refreshData çağır
+  useEffect(() => {
+    if (!hasInitialSyncRef.current) return; // İlk mount'u bekle
+    
+    let currentLat: number | undefined;
+    let currentLng: number | undefined;
+    
+    if (mapMoveQuery) {
+      currentLat = mapMoveQuery.latitude;
+      currentLng = mapMoveQuery.longitude;
+    } else if (location?.coords) {
+      currentLat = location.coords.latitude;
+      currentLng = location.coords.longitude;
+    }
+    
+    if (currentLat === undefined || currentLng === undefined) return;
+    
+    // Son sorgulanan konum varsa mesafe kontrolü yap
+    if (lastQueriedLocationRef.current) {
+      const dist = getDistanceMeters(
+        lastQueriedLocationRef.current.latitude,
+        lastQueriedLocationRef.current.longitude,
+        currentLat,
+        currentLng
+      );
+      
+      // 1000 metreden az değiştiyse sorgu yapma
+      if (dist < 1000) {
+        if (__DEV__) console.log('[DEBUG] Konum anlamlı değişmedi, sorgu yapılmayacak:', dist.toFixed(2), 'metre');
+        return;
+      }
+      if (__DEV__) console.log('[DEBUG] Konum değişti, yeni sorgu yapılacak:', dist.toFixed(2), 'metre');
+    }
+    
+    // Konumu güncelle ve veriyi yenile
+    lastQueriedLocationRef.current = { latitude: currentLat, longitude: currentLng };
+    refreshData();
+  }, [mapMoveQuery, location]);
+
+  // Her 1 dakikada bir sessiz senkronizasyon
+  useEffect(() => {
+    const syncInterval = setInterval(async () => {
+      if (!isConnected) {
+        if (__DEV__) console.log('[AUTO_SYNC] Offline, otomatik senkronizasyon atlanıyor.');
+        return;
+      }
+      
+      if (isSyncingRef.current) {
+        if (__DEV__) console.log('[AUTO_SYNC] Zaten bir sync devam ediyor, atlanıyor.');
+        return;
+      }
+      
+      if (__DEV__) console.log('[AUTO_SYNC] Sessiz senkronizasyon başlatılıyor...');
+      isSyncingRef.current = true;
+      
+      try {
+        const token = await getToken();
+        if (!token) {
+          if (__DEV__) console.log('[AUTO_SYNC] Token yok, atlanıyor.');
+          isSyncingRef.current = false;
+          return;
+        }
+        
+        const count = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
+        if (__DEV__) console.log('[AUTO_SYNC] Senkronize edildi:', count, 'kamp alanı');
+        
+        // Sessizce veriyi güncelle (loading göstermeden)
+        await refreshData();
+      } catch (err) {
+        if (__DEV__) console.error('[AUTO_SYNC] Hata:', err);
+      } finally {
+        isSyncingRef.current = false;
+      }
+    }, 600000); // 600 saniye = 10 dakika
+
+    // Cleanup
+    return () => clearInterval(syncInterval);
   }, [isConnected]);
 
   // Load favorites when component mounts
@@ -1551,9 +1713,9 @@ export default function MapScreen() {
         return;
       }
       if (Platform.OS === 'android') {
-        ToastAndroid.show('Senkronizasyon başlatıldı...', ToastAndroid.SHORT);
+        ToastAndroid.show('Veriler güncelleniyor...', ToastAndroid.SHORT);
       } else {
-        Alert.alert('Senkronizasyon', 'Senkronizasyon başlatıldı...');
+        Alert.alert('Senkronizasyon', 'Veriler güncelleniyor...');
       }
       // Önce local veriyi güncelle, UI hemen güncellensin
       await refreshData();
