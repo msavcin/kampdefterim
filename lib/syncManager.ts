@@ -222,6 +222,8 @@ export async function syncAll({ userId }) {
   await syncPendingChecklists();
   // 3. Diğer değişiklikler
   await syncPendingChanges(userId);
+  // 4. Duyuru delta sync
+  await syncAnnouncements();
 }
 
 // Geliştirilebilir: isConnected değiştiğinde veya uygulama açıldığında bu fonksiyon çağrılır

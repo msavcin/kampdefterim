@@ -268,31 +268,12 @@ export default function AnnouncementsScreen() {
     if (isConnected && userData) {
       setApiLoading(true);
       (async () => {
-        let apiAnnouncements: any[] = [];
         try {
-          if (userData?.role === 'superadmin') {
-            apiAnnouncements = await fetchAnnouncements(null, null); // Tüm duyurular
-          } else {
-            apiAnnouncements = await fetchAnnouncements(userData?.community_id || null, matchedValilikIdLocal);
-          }
-        } catch (e) {
-          apiAnnouncements = [];
-        }
-        // API'den gelen duyuruları local veritabanına kaydet ve ardından localden tekrar çek
-        try {
-          // --- Silinen duyuruları localde işaretle ---
-          const apiIds = apiAnnouncements.map(a => a.id);
-          const localAll = await db.listAnnouncementsLocal({ onlyActive: false });
-          for (const localAnn of localAll) {
-            if (!apiIds.includes(localAnn.id) && localAnn.deleted !== 1) {
-              // Sadece aktif ve silinmemiş olanları işaretle
-              await db.deleteAnnouncementLocal?.(localAnn.id);
-            }
-          }
-          // --- API'den gelenleri ekle ---
-          for (const ann of apiAnnouncements) {
-            db.insertAnnouncement(ann);
-          }
+          // Delta sync kullan (pending changes + API güncellemeleri)
+          console.log('[ANNOUNCEMENTS] Delta sync başlatılıyor...');
+          await db.syncAnnouncements();
+          console.log('[ANNOUNCEMENTS] Delta sync tamamlandı.');
+          
           // Local veritabanından tekrar çek ve ekrana yansıt
           const updatedLocal = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
           let filteredUpdated = updatedLocal;
@@ -315,7 +296,7 @@ export default function AnnouncementsScreen() {
           filteredUpdated = sortLeaderFirst(filteredUpdated);
           setAnnouncements(filteredUpdated);
         } catch (err) {
-          console.warn('Duyurular local veritabanına kaydedilemedi veya güncellenemedi:', err);
+          console.error('[ANNOUNCEMENTS] Delta sync hatası:', err);
         }
         setApiLoading(false);
       })();
@@ -337,6 +318,62 @@ export default function AnnouncementsScreen() {
       refreshAnnouncements();
     }
   }, [searchParams.refresh]);
+
+  // Sekmeye her odaklanıldığında (haritadan gelindiğinde) local DB'yi güncelle
+  useFocusEffect(
+    React.useCallback(() => {
+      // Sadece local DB'den çek, API isteği yapma (harita zaten sync yapmıştır)
+      (async () => {
+        try {
+          const db = getDatabase();
+          const localAnnouncements = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
+          
+          // Kullanıcı bilgisi varsa filtrele
+          if (user) {
+            let filtered = localAnnouncements;
+            if (user.role !== 'superadmin') {
+              const storedValilikId = await AsyncStorage.getItem('matchedValilikId');
+              const valilikId = storedValilikId ? parseInt(storedValilikId) : null;
+              
+              filtered = localAnnouncements.filter((a: any) => {
+                if (a.community_id === 0) {
+                  if (valilikId && a.valilik_id) {
+                    return String(a.valilik_id) === String(valilikId);
+                  }
+                  return false;
+                }
+                if (user?.community_id && String(a.community_id) === String(user.community_id)) return true;
+                return false;
+              });
+            }
+            
+            // Sıralama
+            filtered = [
+              ...filtered.filter((a: any) => a.community_id === 0),
+              ...filtered.filter((a: any) => a.community_id !== 0)
+            ];
+            
+            const sortLeaderFirst = (arr: any[]) => {
+              const communityAnnouncements = arr.filter(a => a.community_id !== 0);
+              const valilikAnnouncements = arr
+                .filter(a => a.community_id === 0)
+                .sort((a, b) => {
+                  const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                  const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                  return dateB - dateA;
+                });
+              return [...communityAnnouncements, ...valilikAnnouncements];
+            };
+            
+            filtered = sortLeaderFirst(filtered);
+            setAnnouncements(filtered);
+          }
+        } catch (err) {
+          console.error('[ANNOUNCEMENTS] Focus event DB güncelleme hatası:', err);
+        }
+      })();
+    }, [user])
+  );
 
   // Duyuru silme
   const handleDelete = async (id: number) => {

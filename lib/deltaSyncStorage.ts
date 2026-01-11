@@ -43,3 +43,46 @@ export async function clearLastCampingAreaSync(): Promise<void> {
     console.error('[deltaSyncStorage] Son sync zamanı temizlenemedi:', error);
   }
 }
+
+// --- ANNOUNCEMENTS DELTA SYNC ---
+
+const LAST_ANNOUNCEMENT_SYNC_KEY = 'lastAnnouncementSync';
+
+/**
+ * Son duyuru senkronizasyon zamanını kaydeder
+ * @param timestamp ISO 8601 formatında tarih (örn: 2026-01-10T12:00:00Z)
+ */
+export async function setLastAnnouncementSync(timestamp: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(LAST_ANNOUNCEMENT_SYNC_KEY, timestamp);
+    console.log('[deltaSyncStorage] Son duyuru sync zamanı kaydedildi:', timestamp);
+  } catch (error) {
+    console.error('[deltaSyncStorage] Son duyuru sync zamanı kaydedilemedi:', error);
+  }
+}
+
+/**
+ * Son duyuru senkronizasyon zamanını getirir
+ * @returns ISO 8601 formatında tarih veya null (ilk senkronizasyon ise)
+ */
+export async function getLastAnnouncementSync(): Promise<string | null> {
+  try {
+    const timestamp = await AsyncStorage.getItem(LAST_ANNOUNCEMENT_SYNC_KEY);
+    return timestamp;
+  } catch (error) {
+    console.error('[deltaSyncStorage] Son duyuru sync zamanı alınamadı:', error);
+    return null;
+  }
+}
+
+/**
+ * Son duyuru senkronizasyon zamanını siler (test veya reset için)
+ */
+export async function clearLastAnnouncementSync(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(LAST_ANNOUNCEMENT_SYNC_KEY);
+    console.log('[deltaSyncStorage] Son duyuru sync zamanı temizlendi');
+  } catch (error) {
+    console.error('[deltaSyncStorage] Son duyuru sync zamanı temizlenemedi:', error);
+  }
+}

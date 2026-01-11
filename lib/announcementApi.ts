@@ -10,15 +10,47 @@ export async function listAnnouncementsByValilikId(valilikId: number) {
 import { getToken } from './auth';
 import { API_URL } from './config';
 
-export async function listAnnouncements(communityId?: number) {
+/**
+ * Duyuruları listeler, delta sync parametrelerini destekler
+ * @param communityId Topluluk ID'si (opsiyonel)
+ * @param updatedAfter Son sync zamanı (ISO 8601, opsiyonel) - sadece bu tarihten sonra güncellenenleri getirir
+ * @param includeDeleted Silinen duyuruları da getir (opsiyonel, varsayılan: false)
+ * @param limit Maksimum sonuç sayısı (opsiyonel)
+ * @param offset Kaçıncı kayıttan başlasın (opsiyonel)
+ */
+export async function listAnnouncements(
+  communityId?: number,
+  updatedAfter?: string,
+  includeDeleted: boolean = false,
+  limit?: number,
+  offset?: number
+) {
   const token = await getToken();
-  let url = `${API_URL}/announcements`;
+  const params = new URLSearchParams();
+  
   if (typeof communityId === 'number' && !isNaN(communityId)) {
-    url += `?community_id=${communityId}`;
+    params.append('community_id', String(communityId));
   }
+  if (updatedAfter) {
+    params.append('updated_after', updatedAfter);
+  }
+  if (includeDeleted) {
+    params.append('include_deleted', 'true');
+  }
+  if (typeof limit === 'number') {
+    params.append('limit', String(limit));
+  }
+  if (typeof offset === 'number') {
+    params.append('offset', String(offset));
+  }
+
+  const queryString = params.toString();
+  const url = `${API_URL}/announcements${queryString ? '?' + queryString : ''}`;
+  
   const res = await fetch(url, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
+  
   let data;
   try {
     data = await res.json();

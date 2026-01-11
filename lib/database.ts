@@ -252,31 +252,75 @@ export class DatabaseManager {
   }
   // --- ANNOUNCEMENTS SYNC ---
   /**
-   * Sunucudan duyuruları çekip local veritabanına kaydeder. (Çift yönlü sync için gereklidir)
+   * Sunucudan duyuruları çekip local veritabanına kaydeder. (Delta Sync destekli)
    * @param apiUrl API endpointi (varsayılan: /node/announcements/)
+   * @param useDeltaSync Delta sync kullanılsın mı (varsayılan: true)
    * @returns Eklenen/güncellenen duyuru sayısı
    */
-  async fetchAndStoreAnnouncementsFromAPI(apiUrl: string = API_URL + '/announcements/') {
+  async fetchAndStoreAnnouncementsFromAPI(apiUrl: string = API_URL + '/announcements/', useDeltaSync: boolean = true) {
     return DatabaseManager.enqueue(async () => {
       try {
         const headers: Record<string, string> = {};
         const token = await getToken();
         if (token) headers['Authorization'] = `Bearer ${token}`;
-  const response = await apiFetch(apiUrl, { headers });
-  if (!response.ok) throw new Error('API yanıtı başarısız: ' + response.status);
-  const data = await response.json();
-  // [API][ANNOUNCEMENT][GET] URL: logu kaldırıldı
-  if (!Array.isArray(data)) throw new Error('API beklenen formatta veri döndürmedi');
+
+        // Delta sync: Son sync zamanını al
+        let lastSync: string | null = null;
+        if (useDeltaSync) {
+          const { getLastAnnouncementSync } = await import('./deltaSyncStorage');
+          lastSync = await getLastAnnouncementSync();
+        }
+
+        // URL'yi parametrelerle hazırla
+        let finalUrl = apiUrl;
+        const params = new URLSearchParams();
+        
+        if (lastSync) {
+          params.append('updated_after', lastSync);
+          params.append('include_deleted', 'true'); // Silinenleri de çek
+          console.log('[ANNOUNCEMENT][DELTA-SYNC] Son sync zamanı:', lastSync);
+        }
+
+        if (params.toString()) {
+          finalUrl += (finalUrl.includes('?') ? '&' : '?') + params.toString();
+        }
+
+        console.log('[ANNOUNCEMENT][DELTA-SYNC] ===== SYNC BAŞLADI =====');
+        console.log('[ANNOUNCEMENT][DELTA-SYNC] Request URL:', finalUrl);
+        
+        const response = await apiFetch(finalUrl, { headers });
+        if (!response.ok) throw new Error('API yanıtı başarısız: ' + response.status);
+        const data = await response.json();
+        
+        if (!Array.isArray(data)) throw new Error('API beklenen formatta veri döndürmedi');
+
+        console.log('[ANNOUNCEMENT][DELTA-SYNC] API\'den gelen toplam kayıt sayısı:', data.length);
+
         let insertCount = 0;
+        let deleteCount = 0;
         if (!this.db) await this.init();
+
         for (const item of data) {
           try {
+            // Backend'den gelen deleted ve aktif flag'lerini kontrol et
+            // Silinen kayıt: deleted=true VEYA aktif=false
+            const isDeleted = item.deleted === true || item.deleted === 1 || item.deleted === '1';
+            const isInactive = item.aktif === false || item.aktif === 0 || item.aktif === '0' || item.aktif === null;
+            
+            if (isDeleted || isInactive) {
+              await this.db!.runAsync('DELETE FROM announcements WHERE id = ?', [item.id]);
+              deleteCount++;
+              console.log('[ANNOUNCEMENT][DELTA-SYNC] Silinen duyuru lokal DB\'den kaldırıldı:', item.id, 'deleted:', item.deleted, 'aktif:', item.aktif);
+              continue;
+            }
+
             // keywords alanı dizi veya string olabilir
             const keywordsStr = Array.isArray(item.keywords) ? JSON.stringify(item.keywords) : (item.keywords ?? '');
             const aktifValue = (typeof item.aktif === 'boolean') ? (item.aktif ? 1 : 0) : (item.aktif === undefined ? 1 : Number(item.aktif));
+            
             await this.db!.runAsync(
               `INSERT OR REPLACE INTO announcements (id, community_id, title, message, created_by, created_at, valilik_id, keywords, source_url, islenme_tarihi, link, date, updated_at, status, synced, deleted, aktif, baslama_zamani, bitis_zamani)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)` ,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)`,
               [
                 item.id ?? null,
                 item.community_id ?? null,
@@ -302,6 +346,49 @@ export class DatabaseManager {
             console.error('Duyuru ekleme/güncelleme hatası:', err, item);
           }
         }
+
+        // Sync zamanını güncelle
+        if (useDeltaSync) {
+          const { setLastAnnouncementSync } = await import('./deltaSyncStorage');
+          const now = new Date().toISOString();
+          await setLastAnnouncementSync(now);
+          console.log('[ANNOUNCEMENT][DELTA-SYNC] Yeni sync zamanı kaydedildi:', now);
+        }
+
+        console.log(`[ANNOUNCEMENT][DELTA-SYNC] ${insertCount} eklendi/güncellendi, ${deleteCount} silindi`);
+        
+        // Full Sync ise: Sunucuda olmayan local kayıtları sil
+        if (!lastSync) {
+          console.log('[ANNOUNCEMENT][DELTA-SYNC] Full Sync - sunucuda olmayan local kayıtlar kontrol ediliyor...');
+          
+          // API'den gelen id listesi
+          const serverIds = new Set<number>();
+          for (const item of data) {
+            if (item.id) {
+              serverIds.add(Number(item.id));
+            }
+          }
+          
+          // Local'deki tüm announcement id'lerini al
+          const localAnnouncements = await this.db!.getAllAsync('SELECT id FROM announcements') as { id: number }[];
+          
+          let removedCount = 0;
+          for (const local of localAnnouncements) {
+            // Sunucuda yoksa local'den sil
+            if (!serverIds.has(local.id)) {
+              await this.db!.runAsync('DELETE FROM announcements WHERE id = ?', [local.id]);
+              removedCount++;
+              console.log('[ANNOUNCEMENT][DELTA-SYNC] Sunucuda olmayan local kayıt silindi: id=', local.id);
+            }
+          }
+          
+          if (removedCount > 0) {
+            console.log(`[ANNOUNCEMENT][DELTA-SYNC] Toplam ${removedCount} sunucuda olmayan local kayıt silindi.`);
+          }
+        }
+        
+        console.log('[ANNOUNCEMENT][DELTA-SYNC] ===== SYNC TAMAMLANDI =====');
+        
         return insertCount;
       } catch (error) {
         console.error('API duyuru veri çekme/ekleme hatası:', error);
@@ -1713,6 +1800,21 @@ export class DatabaseManager {
       return { role: row.role, status: row.status };
     }
     return null;
+  }
+  /**
+   * Kullanılan SQLite veritabanındaki tüm tablo adlarını logla (debug için)
+   */
+  async listAllTables() {
+    if (!this.db) await this.init();
+    try {
+      const tables = await this.db!.getAllAsync("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;");
+      const tableNames = tables.map((t: any) => t.name);
+      console.log('[DB][listAllTables] Mevcut tablolar:', tableNames);
+      return tableNames;
+    } catch (err) {
+      console.error('[DB][listAllTables] Tablo listesi alınamadı:', err);
+      return [];
+    }
   }
 }
 
