@@ -613,11 +613,9 @@ export class DatabaseManager {
         const data = await response.json();
         console.log('[fetchAndStoreCampingAreasFromAPI] API response örnek:', Array.isArray(data) && data.length > 0 ? data[0] : data);
         if (Array.isArray(data)) {
-          const found1129 = data.find((item) => String(item.id) === '1129');
-          if (found1129) {
-            console.log('[fetchAndStoreCampingAreasFromAPI] id:1129', found1129);
-          } else {
-            console.log('[fetchAndStoreCampingAreasFromAPI] id:1129 bulunamadı.');
+          const found1472 = data.find((item) => String(item.id) === '1472' || String(item.external_id) === '1472');
+          if (found1472) {
+            console.log('[fetchAndStoreCampingAreasFromAPI] external_id:1472 API\'den gelen fee:', found1472.fee, 'tipi:', typeof found1472.fee);
           }
         }
         console.log('[fetchAndStoreCampingAreasFromAPI] API veri boyutu:', Array.isArray(data) ? data.length : typeof data);
@@ -696,6 +694,13 @@ export class DatabaseManager {
             : (item.opening_hours || '');
           // owner_id string'e çevir
           const ownerIdStr = item.owner_id !== undefined && item.owner_id !== null ? String(item.owner_id) : '';
+          
+          // Fee değerini loglayalım
+          if (item.external_id === '1472' || item.id === 1472) {
+            console.log('[fetchAndStoreCampingAreasFromAPI] external_id:1472 fee işleme öncesi:', item.fee, 'tipi:', typeof item.fee);
+            const feeValue = item.fee === null || item.fee === undefined ? null : (item.fee ? 1 : 0);
+            console.log('[fetchAndStoreCampingAreasFromAPI] external_id:1472 fee işleme sonrası:', feeValue);
+          }
 
           let updateResult = { changes: 0 };
           if (item.external_id) {
@@ -713,7 +718,7 @@ export class DatabaseManager {
               `UPDATE camping_areas SET 
                 name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
                 capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
-                social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?, owner_username = ?, updated_at = CURRENT_TIMESTAMP,
+                social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?, updated_at = CURRENT_TIMESTAMP,
                 source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?
                WHERE external_id = ?`,
               [
@@ -726,7 +731,7 @@ export class DatabaseManager {
                 item.phone ?? '',
                 openingHoursStr,
                 item.capacity ?? 0,
-                item.fee === true ? 1 : (item.fee === false ? 0 : null),
+                item.fee === null || item.fee === undefined ? null : (item.fee ? 1 : 0),
                 item.status ?? 'active',
                 item.rating ?? 0,
                 item.review_count ?? 0,
@@ -739,7 +744,6 @@ export class DatabaseManager {
                 item.last_verified ?? '',
                 item.visibility ?? '',
                 ownerIdStr,
-                item.owner_username ?? '',
                 item.source_id ?? '',
                 photoLinksStr,
                 amenitiesStr,
@@ -779,7 +783,7 @@ export class DatabaseManager {
                     item.phone ?? '',
                     openingHoursStr,
                     item.capacity ?? 0,
-                    item.fee === true ? 1 : (item.fee === false ? 0 : null),
+                    item.fee === null || item.fee === undefined ? null : (item.fee ? 1 : 0),
                     item.status ?? 'active',
                     item.rating ?? 0,
                     item.review_count ?? 0,
@@ -792,7 +796,6 @@ export class DatabaseManager {
                     item.last_verified ?? '',
                     item.visibility ?? '',
                     ownerIdStr,
-                    item.owner_username ?? '',
                     item.source_id ?? '',
                     photoLinksStr,
                     amenitiesStr,
@@ -829,7 +832,7 @@ export class DatabaseManager {
                       item.phone ?? '',
                       openingHoursStr,
                       item.capacity ?? 0,
-                      item.fee === true ? 1 : (item.fee === false ? 0 : null),
+                      item.fee === null || item.fee === undefined ? null : (item.fee ? 1 : 0),
                       item.status ?? 'active',
                       item.rating ?? 0,
                       item.review_count ?? 0,
@@ -842,7 +845,6 @@ export class DatabaseManager {
                       item.last_verified ?? '',
                       item.visibility ?? '',
                       ownerIdStr,
-                      item.owner_username ?? '',
                       item.source_id ?? '',
                       photoLinksStr,
                       amenitiesStr,
@@ -871,7 +873,7 @@ export class DatabaseManager {
                 item.phone ?? '',
                 openingHoursStr,
                 item.capacity ?? 0,
-                item.fee === true ? 1 : (item.fee === false ? 0 : null),
+                item.fee === null || item.fee === undefined ? null : (item.fee ? 1 : 0),
                 item.status ?? 'active',
                 item.rating ?? 0,
                 item.review_count ?? 0,

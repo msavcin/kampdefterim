@@ -428,6 +428,7 @@ export default function CampingAreaDetailModal({
   useEffect(() => {
     if (campingArea) {
       console.log('[CampingAreaDetailModal] campingArea:', campingArea);
+      console.log('[CampingAreaDetailModal] fee değeri:', campingArea.fee, 'tipi:', typeof campingArea.fee);
     }
   }, [campingArea]);
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -977,7 +978,7 @@ export default function CampingAreaDetailModal({
               </View>
             )}
 
-            {typeof campingArea.fee === 'boolean' && (
+            {(campingArea.fee !== undefined && campingArea.fee !== null) && (
               <View style={styles.detailItem}>
                 <DollarSign size={20} color="#6b7280" />
                 <View style={styles.detailContent}>
