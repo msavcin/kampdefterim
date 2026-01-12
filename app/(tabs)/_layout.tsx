@@ -7,10 +7,12 @@ import { getDatabase } from '../../lib/database';
 import { Map, Heart, User, SquareCheck as CheckSquare, Bell } from 'lucide-react-native';
 import { View, TouchableOpacity, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(true); // Default true, false ise duyurular disabled
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -32,6 +34,21 @@ export default function TabLayout() {
       } finally {
         setLoading(false);
       }
+      
+      // Initial sync durumunu kontrol et
+      const checkInitialSync = async () => {
+        const syncComplete = await AsyncStorage.getItem('isInitialSyncComplete');
+        setIsInitialSyncComplete(syncComplete === 'true');
+      };
+      await checkInitialSync();
+      
+      // AsyncStorage değişikliklerini dinle (polling ile)
+      const interval = setInterval(async () => {
+        const syncComplete = await AsyncStorage.getItem('isInitialSyncComplete');
+        setIsInitialSyncComplete(syncComplete === 'true');
+      }, 1000);
+      
+      return () => clearInterval(interval);
     })();
   }, []);
 
@@ -50,7 +67,7 @@ export default function TabLayout() {
       name: 'announcements',
       label: 'Duyurular',
       icon: Bell,
-      disabled: guestDisabled,
+      disabled: guestDisabled || !isInitialSyncComplete,
     },
     {
       name: 'checklist',

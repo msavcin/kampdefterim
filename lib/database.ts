@@ -54,6 +54,7 @@ export interface Favorite {
 export class DatabaseManager {
     // Singleton instance
     private static instance: DatabaseManager | null = null;
+    private initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
     
     // Singleton getter
     static getInstance(): DatabaseManager {
@@ -300,21 +301,38 @@ export class DatabaseManager {
         let deleteCount = 0;
         if (!this.db) await this.init();
 
-        for (const item of data) {
-          try {
-            // Backend'den gelen deleted ve aktif flag'lerini kontrol et
-            // Silinen kayıt: deleted=true VEYA aktif=false
+        // Transaction başlat - tüm operasyonları toplu yap
+        await this.db!.execAsync('BEGIN TRANSACTION');
+        
+        try {
+          // Önce silinecekleri topla
+          const toDelete: number[] = [];
+          const toUpsert: any[] = [];
+          
+          for (const item of data) {
             const isDeleted = item.deleted === true || item.deleted === 1 || item.deleted === '1';
             const isInactive = item.aktif === false || item.aktif === 0 || item.aktif === '0' || item.aktif === null;
             
             if (isDeleted || isInactive) {
-              await this.db!.runAsync('DELETE FROM announcements WHERE id = ?', [item.id]);
-              deleteCount++;
-              console.log('[ANNOUNCEMENT][DELTA-SYNC] Silinen duyuru lokal DB\'den kaldırıldı:', item.id, 'deleted:', item.deleted, 'aktif:', item.aktif);
-              continue;
+              toDelete.push(item.id);
+            } else {
+              toUpsert.push(item);
             }
-
-            // keywords alanı dizi veya string olabilir
+          }
+          
+          // Batch delete - tek sorguda tüm silmeleri yap
+          if (toDelete.length > 0) {
+            const placeholders = toDelete.map(() => '?').join(',');
+            await this.db!.runAsync(
+              `DELETE FROM announcements WHERE id IN (${placeholders})`,
+              toDelete
+            );
+            deleteCount = toDelete.length;
+            if (__DEV__) console.log('[ANNOUNCEMENT][DELTA-SYNC] Toplu silme:', deleteCount, 'duyuru');
+          }
+          
+          // Batch upsert
+          for (const item of toUpsert) {
             const keywordsStr = Array.isArray(item.keywords) ? JSON.stringify(item.keywords) : (item.keywords ?? '');
             const aktifValue = (typeof item.aktif === 'boolean') ? (item.aktif ? 1 : 0) : (item.aktif === undefined ? 1 : Number(item.aktif));
             
@@ -342,9 +360,15 @@ export class DatabaseManager {
               ]
             );
             insertCount++;
-          } catch (err) {
-            console.error('Duyuru ekleme/güncelleme hatası:', err, item);
           }
+          
+          // Transaction commit
+          await this.db!.execAsync('COMMIT');
+        } catch (err) {
+          // Hata olursa rollback
+          await this.db!.execAsync('ROLLBACK');
+          console.error('[ANNOUNCEMENT][DELTA-SYNC] Transaction hatası, rollback yapıldı:', err);
+          throw err;
         }
 
         // Sync zamanını güncelle
@@ -582,7 +606,7 @@ export class DatabaseManager {
   // fetchAndStoreCampingAreasFromAPI fonksiyonu statement/connection hatalarını önleyecek şekilde güncellendi
   async fetchAndStoreCampingAreasFromAPI(
     apiUrl: string = API_URL + '/campgrounds',
-    options: { forceFull?: boolean } = {}
+    options: { forceFull?: boolean; onProgress?: (current: number, total: number) => void } = {}
   ): Promise<number> {
     // Merkezi queue ile tüm yazma işlemleri sıraya alınır
     return DatabaseManager.enqueue(async () => {
@@ -621,6 +645,12 @@ export class DatabaseManager {
         console.log('[fetchAndStoreCampingAreasFromAPI] API veri boyutu:', Array.isArray(data) ? data.length : typeof data);
         if (!Array.isArray(data)) throw new Error('API beklenen formatta veri döndürmedi');
 
+        // Progress callback - başlangıç
+        if (options.onProgress && data.length > 0) {
+          if (__DEV__) console.log('[DB][PROGRESS] Başlangıç callback:', 0, '/', data.length);
+          options.onProgress(0, data.length);
+        }
+
         let insertCount = 0;
         let updateCount = 0;
         if (!this.db) await this.init();
@@ -656,6 +686,13 @@ export class DatabaseManager {
         let deletedByServerCount = 0;
         for (const item of data) {
           processed++;
+          
+          // Progress callback - her 10 kayıtta bir güncelle (performans için)
+          if (options.onProgress && (processed % 10 === 0 || processed === data.length)) {
+            if (__DEV__ && processed % 100 === 0) console.log('[DB][PROGRESS] Callback güncellendi:', processed, '/', data.length);
+            options.onProgress(processed, data.length);
+          }
+          
           if (processed % 100 === 0) {
             console.log(`[fetchAndStoreCampingAreasFromAPI] ${processed} kayıt işlendi...`);
           }
@@ -960,11 +997,30 @@ export class DatabaseManager {
   private db: SQLite.SQLiteDatabase | null = null;
 
   async init() {
-    if (this.db) return this.db;
+    // Eğer zaten bir init işlemi devam ediyorsa, onu bekle
+    if (this.initPromise) {
+      return this.initPromise;
+    }
     
-    this.db = await SQLite.openDatabaseAsync('camping_areas.db');
-    await this.createTables();
-    return this.db;
+    // Eğer database zaten başlatılmışsa, onu döndür
+    if (this.db) {
+      return this.db;
+    }
+    
+    // Yeni init promise oluştur ve sakla
+    this.initPromise = (async () => {
+      this.db = await SQLite.openDatabaseAsync('camping_areas.db');
+      await this.createTables();
+      return this.db;
+    })();
+    
+    try {
+      const db = await this.initPromise;
+      return db;
+    } finally {
+      // Init tamamlandıktan sonra promise'i temizle
+      this.initPromise = null;
+    }
   }
 
   private async createTables() {

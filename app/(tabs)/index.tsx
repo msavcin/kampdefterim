@@ -97,6 +97,10 @@ export default function MapScreen() {
   const isMounted = useRef(true);
   const timeoutRefs = useRef<number[]>([]);
   
+  // Sync progress tracking
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, isLoading: false });
+  const isFullSyncInProgressRef = useRef(false); // Ref kullan, state closure problemi için
+  
   useEffect(() => {
     isMounted.current = true;
     return () => {
@@ -142,7 +146,8 @@ export default function MapScreen() {
   const isConnected = useNetworkStatus();
   // Duyurular ve checklist arka plan fetch fonksiyonları
   // Yeni duyuru bildirimi için localde gösterilen duyuru id'lerini sakla
-  const fetchAnnouncementsSilently = async (router: any) => {
+  const fetchAnnouncementsSilently = async (router: any, skipNotification = false) => {
+    if (__DEV__) console.log('[ANNOUNCEMENT] fetchAnnouncementsSilently çağrıldı, skipNotification:', skipNotification, 'isFullSyncInProgressRef:', isFullSyncInProgressRef.current);
     try {
       // Kullanıcıyı çek
       const user = await getMe();
@@ -228,12 +233,12 @@ export default function MapScreen() {
           ? allAnnouncements.filter((a: any) => !shownAnnouncementIds.includes(a.id))
           : [];
       }
-      if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0) {
+      if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
         // Yeni duyuru id'lerini hemen kaydet
         const updatedIds = [...shownAnnouncementIds, ...newAnnouncements.map(a => a.id)];
         await AsyncStorage.setItem('shownAnnouncementIds', JSON.stringify(updatedIds));
         
-        // Her zaman bildirim göster (ilk açılış dahil)
+        // Bildirim göster (full sync sırasında değil)
         setNotifications([{
           id: newAnnouncements[0].id,
           type: 'announcement',
@@ -330,8 +335,8 @@ export default function MapScreen() {
 
   // Harita senkronizasyonundan sonra da yeni duyuru bildirimi tetiklensin
   useEffect(() => {
-    // isConnected veya harita sync sonrası tetiklenebilir
-    fetchAnnouncementsSilently(router);
+    // isConnected veya harita sync sonrası tetiklenebilir (full sync sırasında bildirim gösterme)
+    fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
   }, [isConnected]);
   // Konumu güncelleyen fonksiyon
   const getCurrentLocation = async () => {
@@ -498,7 +503,17 @@ export default function MapScreen() {
           }
           
           const user = await getMe();
-          await syncAll({ userId: user?.id });
+          if (__DEV__) console.log('[DEBUG][PROGRESS] Sync başlıyor...');
+          setSyncProgress({ current: 0, total: 0, isLoading: true });
+          await syncAll({ 
+            userId: user?.id,
+            onProgress: (current, total) => {
+              if (__DEV__) console.log('[DEBUG][PROGRESS] Progress güncellendi:', current, '/', total);
+              setSyncProgress({ current, total, isLoading: true });
+            }
+          });
+          if (__DEV__) console.log('[DEBUG][PROGRESS] Sync tamamlandı');
+          setSyncProgress({ current: 0, total: 0, isLoading: false });
         } else {
         }
       }
@@ -781,18 +796,13 @@ export default function MapScreen() {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active' && isMounted.current) {
         if (__DEV__) console.log('[DEBUG] Uygulama ön plana geldi, veriler yenileniyor...');
-        
-        // Kullanıcıya görsel geri bildirim
-        if (Platform.OS === 'android') {
-          ToastAndroid.show('Veriler güncelleniyor...', ToastAndroid.SHORT);
-        }
-        
+        // Kullanıcıya görsel geri bildirim kaldırıldı
         // Veri yenileme fonksiyonlarını tetikle
         if (typeof refreshData === 'function') {
           refreshData();
         }
-        // Duyuruları da yenile
-        fetchAnnouncementsSilently(router);
+        // Duyuruları da yenile (full sync sırasında bildirim gösterme)
+        fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
       }
     });
 
@@ -902,14 +912,9 @@ export default function MapScreen() {
     hasInitialSyncRef.current = true;
     
     (async () => {
-      // Kullanıcıya bildirim göster
-      if (Platform.OS === 'android') {
-        ToastAndroid.show('Veriler güncelleniyor...', ToastAndroid.SHORT);
-      }
-      
       await refreshData();
-      // Duyurular arka planda fetch
-      fetchAnnouncementsSilently(router);
+      // Duyurular arka planda fetch (full sync sırasında bildirim gösterme)
+      fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
       // API senkronizasyonu
       if (isConnected) {
         if (isSyncingRef.current) {
@@ -926,15 +931,49 @@ export default function MapScreen() {
               return;
             }
             // Delta Sync: İlk açılışta forceFull: true, sonraki açılışlarda delta sync
-            const count = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
+            // hasInitialSync flag'ini kontrol et
+            const hasInitialSync = await AsyncStorage.getItem('hasInitialSync');
+            const shouldForceFullSync = !hasInitialSync;
+            
+            if (__DEV__) console.log('[DEBUG][SYNC] hasInitialSync flag:', hasInitialSync, '| shouldForceFullSync:', shouldForceFullSync);
+            
+            if (shouldForceFullSync) {
+              if (__DEV__) console.log('[DEBUG][PROGRESS] İLK FULL SYNC başlıyor...');
+              isFullSyncInProgressRef.current = true; // Bildirimleri kapat
+              await AsyncStorage.setItem('isInitialSyncComplete', 'false'); // Duyurular tab'ını kapat
+              setSyncProgress({ current: 0, total: 0, isLoading: true });
+            } else {
+              if (__DEV__) console.log('[DEBUG][SYNC] Delta sync yapılacak (full sync atlanıyor)');
+            }
+            
+            const count = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { 
+              forceFull: shouldForceFullSync,
+              onProgress: shouldForceFullSync ? (current, total) => {
+                if (__DEV__) console.log('[DEBUG][PROGRESS] Full sync progress:', current, '/', total);
+                setSyncProgress({ current, total, isLoading: true });
+              } : undefined
+            });
+            
+            if (shouldForceFullSync) {
+              if (__DEV__) console.log('[DEBUG][PROGRESS] Full sync tamamlandı:', count, 'kayıt');
+              await AsyncStorage.setItem('hasInitialSync', 'true');
+              await AsyncStorage.setItem('isInitialSyncComplete', 'true'); // Duyurular tab'ını aç
+              isFullSyncInProgressRef.current = false; // Bildirimleri aç
+              setSyncProgress({ current: 0, total: 0, isLoading: false });
+            }
+            
             if (__DEV__) console.log('API ile senkronize edilen kamp alanı sayısı:', count);
             await refreshData();
-            // Harita sync sonrası tekrar fetch
-            fetchAnnouncementsSilently(router);
+            // Harita sync sonrası tekrar fetch (full sync sırasında bildirim gösterme)
+            fetchAnnouncementsSilently(router, shouldForceFullSync);
           } catch (err) {
             console.error('API veri çekme hatası:', err);
           } finally {
             isSyncingRef.current = false;
+            // Hata durumunda da flag'i sıfırla
+            if (isFullSyncInProgressRef.current) {
+              isFullSyncInProgressRef.current = false;
+            }
           }
         })();
       } else {
@@ -1631,6 +1670,9 @@ export default function MapScreen() {
   // Loader animasyonu için
   const spinAnim = useRef(new Animated.Value(0)).current;
 
+  // Manuel senkronizasyon için ref - Hook kuralları gereği erken return'den önce tanımlanmalı
+  const lastManualSyncRef = useRef<number>(0);
+
   useEffect(() => {
     let loopAnim: Animated.CompositeAnimation | null = null;
     if (isBusy) {
@@ -1657,21 +1699,7 @@ export default function MapScreen() {
     outputRange: ['0deg', '360deg'],
   });
 
-  if (error) {
-    return (
-      <SafeAreaView style={styles.container} edges={['left','right']}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={refreshData}>
-            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // Manuel senkronizasyon fonksiyonu (dakikada 1 kez)
-  const lastManualSyncRef = useRef<number>(0);
+  // Manuel senkronizasyon fonksiyonu (dakikada 1 kez) - Erken return'den önce tanımlanmalı
   const handleManualSync = async () => {
     const now = Date.now();
     if (now - lastManualSyncRef.current < 60000) {
@@ -1712,6 +1740,14 @@ export default function MapScreen() {
         setMapKey(prev => prev + 1); // Haritayı yenile
         return;
       }
+
+      // Senkronizasyon zaten çalışıyorsa uyarı gösterme
+      if (isSyncingRef.current) {
+        if (__DEV__) console.log('[MANUAL SYNC] Zaten bir sync işlemi devam ediyor, tekrar başlatılmayacak.');
+        return;
+      }
+      isSyncingRef.current = true;
+      // Sadece burada uyarı göster
       if (Platform.OS === 'android') {
         ToastAndroid.show('Veriler güncelleniyor...', ToastAndroid.SHORT);
       } else {
@@ -1725,17 +1761,30 @@ export default function MapScreen() {
         try {
           const token = await getToken();
           if (token && user?.id) {
-            await syncAll({ userId: user.id });
+            if (__DEV__) console.log('[DEBUG][PROGRESS] Manuel sync başlıyor...');
+            setSyncProgress({ current: 0, total: 0, isLoading: true });
+            await syncAll({ 
+              userId: user.id,
+              onProgress: (current, total) => {
+                if (__DEV__) console.log('[DEBUG][PROGRESS] Manuel progress:', current, '/', total);
+                setSyncProgress({ current, total, isLoading: true });
+              }
+            });
+            if (__DEV__) console.log('[DEBUG][PROGRESS] Manuel sync tamamlandı');
+            setSyncProgress({ current: 0, total: 0, isLoading: false });
           }
           // Eşitleme sonrası local veriyi tekrar güncelle (opsiyonel)
           await refreshData();
           setMapKey(prev => prev + 1); // Haritayı tekrar yenile
         } catch (e) {
           console.error('Arka planda senkronizasyon hatası:', e);
+        } finally {
+          isSyncingRef.current = false;
         }
       })();
     } catch (e) {
       Alert.alert('Hata', 'Senkronizasyon sırasında bir hata oluştu.');
+      isSyncingRef.current = false;
     }
   };
 
@@ -1746,6 +1795,19 @@ export default function MapScreen() {
       setShowMapMoveButton(false);
     }
   };
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container} edges={['left','right']}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={refreshData}>
+            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // Yükleme sırasında sayfa yarı saydam değil, dokunma engeli yok
   return (
@@ -1868,6 +1930,35 @@ export default function MapScreen() {
             <Text style={[styles.notificationText, { color: '#fff' }]}>{notifications[notificationIndex]?.message}</Text>
           </TouchableOpacity>
         </Animated.View>
+      )}
+      {/* Sync Progress Bar - Menü barının hemen altında */}
+      {(() => {
+        if (__DEV__ && (syncProgress.isLoading || syncProgress.total > 0)) {
+          console.log('[DEBUG][PROGRESS] Render check:', JSON.stringify(syncProgress));
+        }
+        return null;
+      })()}
+      {syncProgress.isLoading && syncProgress.total > 0 && (
+        <View style={styles.progressBarContainer}>
+          <View style={styles.progressBarBackground}>
+            <Animated.View 
+              style={[
+                styles.progressBarFill,
+                { width: `${Math.min((syncProgress.current / syncProgress.total) * 100, 100)}%` }
+              ]} 
+            />
+          </View>
+          <Text style={styles.progressText}>
+            {syncProgress.total > 100 
+              ? `${syncProgress.current} / ${syncProgress.total} kamp alanı yükleniyor...`
+              : 'Senkronizasyon tamamlanıyor'}
+          </Text>
+          {syncProgress.total > 100 && (
+            <Text style={styles.progressSubText}>
+              Duyuru sekmesi eşitleme sonrası aktif olacaktır.
+            </Text>
+          )}
+        </View>
       )}
       {/* Senkronizasyon sırasında üstte uyarı banner'ı (sadece ekrana dokunulunca 2sn görünür) */}
       {showSyncBanner && (
@@ -2518,5 +2609,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
     marginTop: 8,
+  },
+  progressBarContainer: {
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  progressBarBackground: {
+    height: 4,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#059669',
+    borderRadius: 2,
+  },
+  progressText: {
+    fontSize: 11,
+    color: '#6b7280',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  progressSubText: {
+    fontSize: 10,
+    color: '#9ca3af',
+    marginTop: 2,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });

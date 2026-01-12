@@ -18,7 +18,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ visible, onClose }) => {
         <View style={styles.container}>
           <Text style={styles.title}>Hoş geldiniz!</Text>
           <Text style={styles.text}>
-            • Uygulama ilk açılışında kamp alanları güncellemesi için sunucuyla senkronizasyon yapacaktır.{"\n"}
+            • Uygulama ilk açılışında, kamp alanları ve duyuru güncellemesi için sunucuyla senkronizasyon yapacaktır. Eşitleme bitene kadar duyuru ekranına erişim kısıtlanmıştır.{"\n"}
             • Tüm sürüm notlarına 
             <Text style={{color:'#2563eb'}} onPress={() => {require('react-native').Linking.openURL('https://kampdefterim.com/surum-notlari.html')}}> buradan</Text> ulaşabilirsin.{"\n"}
             • Görüş ve önerileriniz uygulama içi bildirim alanından ya da 

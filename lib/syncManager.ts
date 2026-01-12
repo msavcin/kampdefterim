@@ -32,7 +32,7 @@ import { API_URL } from './config';
 export async function syncAnnouncements() {
   const db = getDatabase();
   try {
-    await db.fetchAndStoreAnnouncementsFromAPI(API_URL + '/announcements');
+    await db.fetchAndStoreAnnouncementsFromAPI(API_URL + '/announcements/', true);
   // ...existing code...
     return true;
   } catch (error) {
@@ -215,13 +215,13 @@ async function syncPendingImages(userId) {
 
 
 // Tüm senkronizasyonu başlatan ana fonksiyon
-export async function syncAll({ userId }) {
+export async function syncAll({ userId, onProgress }: { userId?: number; onProgress?: (current: number, total: number) => void } = {}) {
   // 1. Fotoğraflar
   await syncPendingImages(userId);
   // 2. Checklist
   await syncPendingChecklists();
   // 3. Diğer değişiklikler
-  await syncPendingChanges(userId);
+  await syncPendingChanges(userId, onProgress);
   // 4. Duyuru delta sync
   await syncAnnouncements();
 }

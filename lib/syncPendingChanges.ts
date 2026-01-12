@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
 import { getDatabase } from '@/lib/database';
 
 // currentUserId parametresi eklendi
-export async function syncPendingChanges(currentUserId?: string | number) {
+export async function syncPendingChanges(currentUserId?: string | number, onProgress?: (current: number, total: number) => void) {
   console.log('[syncPendingChanges] başlatıldı');
   // DEBUG: Localde adı 'B7' geçen kamp alanı var mı?
   try {
@@ -208,7 +208,7 @@ export async function syncPendingChanges(currentUserId?: string | number) {
     try {
       // Sync sonrası local veritabanını güncelle (Delta Sync ile sadece değişenleri çek)
       console.log('[syncPendingChanges] Tüm değişiklikler işlendi, local veritabanı güncelleniyor...');
-      await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
+      await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, onProgress });
       console.log('[syncPendingChanges] tamamlandı.');
     } catch (e) {
       console.log('[syncPendingChanges] SONDA HATA:', e);
@@ -220,7 +220,7 @@ export async function syncPendingChanges(currentUserId?: string | number) {
   // Her durumda Delta Sync çağrısı (pending değişiklik olmasa da)
   try {
     console.log('[syncPendingChanges] Local değişiklik olmasa da Delta Sync başlatılıyor...');
-    await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
+    await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, onProgress });
     console.log('[syncPendingChanges] Delta Sync tamamlandı.');
   } catch (e) {
     console.log('[syncPendingChanges] Delta Sync HATASI:', e);
