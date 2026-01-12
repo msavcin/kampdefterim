@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
+import useTokenAutoLogout from '@/hooks/useTokenAutoLogout';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { isLoggedIn } from '../lib/auth';
 
 export default function RootLayout() {
   useFrameworkReady();
+  useTokenAutoLogout();
   const router = useRouter();
   const segments = useSegments();
   const [checked, setChecked] = useState(false);
