@@ -96,14 +96,19 @@ import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'react-native';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 // DatePicker kaldırıldı
-import { useRouter } from 'expo-router';
 import { getToken } from '../lib/auth';
 import { getMe } from '../lib/userCommunityApi';
 import { getDatabase } from '../lib/database';
 
 // Alttaki styles tanımı kaldırıldı, sadece üstteki styles kullanılacak
 
-export default function AnnouncementCreate() {
+interface AnnouncementCreateProps {
+  visible: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export default function AnnouncementCreate({ visible, onClose, onSuccess }: AnnouncementCreateProps) {
   const [eventPhoto, setEventPhoto] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
@@ -190,10 +195,8 @@ export default function AnnouncementCreate() {
   // Sadece birer tane tanımlı olmalı
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
-  const [modalVisible, setModalVisible] = useState(true);
   const [showBaslamaPicker, setShowBaslamaPicker] = useState(false);
   const [showBitisPicker, setShowBitisPicker] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
     // Kamp alanlarını yükle (sadece kullanıcının oluşturdukları)
@@ -334,9 +337,20 @@ export default function AnnouncementCreate() {
       if (!res.ok) {
         throw new Error(`Status: ${res.status} | ${JSON.stringify(apiResponse)}`);
       }
+      
+      // Sunucudan yeni eklenen duyuruyu local'e senkronize et
+      try {
+        const db = getDatabase();
+        await db.fetchAndStoreAnnouncementsFromAPI();
+        console.log('[DUYURU EKLE] Delta sync tamamlandı');
+      } catch (syncErr) {
+        console.warn('[DUYURU EKLE] Delta sync hatası:', syncErr);
+      }
+      
       Alert.alert('Başarılı', 'Duyuru başarıyla eklendi!', [
         { text: 'Tamam', onPress: () => {
-            router.replace('/announcements?refresh=1');
+            onSuccess();
+            onClose();
           }
         }
       ]);
@@ -349,25 +363,25 @@ export default function AnnouncementCreate() {
 
   return (
     <Modal
-      visible={modalVisible}
+      visible={visible}
       animationType="slide"
-      transparent
-      onRequestClose={() => {
-        setModalVisible(false);
-        router.back();
-      }}
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
     >
-      <View style={styles.modalBg}>
+      <View style={{ flex: 1, backgroundColor: '#f8fafc' }}>
         <KeyboardAvoidingView
-          style={styles.modalCard}
+          style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
         >
-          <ScrollView contentContainerStyle={{ flexGrow: 1, width: '100%' }} keyboardShouldPersistTaps="always">
-            <TouchableOpacity style={styles.closeButton} onPress={() => { setModalVisible(false); router.back(); }}>
-              <Text style={styles.closeButtonText}>×</Text>
-            </TouchableOpacity>
-            <Text style={styles.title}>Yeni Duyuru Oluştur</Text>
+          <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 20 }} keyboardShouldPersistTaps="always">
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
+              <TouchableOpacity onPress={onClose} style={{ padding: 8 }}>
+                <Text style={{ fontSize: 24, color: '#6b7280' }}>←</Text>
+              </TouchableOpacity>
+              <Text style={[styles.title, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>Yeni Duyuru Oluştur</Text>
+              <View style={{ width: 40 }} />
+            </View>
             {/* Etkinlik fotoğrafı alanı sadece user doluysa gösterilecek */}
             {user && (
               <View style={{ marginBottom: 16, }}>
@@ -604,7 +618,7 @@ export default function AnnouncementCreate() {
                 <Text style={styles.buttonText}>Duyuru Ekle</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.cancelButton} onPress={() => { setModalVisible(false); router.back(); }}>
+            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
               <Text style={styles.cancelButtonText}>Vazgeç</Text>
             </TouchableOpacity>
           </ScrollView>

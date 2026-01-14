@@ -1284,41 +1284,44 @@ export default function ProfileScreen(props: any) {
           )}
 
           
-          {/* Cache Temizleme Butonu */}
-          <TouchableOpacity
-            style={[styles.backupButton, { backgroundColor: '#fef3c7', borderColor: '#f59e0b', marginTop: 16 }]}
-            onPress={async () => {
-              try {
-                const stats = await getTileCacheStats();
-                const sizeMB = (stats.totalSize / 1024 / 1024).toFixed(2);
-                Alert.alert(
-                  'Harita Cache Temizle',
-                  `${stats.tileCount} tile (${sizeMB} MB) silinecek. Devam edilsin mi?`,
-                  [
-                    { text: 'İptal', style: 'cancel' },
-                    {
-                      text: 'Temizle',
-                      style: 'destructive',
-                      onPress: async () => {
-                        await clearTileCache();
-                        Alert.alert('Başarılı', 'Harita cache temizlendi!');
+
+          {/* Cache Temizleme Butonu sadece offline_enabled kullanıcılar için */}
+          {user && user.offline_enabled && (
+            <TouchableOpacity
+              style={[styles.backupButton, { backgroundColor: '#fef3c7', borderColor: '#f59e0b', marginTop: 16 }]}
+              onPress={async () => {
+                try {
+                  const stats = await getTileCacheStats();
+                  const sizeMB = (stats.totalSize / 1024 / 1024).toFixed(2);
+                  Alert.alert(
+                    'Harita Cache Temizle',
+                    `${stats.tileCount} tile (${sizeMB} MB) silinecek. Devam edilsin mi?`,
+                    [
+                      { text: 'İptal', style: 'cancel' },
+                      {
+                        text: 'Temizle',
+                        style: 'destructive',
+                        onPress: async () => {
+                          await clearTileCache();
+                          Alert.alert('Başarılı', 'Harita cache temizlendi!');
+                        }
                       }
-                    }
-                  ]
-                );
-              } catch (error) {
-                Alert.alert('Hata', 'Cache temizlenirken bir hata oluştu.');
-              }
-            }}
-          >
-            <View style={styles.backupButtonContent}>
-              <Trash size={20} color="#f59e0b" />
-              <View style={styles.backupButtonText}>
-                <Text style={[styles.backupButtonTitle, { color: '#f59e0b' }]}>Harita Cache Temizle</Text>
-                <Text style={styles.backupButtonSubtitle}>Offline harita tile'ları temizlenir</Text>
+                    ]
+                  );
+                } catch (error) {
+                  Alert.alert('Hata', 'Cache temizlenirken bir hata oluştu.');
+                }
+              }}
+            >
+              <View style={styles.backupButtonContent}>
+                <Trash size={20} color="#f59e0b" />
+                <View style={styles.backupButtonText}>
+                  <Text style={[styles.backupButtonTitle, { color: '#f59e0b' }]}>Harita Cache Temizle</Text>
+                  <Text style={styles.backupButtonSubtitle}>Offline harita tile'ları temizlenir</Text>
+                </View>
               </View>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          )}
           
           {/* Superadmin için veritabanı silme butonu */}
           {user && user.role === 'superadmin' && (

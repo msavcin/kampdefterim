@@ -336,9 +336,38 @@ export class DatabaseManager {
             const keywordsStr = Array.isArray(item.keywords) ? JSON.stringify(item.keywords) : (item.keywords ?? '');
             const aktifValue = (typeof item.aktif === 'boolean') ? (item.aktif ? 1 : 0) : (item.aktif === undefined ? 1 : Number(item.aktif));
             
+            // Görselleri normalize et
+            let photoData: string[] = [];
+            const photoSources = [item.event_photos, item.images, item.photo_links];
+            
+            for (const source of photoSources) {
+              if (!source) continue;
+              
+              if (Array.isArray(source)) {
+                photoData = source.filter((p: any) => typeof p === 'string' && p.trim() !== '');
+                if (photoData.length > 0) break;
+              } else if (typeof source === 'string' && source.trim() !== '' && source !== '[]') {
+                try {
+                  const parsed = JSON.parse(source);
+                  if (Array.isArray(parsed)) {
+                    photoData = parsed.filter((p: any) => typeof p === 'string' && p.trim() !== '');
+                    if (photoData.length > 0) break;
+                  }
+                } catch (e) {
+                  // JSON parse hatası, devam et
+                }
+              }
+            }
+            
+            const photoString = photoData.length > 0 ? JSON.stringify(photoData) : '';
+            
+            // Orijinal alanları da sakla (backward compatibility için)
+            const imagesStr = item.images ? (Array.isArray(item.images) ? JSON.stringify(item.images) : item.images) : '';
+            const photoLinksStr = item.photo_links ? (Array.isArray(item.photo_links) ? JSON.stringify(item.photo_links) : item.photo_links) : '';
+            
             await this.db!.runAsync(
-              `INSERT OR REPLACE INTO announcements (id, community_id, title, message, created_by, created_at, valilik_id, keywords, source_url, islenme_tarihi, link, date, updated_at, status, synced, deleted, aktif, baslama_zamani, bitis_zamani)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)`,
+              `INSERT OR REPLACE INTO announcements (id, community_id, title, message, created_by, created_at, valilik_id, keywords, source_url, islenme_tarihi, link, date, updated_at, status, synced, deleted, aktif, baslama_zamani, bitis_zamani, event_photos, images, photo_links, etkinlik_turu, zorluk_seviyesi, etkinlik_tarihi, etkinlik_suresi, etkinlik_yeri, etkinlik_yeri_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 item.id ?? null,
                 item.community_id ?? null,
@@ -356,7 +385,16 @@ export class DatabaseManager {
                 item.status ?? 'active',
                 aktifValue,
                 item.baslama_zamani ?? '',
-                item.bitis_zamani ?? ''
+                item.bitis_zamani ?? '',
+                photoString,
+                imagesStr,
+                photoLinksStr,
+                item.etkinlik_turu ?? '',
+                item.zorluk_seviyesi ?? '',
+                item.etkinlik_tarihi ?? '',
+                item.etkinlik_suresi ?? '',
+                item.etkinlik_yeri ?? '',
+                item.etkinlik_yeri_id ?? null
               ]
             );
             insertCount++;
@@ -414,6 +452,66 @@ export class DatabaseManager {
           if (removedCount > 0) {
             deleteCount += removedCount;
             console.log(`[ANNOUNCEMENT][DELTA-SYNC] ${removedCount} sunucuda silinmiş kayıt local'den kaldırıldı.`);
+          }
+        }
+        
+        // Periyodik Full ID Check: Her 10 delta sync'de bir sunucudan tüm ID'leri al ve local'i temizle
+        if (lastSync) {
+          const { incrementAnnouncementSyncCounter } = await import('./deltaSyncStorage');
+          const needsFullCheck = await incrementAnnouncementSyncCounter();
+          
+          if (needsFullCheck) {
+            console.log('[ANNOUNCEMENT][FULL-CHECK] ===== PERİYODİK FULL CHECK BAŞLADI =====');
+            
+            try {
+              // Sunucudan sadece ID'leri çek (hafif istek)
+              const idCheckUrl = API_URL + '/announcements/?fields=id';
+              const idResponse = await apiFetch(idCheckUrl, { headers });
+              
+              if (idResponse.ok) {
+                const allServerData = await idResponse.json();
+                
+                if (Array.isArray(allServerData)) {
+                  const serverIds = new Set<number>();
+                  for (const item of allServerData) {
+                    if (item.id) {
+                      serverIds.add(Number(item.id));
+                    }
+                  }
+                  
+                  console.log(`[ANNOUNCEMENT][FULL-CHECK] Sunucuda ${serverIds.size} duyuru var`);
+                  
+                  // Local'deki tüm ID'leri al
+                  const localAnnouncements = await this.db!.getAllAsync('SELECT id FROM announcements') as { id: number }[];
+                  console.log(`[ANNOUNCEMENT][FULL-CHECK] Local'de ${localAnnouncements.length} duyuru var`);
+                  
+                  // Sunucuda olmayan local kayıtları sil
+                  let cleanedCount = 0;
+                  for (const local of localAnnouncements) {
+                    if (!serverIds.has(local.id)) {
+                      await this.db!.runAsync('DELETE FROM announcements WHERE id = ?', [local.id]);
+                      cleanedCount++;
+                      if (__DEV__) console.log('[ANNOUNCEMENT][FULL-CHECK] Sunucuda olmayan kayıt silindi: id=', local.id);
+                    }
+                  }
+                  
+                  if (cleanedCount > 0) {
+                    deleteCount += cleanedCount;
+                    console.log(`[ANNOUNCEMENT][FULL-CHECK] ✅ ${cleanedCount} eski kayıt temizlendi`);
+                  } else {
+                    console.log('[ANNOUNCEMENT][FULL-CHECK] ✅ Temizlenecek kayıt yok, local DB senkron');
+                  }
+                } else {
+                  console.warn('[ANNOUNCEMENT][FULL-CHECK] ⚠️ API beklenen formatta veri döndürmedi');
+                }
+              } else {
+                console.warn('[ANNOUNCEMENT][FULL-CHECK] ⚠️ ID check API hatası:', idResponse.status);
+              }
+            } catch (fullCheckErr) {
+              console.error('[ANNOUNCEMENT][FULL-CHECK] ❌ Full check hatası:', fullCheckErr);
+            }
+            
+            console.log('[ANNOUNCEMENT][FULL-CHECK] ===== PERİYODİK FULL CHECK TAMAMLANDI =====');
           }
         }
         
@@ -476,6 +574,32 @@ export class DatabaseManager {
     if (!this.db) await this.init();
     const now = new Date().toISOString();
     const aktifValue = (typeof announcement.aktif === 'boolean') ? (announcement.aktif ? 1 : 0) : (announcement.aktif === undefined ? 1 : Number(announcement.aktif));
+    
+    // Görselleri normalize et - event_photos, images veya photo_links alanlarından al
+    let photoData: string[] = [];
+    const photoSources = [announcement.event_photos, announcement.images, announcement.photo_links];
+    
+    for (const source of photoSources) {
+      if (!source) continue;
+      
+      if (Array.isArray(source)) {
+        photoData = source.filter((p: any) => typeof p === 'string' && p.trim() !== '');
+        if (photoData.length > 0) break;
+      } else if (typeof source === 'string' && source.trim() !== '' && source !== '[]') {
+        try {
+          const parsed = JSON.parse(source);
+          if (Array.isArray(parsed)) {
+            photoData = parsed.filter((p: any) => typeof p === 'string' && p.trim() !== '');
+            if (photoData.length > 0) break;
+          }
+        } catch (e) {
+          // JSON parse hatası, devam et
+        }
+      }
+    }
+    
+    const photoString = photoData.length > 0 ? JSON.stringify(photoData) : '';
+    
     // Log: Veritabanına yazılacak etkinlik alanları
     // ...existing code...
     const result = await this.db!.runAsync(
@@ -509,7 +633,7 @@ export class DatabaseManager {
         announcement.etkinlik_yeri_id ?? null,
         announcement.baslama_zamani ?? '',
         announcement.bitis_zamani ?? '',
-        Array.isArray(announcement.event_photos) ? JSON.stringify(announcement.event_photos) : (announcement.event_photos ?? '')
+        photoString
       ]
     );
     return result;
@@ -518,6 +642,37 @@ export class DatabaseManager {
   async updateAnnouncementLocal(id: number, updates: any) {
     if (!this.db) await this.init();
     const now = new Date().toISOString();
+    
+    // Görselleri normalize et - event_photos, images veya photo_links güncellenmişse
+    if (updates.event_photos || updates.images || updates.photo_links) {
+      let photoData: string[] = [];
+      const photoSources = [updates.event_photos, updates.images, updates.photo_links];
+      
+      for (const source of photoSources) {
+        if (!source) continue;
+        
+        if (Array.isArray(source)) {
+          photoData = source.filter((p: any) => typeof p === 'string' && p.trim() !== '');
+          if (photoData.length > 0) break;
+        } else if (typeof source === 'string' && source.trim() !== '' && source !== '[]') {
+          try {
+            const parsed = JSON.parse(source);
+            if (Array.isArray(parsed)) {
+              photoData = parsed.filter((p: any) => typeof p === 'string' && p.trim() !== '');
+              if (photoData.length > 0) break;
+            }
+          } catch (e) {
+            // JSON parse hatası, devam et
+          }
+        }
+      }
+      
+      // event_photos olarak kaydet, diğerlerini sil
+      updates.event_photos = photoData.length > 0 ? JSON.stringify(photoData) : '';
+      delete updates.images;
+      delete updates.photo_links;
+    }
+    
     const fields = [];
     const values = [];
     for (const key in updates) {
@@ -548,8 +703,50 @@ export class DatabaseManager {
   const row = await this.db!.getFirstAsync(`SELECT * FROM announcements WHERE id = ? AND deleted = 0 AND aktif = 1`, [id]);
   if (!row) return null;
   const ann = row as any;
-  try { ann.keywords = typeof ann.keywords === 'string' ? JSON.parse(ann.keywords || '[]') : ann.keywords; } catch { ann.keywords = []; }
-  try { ann.event_photos = typeof ann.event_photos === 'string' ? JSON.parse(ann.event_photos || '[]') : ann.event_photos; } catch { ann.event_photos = []; }
+  try { ann.keywords = typeof ann.keywords === 'string' ? JSON.parse(ann.keywords || '[]') : (ann.keywords || []); } catch { ann.keywords = []; }
+  
+  // event_photos parse et - null/undefined/empty string kontrolü
+  try {
+    if (ann.event_photos === null || ann.event_photos === undefined || ann.event_photos === '') {
+      ann.event_photos = [];
+    } else if (typeof ann.event_photos === 'string') {
+      const parsed = JSON.parse(ann.event_photos);
+      ann.event_photos = Array.isArray(parsed) ? parsed : [];
+    } else if (!Array.isArray(ann.event_photos)) {
+      ann.event_photos = [];
+    }
+  } catch { 
+    ann.event_photos = []; 
+  }
+  
+  // images parse et
+  try {
+    if (ann.images === null || ann.images === undefined || ann.images === '') {
+      ann.images = [];
+    } else if (typeof ann.images === 'string') {
+      const parsed = JSON.parse(ann.images);
+      ann.images = Array.isArray(parsed) ? parsed : [];
+    } else if (!Array.isArray(ann.images)) {
+      ann.images = [];
+    }
+  } catch { 
+    ann.images = []; 
+  }
+  
+  // photo_links parse et
+  try {
+    if (ann.photo_links === null || ann.photo_links === undefined || ann.photo_links === '') {
+      ann.photo_links = [];
+    } else if (typeof ann.photo_links === 'string') {
+      const parsed = JSON.parse(ann.photo_links);
+      ann.photo_links = Array.isArray(parsed) ? parsed : [];
+    } else if (!Array.isArray(ann.photo_links)) {
+      ann.photo_links = [];
+    }
+  } catch { 
+    ann.photo_links = []; 
+  }
+  
   return ann;
   }
 
@@ -570,8 +767,50 @@ export class DatabaseManager {
     }
     const rows = await this.db!.getAllAsync(`SELECT * FROM announcements WHERE ${where} ORDER BY created_at DESC`, params);
     return rows.map((row: any) => {
-      try { row.keywords = typeof row.keywords === 'string' ? JSON.parse(row.keywords || '[]') : row.keywords; } catch { row.keywords = []; }
-      try { row.event_photos = typeof row.event_photos === 'string' ? JSON.parse(row.event_photos || '[]') : row.event_photos; } catch { row.event_photos = []; }
+      try { row.keywords = typeof row.keywords === 'string' ? JSON.parse(row.keywords || '[]') : (row.keywords || []); } catch { row.keywords = []; }
+      
+      // event_photos parse et - null/undefined/empty string kontrolü
+      try {
+        if (row.event_photos === null || row.event_photos === undefined || row.event_photos === '') {
+          row.event_photos = [];
+        } else if (typeof row.event_photos === 'string') {
+          const parsed = JSON.parse(row.event_photos);
+          row.event_photos = Array.isArray(parsed) ? parsed : [];
+        } else if (!Array.isArray(row.event_photos)) {
+          row.event_photos = [];
+        }
+      } catch { 
+        row.event_photos = []; 
+      }
+      
+      // images parse et
+      try {
+        if (row.images === null || row.images === undefined || row.images === '') {
+          row.images = [];
+        } else if (typeof row.images === 'string') {
+          const parsed = JSON.parse(row.images);
+          row.images = Array.isArray(parsed) ? parsed : [];
+        } else if (!Array.isArray(row.images)) {
+          row.images = [];
+        }
+      } catch { 
+        row.images = []; 
+      }
+      
+      // photo_links parse et
+      try {
+        if (row.photo_links === null || row.photo_links === undefined || row.photo_links === '') {
+          row.photo_links = [];
+        } else if (typeof row.photo_links === 'string') {
+          const parsed = JSON.parse(row.photo_links);
+          row.photo_links = Array.isArray(parsed) ? parsed : [];
+        } else if (!Array.isArray(row.photo_links)) {
+          row.photo_links = [];
+        }
+      } catch { 
+        row.photo_links = []; 
+      }
+      
       return row;
     });
   }
@@ -1101,9 +1340,26 @@ export class DatabaseManager {
   etkinlik_suresi TEXT,
   etkinlik_yeri TEXT,
   etkinlik_yeri_id INTEGER,
-  event_photos TEXT
+  event_photos TEXT,
+  images TEXT,
+  photo_links TEXT
     );
     `);
+
+    // Mevcut tabloya images ve photo_links kolonlarını ekle (varsa hata vermez)
+    try {
+      await this.db.execAsync(`ALTER TABLE announcements ADD COLUMN images TEXT;`);
+      console.log('[DB][MIGRATION] images kolonu eklendi');
+    } catch (e) {
+      // Kolon zaten varsa hata verir, görmezden gel
+    }
+    
+    try {
+      await this.db.execAsync(`ALTER TABLE announcements ADD COLUMN photo_links TEXT;`);
+      console.log('[DB][MIGRATION] photo_links kolonu eklendi');
+    } catch (e) {
+      // Kolon zaten varsa hata verir, görmezden gel
+    }
 
     // Create index for fast lookup
     await this.db.execAsync(`

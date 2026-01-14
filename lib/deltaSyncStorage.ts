@@ -47,6 +47,33 @@ export async function clearLastCampingAreaSync(): Promise<void> {
 // --- ANNOUNCEMENTS DELTA SYNC ---
 
 const LAST_ANNOUNCEMENT_SYNC_KEY = 'lastAnnouncementSync';
+const ANNOUNCEMENT_SYNC_COUNTER_KEY = 'announcementSyncCounter';
+const FULL_SYNC_INTERVAL = 10; // Her 10 delta sync'de bir full check
+
+/**
+ * Sync counter'ı arttırır ve her 10 sync'de true döner (full check için)
+ * @returns Full check yapılmalı mı
+ */
+export async function incrementAnnouncementSyncCounter(): Promise<boolean> {
+  try {
+    const counterStr = await AsyncStorage.getItem(ANNOUNCEMENT_SYNC_COUNTER_KEY);
+    const counter = counterStr ? parseInt(counterStr, 10) : 0;
+    const newCounter = counter + 1;
+    
+    if (newCounter >= FULL_SYNC_INTERVAL) {
+      await AsyncStorage.setItem(ANNOUNCEMENT_SYNC_COUNTER_KEY, '0');
+      console.log('[deltaSyncStorage] Sync counter reset, full check gerekli');
+      return true;
+    } else {
+      await AsyncStorage.setItem(ANNOUNCEMENT_SYNC_COUNTER_KEY, String(newCounter));
+      console.log('[deltaSyncStorage] Sync counter:', newCounter);
+      return false;
+    }
+  } catch (error) {
+    console.error('[deltaSyncStorage] Sync counter hatası:', error);
+    return false;
+  }
+}
 
 /**
  * Son duyuru senkronizasyon zamanını kaydeder

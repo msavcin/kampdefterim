@@ -71,6 +71,7 @@ import { deleteAnnouncement } from '@/lib/announcementApi';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AnnouncementDetail from './announcementDetail';
 import AnnouncementEditScreen from './announcement-edit/[id]';
+import AnnouncementCreate from './announcement-create';
 import { getSVGIcon } from './icons/svgIcons';
 import Svg, { SvgXml } from 'react-native-svg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -145,6 +146,7 @@ export default function AnnouncementsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editAnnouncementId, setEditAnnouncementId] = useState<number | null>(null);
+  const [createModalVisible, setCreateModalVisible] = useState(false);
   const router = useRouter();
 
   // Detay linki için WebView modal state'i
@@ -178,13 +180,13 @@ export default function AnnouncementsScreen() {
   }, [announcements]);
 
   // Duyuruları çekmek ve filtrelemek için yardımcı fonksiyon
-  const refreshAnnouncements = async () => {
-        // Throttle: 1 dakikada birden fazla yenileme engellenir
+  const refreshAnnouncements = async (forceRefresh = false) => {
+        // Throttle: 1 dakikada birden fazla yenileme engellenir (forceRefresh true ise bypass edilir)
         const now = Date.now();
         const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
         const oneMinuteInMs = 60000;
         
-        if (timeSinceLastRefresh < oneMinuteInMs) {
+        if (!forceRefresh && timeSinceLastRefresh < oneMinuteInMs) {
           const remainingSeconds = Math.ceil((oneMinuteInMs - timeSinceLastRefresh) / 1000);
           if (__DEV__) console.log(`[ANNOUNCEMENTS_REFRESH] Çok erken, ${remainingSeconds} saniye sonra tekrar deneyin.`);
           
@@ -204,8 +206,23 @@ export default function AnnouncementsScreen() {
     setLocalLoading(true);
     setApiLoading(false);
     try {
-    // Harita sayfası zaten delta sync yapıyor, sadece güncel local verileri çek
     const db = getDatabase();
+    
+    // Online ise sunucudan delta sync yap
+    if (isConnected) {
+      console.log('[ANNOUNCEMENTS_REFRESH] Online - Delta sync başlatılıyor...');
+      setApiLoading(true);
+      try {
+        await db.fetchAndStoreAnnouncementsFromAPI();
+        console.log('[ANNOUNCEMENTS_REFRESH] Delta sync tamamlandı');
+      } catch (syncErr) {
+        console.warn('[ANNOUNCEMENTS_REFRESH] Delta sync hatası:', syncErr);
+        // Hata olsa da local verilerle devam et
+      }
+      setApiLoading(false);
+    } else {
+      console.log('[ANNOUNCEMENTS_REFRESH] Offline - Sadece local veriler okunuyor');
+    }
     
     console.log('[ANNOUNCEMENTS_REFRESH] Local DB\'den güncel veriler okunuyor...');
     let localAnnouncements = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
@@ -285,7 +302,8 @@ export default function AnnouncementsScreen() {
     
     // Başarılı yenileme bildirimi
     if (Platform.OS === 'android') {
-      ToastAndroid.show('Duyurular güncellendi ✓', ToastAndroid.SHORT);
+      const message = isConnected ? 'Duyurular senkronize edildi ✓' : 'Duyurular güncellendi ✓';
+      ToastAndroid.show(message, ToastAndroid.SHORT);
     }
     } catch (error) {
       setAnnouncements([]);
@@ -310,7 +328,7 @@ export default function AnnouncementsScreen() {
 
   useEffect(() => {
     if (searchParams.refresh === '1') {
-      refreshAnnouncements();
+      refreshAnnouncements(true); // Yeni ekleme/güncelleme sonrası throttle'ı bypass et
     }
   }, [searchParams.refresh]);
 
@@ -509,7 +527,7 @@ export default function AnnouncementsScreen() {
               {(user?.role === 'leader' || user?.role === 'superadmin') && (
                 <TouchableOpacity
                   style={{ backgroundColor: '#6366f1', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', shadowColor: '#6366f1', shadowOpacity: 0.10, shadowRadius: 4, elevation: 1 }}
-                  onPress={() => router.push('/announcement-create')}
+                  onPress={() => setCreateModalVisible(true)}
                   activeOpacity={0.85}
                 >
                   <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>+ Duyuru Ekle</Text>
@@ -665,18 +683,31 @@ export default function AnnouncementsScreen() {
                 <>
                   {/* Fotoğraf varsa başlığın üstünde göster */}
                   {(() => {
-                    let photos = a.event_photos;
-                    if (!photos) {
-                      if (a.images) {
-                        photos = a.images;
-                      } else if (a.photo_links) {
-                        photos = a.photo_links;
+                    let photos: string[] = [];
+                    
+                    // event_photos, images veya photo_links alanlarını kontrol et
+                    const photoSources = [a.event_photos, a.images, a.photo_links];
+                    
+                    for (const source of photoSources) {
+                      if (!source) continue;
+                      
+                      if (Array.isArray(source)) {
+                        photos = source.filter((p: any) => typeof p === 'string' && p.trim() !== '' && (p.startsWith('http://') || p.startsWith('https://')));
+                        if (photos.length > 0) break;
+                      } else if (typeof source === 'string' && source.trim() !== '' && source !== '[]') {
+                        try {
+                          const parsed = JSON.parse(source);
+                          if (Array.isArray(parsed)) {
+                            photos = parsed.filter((p: any) => typeof p === 'string' && p.trim() !== '' && (p.startsWith('http://') || p.startsWith('https://')));
+                            if (photos.length > 0) break;
+                          }
+                        } catch (e) {
+                          // JSON parse hatası, devam et
+                        }
                       }
                     }
-                    if (typeof photos === 'string' && photos.trim() !== '' && photos !== '[]') {
-                      try { photos = JSON.parse(photos); } catch (e) { photos = []; }
-                    }
-                    if (Array.isArray(photos) && photos.length > 0) {
+                    
+                    if (photos.length > 0) {
                       return (
                         <View style={{ marginBottom: 10 }}>
                           {photos.map((url: string, idx: number) => (
@@ -857,7 +888,15 @@ export default function AnnouncementsScreen() {
             setEditModalVisible(false);
             setEditAnnouncementId(null);
           }}
-          onSuccess={refreshAnnouncements}
+          onSuccess={() => refreshAnnouncements(true)}
+        />
+      )}
+      {/* Duyuru Oluşturma Modal */}
+      {createModalVisible && (
+        <AnnouncementCreate
+          visible={createModalVisible}
+          onClose={() => setCreateModalVisible(false)}
+          onSuccess={() => refreshAnnouncements(true)}
         />
       )}
       {/* WebView ile detay linki modalı */}

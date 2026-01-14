@@ -127,7 +127,7 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
   const zorlukSeviyesiList = ['Kolay', 'Orta', 'Orta-Zor', 'Zor'];
   const [form, setForm] = useState({
     title: '',
-    content: '',
+    message: '',
     etkinlik_turu: '',
     zorluk_seviyesi: '',
     etkinlik_tarihi: '',
@@ -206,7 +206,7 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
         setAnnouncementType(isEtkinlik ? 'etkinlik' : 'duyuru');
         setForm({
           title: data.title || '',
-          content: data.content || data.message || '',
+          message: data.message || data.content || '',
           etkinlik_turu: data.etkinlik_turu || '',
           zorluk_seviyesi: data.zorluk_seviyesi || '',
           etkinlik_tarihi: data.etkinlik_tarihi || '',
@@ -239,7 +239,7 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
         const { user_id, ...rest } = {
           ...announcement,
           title: form.title,
-          content: form.content,
+          message: form.message,
           etkinlik_turu: form.etkinlik_turu,
           zorluk_seviyesi: form.zorluk_seviyesi,
           etkinlik_tarihi: form.etkinlik_tarihi,
@@ -263,8 +263,7 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
         body: JSON.stringify({
           ...announcement,
           title: form.title,
-          content: form.content,
-          message: form.content,
+          message: form.message,
           etkinlik_turu: form.etkinlik_turu,
           zorluk_seviyesi: form.zorluk_seviyesi,
           etkinlik_tarihi: form.etkinlik_tarihi,
@@ -277,25 +276,18 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
         })
       });
       if (res.status === 200) {
-        // Sunucuya başarıyla kaydedildiyse local veritabanını da güncelle
+        // Sunucudan güncellenmiş duyuruyu local'e senkronize et
         try {
           const db = getDatabase();
-          const updatedData = await res.json();
-          // Local veritabanında güncelle (announcements tablosunda)
-          await db.insertAnnouncement({
-            ...updatedData,
-            event_photos: typeof updatedData.event_photos === 'string' 
-              ? updatedData.event_photos 
-              : JSON.stringify(updatedData.event_photos || [])
-          });
-          console.log('[ANNOUNCEMENT][UPDATE] Local veritabanı güncellendi');
+          await db.fetchAndStoreAnnouncementsFromAPI();
+          console.log('[ANNOUNCEMENT][UPDATE] Delta sync tamamlandı');
         } catch (e) {
-          console.warn('[ANNOUNCEMENT][UPDATE] Local veritabanı güncelleme hatası:', e);
+          console.warn('[ANNOUNCEMENT][UPDATE] Delta sync hatası:', e);
         }
         
         Alert.alert('Başarılı', 'Duyuru güncellendi.', [
           { text: 'Tamam', onPress: () => {
-              router.replace('/announcements');
+              router.replace('/announcements?refresh=1');
               onSuccess();
               onClose();
             }
@@ -544,8 +536,8 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
                   <Text style={styles.label}>İçerik</Text>
                   <TextInput
                     style={[styles.input, styles.textArea]}
-                    value={form.content}
-                    onChangeText={text => setForm(f => ({ ...f, content: text }))}
+                    value={form.message}
+                    onChangeText={text => setForm(f => ({ ...f, message: text }))}
                     placeholder="Duyuru içeriği"
                     multiline
                     numberOfLines={3}

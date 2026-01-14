@@ -1501,7 +1501,7 @@ export default function MapScreen() {
       <body>
         <div id="map"></div>
         <script>
-          var map = L.map('map').setView([${mapMoveQuery ? mapMoveQuery.latitude : location.coords.latitude}, ${mapMoveQuery ? mapMoveQuery.longitude : location.coords.longitude}], 13);
+          var map = L.map('map').setView([${mapMoveQuery ? mapMoveQuery.latitude : location.coords.latitude}, ${mapMoveQuery ? mapMoveQuery.longitude : location.coords.longitude}], 14);
           var isLocationPickerMode = ${isLocationPickerMode};
           var selectedLocationMarker = null;
           var isOffline = ${!isConnected};

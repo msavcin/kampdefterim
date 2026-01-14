@@ -56,15 +56,32 @@ const AnnouncementDetail: React.FC<AnnouncementDetailProps> = ({ visible, announ
     campingAreaName = announcement.etkinlik_yeri;
   }
 
-  // Fotoğrafları al
+  // Fotoğrafları al - event_photos, images veya photo_links alanlarından
   let photos: string[] = [];
-  if (Array.isArray(announcement.event_photos)) {
-    photos = announcement.event_photos.filter((p: any) => typeof p === 'string' && p.startsWith('http'));
-  } else if (typeof announcement.event_photos === 'string') {
-    try {
-      const arr = JSON.parse(announcement.event_photos);
-      if (Array.isArray(arr)) photos = arr.filter((p: any) => typeof p === 'string' && p.startsWith('http'));
-    } catch {}
+  
+  const photoSources = [
+    announcement.event_photos,
+    announcement.images,
+    announcement.photo_links
+  ];
+  
+  for (const source of photoSources) {
+    if (!source) continue;
+    
+    if (Array.isArray(source)) {
+      photos = source.filter((p: any) => typeof p === 'string' && p.trim() !== '' && (p.startsWith('http://') || p.startsWith('https://')));
+      if (photos.length > 0) break;
+    } else if (typeof source === 'string' && source.trim() !== '' && source !== '[]') {
+      try {
+        const arr = JSON.parse(source);
+        if (Array.isArray(arr)) {
+          photos = arr.filter((p: any) => typeof p === 'string' && p.trim() !== '' && (p.startsWith('http://') || p.startsWith('https://')));
+          if (photos.length > 0) break;
+        }
+      } catch (e) {
+        // JSON parse hatası, devam et
+      }
+    }
   }
 
   return (
