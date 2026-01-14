@@ -381,6 +381,42 @@ export class DatabaseManager {
 
         console.log(`[ANNOUNCEMENT][DELTA-SYNC] ${insertCount} eklendi/güncellendi, ${deleteCount} silindi`);
         
+        // Delta sync'te silinen kayıtları kontrol et
+        // API deleted: true ile işaretlenmiş kayıtları döndürmüyorsa, bu kontrol gerekli
+        if (lastSync && data.length > 0) {
+          console.log('[ANNOUNCEMENT][DELTA-SYNC] Delta Sync - silinen kayıtlar kontrol ediliyor...');
+          
+          // API'den gelen güncellenmiş kayıtların ID'leri
+          const updatedIds = new Set<number>();
+          for (const item of data) {
+            if (item.id) {
+              updatedIds.add(Number(item.id));
+            }
+          }
+          
+          // Son sync zamanından sonra güncellenen local kayıtları al
+          const localUpdated = await this.db!.getAllAsync(
+            'SELECT id FROM announcements WHERE updated_at >= ?',
+            [lastSync]
+          ) as { id: number }[];
+          
+          // Local'de güncellenmişçe gözüken ama API'den gelmeyen kayıtlar silinmiş demektir
+          let removedCount = 0;
+          for (const local of localUpdated) {
+            if (!updatedIds.has(local.id)) {
+              // Bu kayıt API'den gelmedi, silinmiş olabilir
+              await this.db!.runAsync('DELETE FROM announcements WHERE id = ?', [local.id]);
+              removedCount++;
+              console.log('[ANNOUNCEMENT][DELTA-SYNC] Sunucuda silinmiş kayıt local\'den kaldırıldı: id=', local.id);
+            }
+          }
+          
+          if (removedCount > 0) {
+            deleteCount += removedCount;
+            console.log(`[ANNOUNCEMENT][DELTA-SYNC] ${removedCount} sunucuda silinmiş kayıt local'den kaldırıldı.`);
+          }
+        }
+        
         // Full Sync ise: Sunucuda olmayan local kayıtları sil
         if (!lastSync) {
           console.log('[ANNOUNCEMENT][DELTA-SYNC] Full Sync - sunucuda olmayan local kayıtlar kontrol ediliyor...');

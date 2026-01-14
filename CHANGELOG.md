@@ -3,7 +3,13 @@
 ## Son Güncellemeler
 
 ### ✨ Yeni Özellikler (2026-01-14)
-- **🗺️ Offline Harita Cache Sistemi**: Artık offline modda da harita kullanılabilir!
+- **� Duyuru Delta Sync İyileştirmesi**: Sunucudan silinen duyurular artık lokalde de silinir
+  - Delta sync'te: Son sync'ten sonra güncellenen local kayıtlar API ile karşılaştırılır
+  - API'den gelmeyen (sunucuda silinmiş) kayıtlar lokalde silinir
+  - Full sync'te: Tüm local kayıtlar sunucu ile senkronize edilir
+  - **Not**: Backend'in silinen kayıtları `deleted: true` ile döndürmesi önerilir
+  
+- **�🗺️ Offline Harita Cache Sistemi**: Artık offline modda da harita kullanılabilir!
   - Online modda görüntülediğiniz harita bölgeleri otomatik olarak cache'lenir
   - **Akıllı Konum Takibi:** Konumunuz 1 km'den fazla değiştiğinde otomatik cache başlar
   - **20 km Çapında Cache:** Her konum değişikliğinde 20 km çapında bölge indirilir

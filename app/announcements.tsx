@@ -204,9 +204,13 @@ export default function AnnouncementsScreen() {
     setLocalLoading(true);
     setApiLoading(false);
     try {
-    // Sadece local veriyi göster (harita sayfası zaten otomatik sync yapıyor)
+    // Harita sayfası zaten delta sync yapıyor, sadece güncel local verileri çek
     const db = getDatabase();
+    
+    console.log('[ANNOUNCEMENTS_REFRESH] Local DB\'den güncel veriler okunuyor...');
     let localAnnouncements = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
+    console.log('[ANNOUNCEMENTS_REFRESH] Local DB\'den', localAnnouncements.length, 'aktif duyuru okundu');
+    
     // Kullanıcıyı paralel çek
     let userData: any = null;
     try {
@@ -242,10 +246,12 @@ export default function AnnouncementsScreen() {
     if (userData?.role !== 'superadmin' && userData) {
       filtered = localAnnouncements.filter((a: any) => {
         if (a.community_id === 0) {
+          // Eğer valilik_id eşleştirmesi varsa filtrele, yoksa tüm genel duyuruları göster
           if (matchedValilikIdLocal && a.valilik_id) {
             return String(a.valilik_id) === String(matchedValilikIdLocal);
           }
-          return false;
+          // Valilik_id yoksa veya eşleştirme yapılamadıysa tüm genel duyuruları göster
+          return true;
         }
         if (userData?.community_id && String(a.community_id) === String(userData.community_id)) return true;
         return false;
@@ -281,12 +287,11 @@ export default function AnnouncementsScreen() {
     if (Platform.OS === 'android') {
       ToastAndroid.show('Duyurular güncellendi ✓', ToastAndroid.SHORT);
     }
-    
-    // API sync kaldırıldı - harita sayfası zaten otomatik sync yapıyor (her 1 dakikada)
     } catch (error) {
       setAnnouncements([]);
       setAnnouncementsLoading(false);
       setRefreshing(false);
+      setLocalLoading(false);
       setApiLoading(false);
       
       // Hata bildirimi
@@ -309,30 +314,45 @@ export default function AnnouncementsScreen() {
     }
   }, [searchParams.refresh]);
 
-  // Sekmeye her odaklanıldığında (haritadan gelindiğinde) local DB'yi güncelle
+  // Sekmeye her odaklanıldığında (haritadan gelindiğinde) güncel local verileri oku
   useFocusEffect(
     React.useCallback(() => {
-      // Sadece local DB'den çek, API isteği yapma (harita zaten sync yapmıştır)
+      // Harita sayfası zaten delta sync yapıyor, sadece güncel local verileri oku
       (async () => {
         try {
+          console.log('[ANNOUNCEMENTS_FOCUS] Sekmeye odaklanıldı, güncel local veriler okunuyor...');
           const db = getDatabase();
           const localAnnouncements = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
+          console.log('[ANNOUNCEMENTS_FOCUS] Local DB\'den', localAnnouncements.length, 'aktif duyuru okundu');
+          
+          // Kullanıcı bilgisi yoksa önce çek
+          let userData = user;
+          if (!userData) {
+            try {
+              userData = await getMe();
+              setUser(userData);
+            } catch (err) {
+              console.warn('[ANNOUNCEMENTS_FOCUS] Kullanıcı bilgisi alınamadı:', err);
+            }
+          }
           
           // Kullanıcı bilgisi varsa filtrele
-          if (user) {
+          if (userData) {
             let filtered = localAnnouncements;
-            if (user.role !== 'superadmin') {
+            if (userData.role !== 'superadmin') {
               const storedValilikId = await AsyncStorage.getItem('matchedValilikId');
               const valilikId = storedValilikId ? parseInt(storedValilikId) : null;
               
               filtered = localAnnouncements.filter((a: any) => {
                 if (a.community_id === 0) {
+                  // Eğer valilik_id eşleştirmesi varsa filtrele, yoksa tüm genel duyuruları göster
                   if (valilikId && a.valilik_id) {
                     return String(a.valilik_id) === String(valilikId);
                   }
-                  return false;
+                  // Valilik_id yoksa veya eşleştirme yapılamadıysa tüm genel duyuruları göster
+                  return true;
                 }
-                if (user?.community_id && String(a.community_id) === String(user.community_id)) return true;
+                if (userData?.community_id && String(a.community_id) === String(userData.community_id)) return true;
                 return false;
               });
             }
@@ -357,9 +377,10 @@ export default function AnnouncementsScreen() {
             
             filtered = sortLeaderFirst(filtered);
             setAnnouncements(filtered);
+            console.log('[ANNOUNCEMENTS_FOCUS] Filtrelenmiş', filtered.length, 'duyuru gösteriliyor');
           }
         } catch (err) {
-          console.error('[ANNOUNCEMENTS] Focus event DB güncelleme hatası:', err);
+          console.error('[ANNOUNCEMENTS_FOCUS] Güncel verileri okuma hatası:', err);
         }
       })();
     }, [user])

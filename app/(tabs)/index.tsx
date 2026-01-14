@@ -2227,23 +2227,39 @@ export default function MapScreen() {
         <View style={styles.headerActions}>
           {/* Görünüm Değiştirme Butonu */}
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
             onPress={() => {
+              if (!isConnected && !user?.offline_enabled) {
+                Alert.alert(
+                  'Offline Özellik Gerekli',
+                  'Liste görünümü için Premium aboneliğe ihtiyacınız var.',
+                  [{ text: 'Tamam' }]
+                );
+                return;
+              }
               if (isMounted.current) {
                 setViewMode(viewMode === 'map' ? 'list' : 'map');
               }
             }}
-            disabled={isBusy}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
           >
             {viewMode === 'map' ? (
-              <List size={20} color="#059669" />
+              <List size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
             ) : (
-              <Map size={20} color="#059669" />
+              <Map size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
             )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
             onPress={async () => {
+              if (!isConnected && !user?.offline_enabled) {
+                Alert.alert(
+                  'Offline Özellik Gerekli',
+                  'Arama özelliği için Premium aboneliğe ihtiyacınız var.',
+                  [{ text: 'Tamam' }]
+                );
+                return;
+              }
               if (!isMounted.current) return;
               try {
                 const allAreas = await getDatabase().getAllCampingAreas();
@@ -2257,18 +2273,26 @@ export default function MapScreen() {
                 }
               }
             }}
-            disabled={isBusy}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
           >
-            <Feather name="search" size={20} color="#059669" />
+            <Feather name="search" size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
             onPress={() => {
+              if (!isConnected && !user?.offline_enabled) {
+                Alert.alert(
+                  'Offline Özellik Gerekli',
+                  'Filtre özelliği için Premium aboneliğe ihtiyacınız var.',
+                  [{ text: 'Tamam' }]
+                );
+                return;
+              }
               if (isMounted.current) setShowFilters(!showFilters);
             }}
-            disabled={isBusy}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
           >
-            <Filter size={20} color="#059669" />
+            <Filter size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionButton}
@@ -2377,7 +2401,11 @@ export default function MapScreen() {
       {/* Offline Mode Banner */}
       {!isConnected && (
         <View style={styles.offlineBanner}>
-          <Text style={styles.offlineBannerText}>📵 Offline Mod - Cache'lenmiş harita gösteriliyor</Text>
+          <Text style={styles.offlineBannerText}>
+            {user?.offline_enabled 
+              ? '📵 Offline Mod - Cache\'lenmiş harita gösteriliyor' 
+              : <>📵 Offline mod için <Text style={{fontWeight: 'bold', fontStyle: 'italic'}}>Premium</Text> aboneliği gerekmektedir.</>}
+          </Text>
         </View>
       )}
       {/* Location Picker Mode Banner */}
@@ -2489,7 +2517,25 @@ export default function MapScreen() {
             {/* Harita kaydırıldığında çıkan buton */}
             {showMapMoveButton && mapCenter && !isLocationPickerMode && !showMapPopup && (
               <View style={styles.mapMoveButtonContainer} pointerEvents="box-none">
-                <TouchableOpacity style={[styles.fab, styles.fabBinoculars]} onPress={handleShowMapMoveResults}>
+                <TouchableOpacity 
+                  style={[
+                    styles.fab, 
+                    styles.fabBinoculars, 
+                    (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }
+                  ]} 
+                  onPress={() => {
+                    if (!isConnected && !user?.offline_enabled) {
+                      Alert.alert(
+                        'Offline Özellik Gerekli',
+                        'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
+                        [{ text: 'Tamam' }]
+                      );
+                      return;
+                    }
+                    handleShowMapMoveResults();
+                  }}
+                  disabled={!isConnected && !user?.offline_enabled}
+                >
                   <Binoculars size={24} color="#fff" />
                 </TouchableOpacity>
               </View>

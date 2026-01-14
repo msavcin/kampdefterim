@@ -33,10 +33,27 @@ export async function syncAnnouncements() {
   const db = getDatabase();
   try {
     await db.fetchAndStoreAnnouncementsFromAPI(API_URL + '/announcements/', true);
-  // ...existing code...
+    if (__DEV__) console.log('[syncAnnouncements] ✅ Duyurular başarıyla senkronize edildi');
     return true;
   } catch (error) {
-    console.error('[syncAnnouncements] Duyurular senkronize edilemedi:', error);
+    if (error instanceof Error) {
+      const errMsg = error.message || '';
+      
+      // Geçici sunucu hataları (5xx)
+      if (errMsg.includes('502') || errMsg.includes('503') || errMsg.includes('504')) {
+        console.warn('[syncAnnouncements] ⚠️ Geçici sunucu hatası, sonraki denemede tekrar denenecek:', errMsg);
+      }
+      // Ağ bağlantısı hataları
+      else if (errMsg.includes('Network') || errMsg.includes('fetch')) {
+        console.warn('[syncAnnouncements] 🌐 Ağ bağlantısı hatası:', errMsg);
+      }
+      // Diğer hatalar
+      else {
+        console.error('[syncAnnouncements] ❌ Duyurular senkronize edilemedi:', errMsg);
+      }
+    } else {
+      console.error('[syncAnnouncements] ❌ Duyurular senkronize edilemedi:', error);
+    }
     return false;
   }
 }
