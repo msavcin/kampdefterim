@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { clearTileCache, getTileCacheStats } from '@/lib/mapTileCache';
 // Sunucu eşleştirme fonksiyonu: source_id:1 olan tüm kamp alanlarını lokal veritabanına kaydet
 async function syncServerCampgroundsToLocal() {
   try {
@@ -45,7 +46,7 @@ import { syncPendingChanges } from '@/lib/syncPendingChanges';
 import React, { useEffect, useState } from 'react';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { View, Text, Image, Button, StyleSheet, ActivityIndicator, ScrollView, Switch, Alert, TouchableOpacity, Modal, TextInput, BackHandler } from 'react-native';
+import { View, Text, Image, Button, StyleSheet, ActivityIndicator, ScrollView, Switch, Alert, TouchableOpacity, Modal, TextInput, BackHandler, Linking, Platform } from 'react-native';
 import { Friend } from '../../types/friend';
 import FriendAvatar from '../../components/FriendAvatar';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -1222,8 +1223,102 @@ export default function ProfileScreen(props: any) {
           )}
           
           
+          {/* Konum İzni Ayarları (offline_enabled olan kullanıcılar için) */}
+          {user && user.offline_enabled && (
+            <TouchableOpacity
+              style={[styles.backupButton, { backgroundColor: '#dbeafe', borderColor: '#3b82f6', marginTop: 16 }]}
+              onPress={async () => {
+                try {
+                  // Mevcut konum izinlerini kontrol et
+                  const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
+                  const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
+                  
+                  let statusText = '';
+                  if (foregroundStatus === 'granted' && backgroundStatus === 'granted') {
+                    statusText = '✅ Her zaman izin verilmiş (Offline mod aktif)';
+                  } else if (foregroundStatus === 'granted') {
+                    statusText = '⚠️ Yalnızca uygulamayı kullanırken (Offline mod için "Her zaman" gerekli)';
+                  } else {
+                    statusText = '❌ İzin verilmemiş';
+                  }
+                  
+                  Alert.alert(
+                    'Konum İzni Durumu',
+                    `Mevcut durum: ${statusText}\n\nOffline harita özelliğini kullanabilmek için "Her zaman izin ver" seçeneğini seçmelisiniz.`,
+                    [
+                      { text: 'Kapat', style: 'cancel' },
+                      {
+                        text: 'Ayarları Aç',
+                        onPress: () => {
+                          if (Platform.OS === 'ios') {
+                            Linking.openURL('app-settings:');
+                          } else {
+                            Linking.openSettings();
+                          }
+                        }
+                      },
+                      {
+                        text: 'Uyarıyı Sıfırla',
+                        onPress: async () => {
+                          // Tüm offline mod uyarı flag'lerini sıfırla
+                          await AsyncStorage.removeItem('offlineLimitedModeAlertSeen');
+                          Alert.alert('Başarılı', 'Konum izni uyarısı sıfırlandı. Uygulamayı yeniden başlattığınızda tekrar gösterilecek.');
+                        },
+                        style: 'default'
+                      }
+                    ]
+                  );
+                } catch (error) {
+                  Alert.alert('Hata', 'Konum izni kontrol edilirken bir hata oluştu.');
+                }
+              }}
+            >
+              <View style={styles.backupButtonContent}>
+                <MapPin size={20} color="#3b82f6" />
+                <View style={styles.backupButtonText}>
+                  <Text style={[styles.backupButtonTitle, { color: '#3b82f6' }]}>Konum İzni Ayarları</Text>
+                  <Text style={styles.backupButtonSubtitle}>Offline mod için konum iznini kontrol et</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          )}
 
           
+          {/* Cache Temizleme Butonu */}
+          <TouchableOpacity
+            style={[styles.backupButton, { backgroundColor: '#fef3c7', borderColor: '#f59e0b', marginTop: 16 }]}
+            onPress={async () => {
+              try {
+                const stats = await getTileCacheStats();
+                const sizeMB = (stats.totalSize / 1024 / 1024).toFixed(2);
+                Alert.alert(
+                  'Harita Cache Temizle',
+                  `${stats.tileCount} tile (${sizeMB} MB) silinecek. Devam edilsin mi?`,
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    {
+                      text: 'Temizle',
+                      style: 'destructive',
+                      onPress: async () => {
+                        await clearTileCache();
+                        Alert.alert('Başarılı', 'Harita cache temizlendi!');
+                      }
+                    }
+                  ]
+                );
+              } catch (error) {
+                Alert.alert('Hata', 'Cache temizlenirken bir hata oluştu.');
+              }
+            }}
+          >
+            <View style={styles.backupButtonContent}>
+              <Trash size={20} color="#f59e0b" />
+              <View style={styles.backupButtonText}>
+                <Text style={[styles.backupButtonTitle, { color: '#f59e0b' }]}>Harita Cache Temizle</Text>
+                <Text style={styles.backupButtonSubtitle}>Offline harita tile'ları temizlenir</Text>
+              </View>
+            </View>
+          </TouchableOpacity>
           
           {/* Superadmin için veritabanı silme butonu */}
           {user && user.role === 'superadmin' && (

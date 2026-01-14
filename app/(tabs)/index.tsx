@@ -11,6 +11,10 @@ function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: numbe
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
+
+// Arka plan konum izleme görevi
+const BACKGROUND_LOCATION_TASK = 'background-location-task';
+
 import { campingTypes, getCampingTypeLabel, getCampingAreaBgColor } from '../../lib/categories';
 import { filterCampingAreasByUser } from '../../lib/accessControl';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
@@ -41,6 +45,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { getSVGIcon } from '../icons/svgIcons';
 import { syncAll } from '@/lib/syncManager';
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 import { listAnnouncements } from '@/lib/announcementApi';
 import { getValilikIdFromProvinceName, getProvinceFromDistrict } from '@/lib/provinceMap';
 // If getValilikIdFromProvinceName is the default export, use:
@@ -67,8 +72,60 @@ import { getDatabase } from '@/lib/database';
 import { getToken } from '@/lib/auth';
 import type { CampingArea } from '@/lib/database';
 import { Alert, ToastAndroid, Platform } from 'react-native';
+import { getCachedTile, cacheTile, precacheTilesForRegion, precacheRegionWithRadius } from '@/lib/mapTileCache';
 
 const { width, height } = Dimensions.get('window');
+
+// Arka plan konum izleme görevini tanımla
+TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }: any) => {
+  if (error) {
+    console.error('[BackgroundLocation] Hata:', error);
+    return;
+  }
+  if (data) {
+    const { locations } = data;
+    if (locations && locations.length > 0) {
+      const location = locations[0];
+      const { latitude, longitude } = location.coords;
+      
+      console.log(`[BackgroundLocation] Konum alındı: ${latitude}, ${longitude}`);
+      
+      try {
+        // Kullanıcı offline özelliğine sahip mi kontrol et
+        const token = await getToken();
+        if (!token) {
+          console.log('[BackgroundLocation] Token yok, cache atlandı');
+          return;
+        }
+        
+        const userData = await getMe();
+        
+        // DEBUG: Kullanıcı datasını kontrol et
+        console.log('[BackgroundLocation] 🔍 User Data:', JSON.stringify({
+          id: userData?.id,
+          email: userData?.email,
+          role: userData?.role,
+          offline_enabled: userData?.offline_enabled,
+          offline_radius_km: userData?.offline_radius_km
+        }, null, 2));
+        
+        if (!userData || !userData.offline_enabled) {
+          console.log('[BackgroundLocation] ❌ Offline özelliği aktif değil, cache atlandı');
+          return;
+        }
+        
+        // Kullanıcının offline_radius_km değerini kullan (varsayılan 20 km)
+        const radiusKm = userData.offline_radius_km || 20;
+        
+        // Bölgeyi offline kullanım için cache'le
+        await precacheRegionWithRadius(latitude, longitude, radiusKm);
+        console.log(`[BackgroundLocation] Bölge cache'lendi: ${latitude}, ${longitude} (${radiusKm} km)`);
+      } catch (error) {
+        console.error('[BackgroundLocation] Cache hatası:', error);
+      }
+    }
+  }
+});
 
 export default function MapScreen() {
     // Son sorgulanan konumu saklamak için ref
@@ -113,6 +170,8 @@ export default function MapScreen() {
   // WebView ref
   const webViewRef = useRef<WebView>(null);
   const [isWebViewReady, setIsWebViewReady] = useState(false);
+  const refreshDataRef = useRef<(() => void) | null>(null);
+  const appStateTimeoutRef = useRef<number | null>(null);
   // Harita WebView'ı yeniden render etmek için bir key
   const [mapKey, setMapKey] = useState(0);
   
@@ -128,6 +187,10 @@ export default function MapScreen() {
   // useTokenAutoLogout kaldırıldı: Token login sonrası otomatik silinmeyecek
   // Yardım modalı (sadece ilk açılışta göster)
   const [helpVisible, setHelpVisible] = useState(false);
+  
+  // Konum izni uyarı modalı
+  const [locationPermissionModalVisible, setLocationPermissionModalVisible] = useState(false);
+  
   useEffect(() => {
     (async () => {
       try {
@@ -519,6 +582,112 @@ export default function MapScreen() {
       }
     })();
   }, [isConnected]);
+  
+  // Arka plan konum izlemeyi başlat
+  useEffect(() => {
+    let isActive = true;
+    
+    const startBackgroundLocation = async () => {
+      try {
+        // Önce kullanıcının offline özelliğine sahip olup olmadığını kontrol et
+        const token = await getToken();
+        if (!token) {
+          console.log('[BackgroundLocation] Token yok, offline mod devre dışı');
+          return;
+        }
+        
+        const userData = await getMe();
+        if (!userData || !userData.offline_enabled) {
+          console.log('[BackgroundLocation] Kullanıcı offline özelliğine sahip değil');
+          // Kullanıcıya bilgilendirme göster (opsiyonel)
+          if (userData && userData.role === 'guest') {
+            console.log('[BackgroundLocation] Guest kullanıcılar offline mod kullanamaz');
+          }
+          return;
+        }
+        
+        console.log(`[BackgroundLocation] Offline özelliği aktif (${userData.offline_radius_km || 20} km)`);
+        
+        // Konum izni kontrolü
+        const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+        if (foregroundStatus !== 'granted') {
+          console.log('[BackgroundLocation] Konum izni reddedildi');
+          return;
+        }
+        
+        // Arka plan konum izni (sadece iOS için gerekli)
+        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+        if (backgroundStatus !== 'granted') {
+          console.log('[BackgroundLocation] Arka plan konum izni reddedildi - Kısıtlı mod');
+          
+          // İlk kez gösterildi mi kontrol et (sadece bilgilendirme için)
+          const limitedModeAlertSeen = await AsyncStorage.getItem('offlineLimitedModeAlertSeen');
+          if (!limitedModeAlertSeen) {
+            // İlk kez, bilgilendirme göster
+            Alert.alert(
+              'Offline Mod: Kısıtlı Özellikler',
+              'Konum izniniz "Yalnızca uygulama kullanılırken" olarak ayarlandı.\n\n✅ Manuel harita cache yapabilirsiniz\n❌ Otomatik arka plan senkronizasyonu devre dışı\n\nTam özellikler için: Ayarlar > Uygulamalar > Kamp Defterim > Konum > "Her zaman izin ver"',
+              [
+                {
+                  text: 'Anladım',
+                  onPress: async () => {
+                    await AsyncStorage.setItem('offlineLimitedModeAlertSeen', '1');
+                  },
+                  style: 'cancel'
+                },
+                {
+                  text: 'Ayarlara Aç',
+                  onPress: async () => {
+                    await AsyncStorage.setItem('offlineLimitedModeAlertSeen', '1');
+                    if (Platform.OS === 'ios') {
+                      Linking.openURL('app-settings:');
+                    } else {
+                      Linking.openSettings();
+                    }
+                  }
+                }
+              ]
+            );
+          }
+          return; // Arka plan tracking başlatma
+        }
+        
+        // Zaten çalışıyor mu kontrol et
+        const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
+        if (isRegistered && isActive) {
+          console.log('[BackgroundLocation] Zaten çalışıyor');
+          return;
+        }
+        
+        // Arka plan konum izlemeyi başlat (her 10 dakikada bir)
+        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 10 * 60 * 1000, // 10 dakika
+          distanceInterval: 1000, // 1 km
+          foregroundService: {
+            notificationTitle: 'Kamp Defterim',
+            notificationBody: 'Offline harita senkronizasyonu için konum izleniyor',
+            notificationColor: '#059669',
+          },
+          pausesUpdatesAutomatically: true,
+          showsBackgroundLocationIndicator: false,
+        });
+        
+        console.log('[BackgroundLocation] Başlatıldı - her 10 dakikada bir konum alınacak');
+      } catch (error) {
+        console.error('[BackgroundLocation] Başlatma hatası:', error);
+      }
+    };
+    
+    startBackgroundLocation();
+    
+    return () => {
+      isActive = false;
+      // Component unmount olduğunda arka plan izlemeyi durdur
+      Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => {});
+    };
+  }, []);
+  
   // ...existing code...
 
   const [user, setUser] = useState<any>(null);
@@ -540,7 +709,16 @@ export default function MapScreen() {
           setCommunityMember(null);
           return;
         }
-        const userData = await getMe(); // users tablosu
+        const userData = await getMe(); // users tablosu (artık offline_enabled ve offline_radius_km içerir)
+        
+        // Offline ayarlarını logla
+        if (__DEV__) {
+          console.log('[User] ✅ Offline ayarları:', {
+            offline_enabled: userData?.offline_enabled,
+            offline_radius_km: userData?.offline_radius_km
+          });
+        }
+        
         // Arkadaş listesini ayrıca çek
         let friends = [];
         try {
@@ -607,31 +785,36 @@ export default function MapScreen() {
         // Checklist paylaşım bildirimleri
         let checklistNotifs: any[] = [];
         if (token && user?.id) {
-          const sharedUrl = `${API_URL}/checklst_shares/shared?shared_with_user_id=${user.id}`;
-          const res = await fetch(sharedUrl, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          const data = await res.json();
-          // Her paylaşım kaydının id'sini kontrol et
-          const shownSharedStr = await AsyncStorage.getItem('shownSharedChecklistIds');
-          const shownSharedIds = shownSharedStr ? JSON.parse(shownSharedStr) : [];
-          // Sadece yeni (gösterilmemiş) paylaşımlar
-          const newShares = Array.isArray(data)
-            ? data.filter((share: any) => !shownSharedIds.includes(share.id))
-            : [];
-          if (Array.isArray(newShares) && newShares.length > 0) {
-            checklistNotifs = [
-              {
-                id: newShares[0].id,
-                type: 'checklist_share',
-                message: `Seninle paylaşılan ${newShares.length} yeni checklist var!`,
-                goto: () => router.push('/checklist'),
-              },
-            ];
-            // Gösterilenleri kaydet
-            AsyncStorage.setItem('shownSharedChecklistIds', JSON.stringify([...shownSharedIds, ...newShares.map(s => s.id)]));
+          try {
+            const sharedUrl = `${API_URL}/checklst_shares/shared?shared_with_user_id=${user.id}`;
+            const res = await fetch(sharedUrl, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await res.json();
+            // Her paylaşım kaydının id'sini kontrol et
+            const shownSharedStr = await AsyncStorage.getItem('shownSharedChecklistIds');
+            const shownSharedIds = shownSharedStr ? JSON.parse(shownSharedStr) : [];
+            // Sadece yeni (gösterilmemiş) paylaşımlar
+            const newShares = Array.isArray(data)
+              ? data.filter((share: any) => !shownSharedIds.includes(share.id))
+              : [];
+            if (Array.isArray(newShares) && newShares.length > 0) {
+              checklistNotifs = [
+                {
+                  id: newShares[0].id,
+                  type: 'checklist_share',
+                  message: `Seninle paylaşılan ${newShares.length} yeni checklist var!`,
+                  goto: () => router.push('/checklist'),
+                },
+              ];
+              // Gösterilenleri kaydet
+              AsyncStorage.setItem('shownSharedChecklistIds', JSON.stringify([...shownSharedIds, ...newShares.map(s => s.id)]));
+            }
+          } catch (e) {
+            console.warn('[Checklist Notification] Hata:', e);
           }
         }
+
 
         // Kamp alanı paylaşım bildirimleri
         let campingAreaNotifs: any[] = [];
@@ -791,25 +974,51 @@ export default function MapScreen() {
     isSuperAdmin,
   });
 
+  // refreshData'yı ref'te sakla (stale closure önleme)
+  useEffect(() => {
+    refreshDataRef.current = refreshData;
+  }, [refreshData]);
+
   // AppState listener: Uygulama arka plandan ön plana geldiğinde veri yenile
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active' && isMounted.current) {
         if (__DEV__) console.log('[DEBUG] Uygulama ön plana geldi, veriler yenileniyor...');
-        // Kullanıcıya görsel geri bildirim kaldırıldı
-        // Veri yenileme fonksiyonlarını tetikle
-        if (typeof refreshData === 'function') {
-          refreshData();
+        
+        // Önceki timeout'u temizle
+        if (appStateTimeoutRef.current) {
+          clearTimeout(appStateTimeoutRef.current);
         }
-        // Duyuruları da yenile (full sync sırasında bildirim gösterme)
-        fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
+        
+        // WebView'in mount olmasını bekle, sonra refresh yap
+        appStateTimeoutRef.current = setTimeout(() => {
+          if (!isMounted.current) return;
+          
+          // Veri yenileme fonksiyonlarını tetikle (ref'ten al - stale closure önleme)
+          if (refreshDataRef.current && typeof refreshDataRef.current === 'function') {
+            try {
+              refreshDataRef.current();
+            } catch (err) {
+              if (__DEV__) console.warn('[AppState] refreshData error:', err);
+            }
+          }
+          // Duyuruları da yenile (full sync sırasında bildirim gösterme)
+          try {
+            fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
+          } catch (err) {
+            if (__DEV__) console.warn('[AppState] fetchAnnouncements error:', err);
+          }
+        }, 300); // 300ms gecikme ile WebView'in mount olmasını bekle
       }
     });
 
     return () => {
       subscription.remove();
+      if (appStateTimeoutRef.current) {
+        clearTimeout(appStateTimeoutRef.current);
+      }
     };
-  }, [refreshData, router]);
+  }, [router]);
 
   // Konum izni durumunu kontrol et
   useEffect(() => {
@@ -1020,6 +1229,57 @@ export default function MapScreen() {
     lastQueriedLocationRef.current = { latitude: currentLat, longitude: currentLng };
     refreshData();
   }, [mapMoveQuery, location]);
+
+  // Online modda konum değiştiğinde harita tile'larını ön-cache'le
+  useEffect(() => {
+    if (!isConnected || !location?.coords) return;
+    
+    // Arka planda tile'ları ön-cache'le
+    const precacheTiles = async () => {
+      try {
+        // DEBUG: User state'ini kontrol et
+        if (__DEV__) {
+          console.log('[MapTileCache] 🔍 User State:', JSON.stringify({
+            id: user?.id,
+            email: user?.email,
+            role: user?.role,
+            offline_enabled: user?.offline_enabled,
+            offline_radius_km: user?.offline_radius_km
+          }, null, 2));
+        }
+        
+        // Kullanıcının offline özelliğine sahip olup olmadığını kontrol et
+        if (!user || !user.offline_enabled) {
+          if (__DEV__) console.log('[MapTileCache] ❌ Kullanıcı offline özelliğine sahip değil, cache atlandı');
+          return;
+        }
+        
+        const lat = mapMoveQuery ? mapMoveQuery.latitude : location.coords.latitude;
+        const lng = mapMoveQuery ? mapMoveQuery.longitude : location.coords.longitude;
+        
+        // Kullanıcının offline_radius_km değerini kullan (varsayılan 20 km)
+        const radiusKm = user.offline_radius_km || 20;
+        
+        // Bölgeyi cache'le (çoklu zoom seviyelerinde)
+        const result = await precacheRegionWithRadius(lat, lng, radiusKm);
+        
+        if (__DEV__) {
+          if (result.alreadyCached) {
+            console.log('[MapTileCache] Bölge zaten cache\'lenmiş, atlandı');
+          } else if (result.totalTiles > 0) {
+            console.log(`[MapTileCache] ${result.totalTiles} harita tile'ı ${radiusKm} km çapında cache'lendi`);
+          }
+        }
+      } catch (error) {
+        if (__DEV__) console.error('[MapTileCache] Ön-cache hatası:', error);
+      }
+    };
+    
+    // 2 saniye gecikme ile ön-cache başlat (performans için)
+    const timeoutId = setTimeout(precacheTiles, 2000);
+    
+    return () => clearTimeout(timeoutId);
+  }, [isConnected, location, mapMoveQuery, user]);
 
   // Her 1 dakikada bir sessiz senkronizasyon
   useEffect(() => {
@@ -1244,10 +1504,128 @@ export default function MapScreen() {
           var map = L.map('map').setView([${mapMoveQuery ? mapMoveQuery.latitude : location.coords.latitude}, ${mapMoveQuery ? mapMoveQuery.longitude : location.coords.longitude}], 13);
           var isLocationPickerMode = ${isLocationPickerMode};
           var selectedLocationMarker = null;
-          // API_URL üzerinden tile proxy kullanılıyor
-          L.tileLayer(window.API_URL + '/tiles/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-          }).addTo(map);
+          var isOffline = ${!isConnected};
+          
+          // Offline-aware tile layer
+          var tileLayer;
+          
+          if (isOffline) {
+            // Offline modda: Cache'den tile yükle
+            // Custom tile layer class tanımla
+            var OfflineTileLayer = L.TileLayer.extend({
+              createTile: function(coords, done) {
+                var tile = document.createElement('img');
+                var requestId = coords.z + '_' + coords.x + '_' + coords.y;
+                
+                // Cache'den tile iste
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'requestCachedTile',
+                    z: coords.z,
+                    x: coords.x,
+                    y: coords.y,
+                    requestId: requestId
+                  }));
+                  
+                  // Callback fonksiyonu
+                  window['tileCacheCallback_' + requestId] = function(base64Data) {
+                    if (base64Data) {
+                      tile.src = base64Data;
+                      if (done) done(null, tile);
+                    } else {
+                      // Cache'de yok, açık gri placeholder tile göster (256x256)
+                      var canvas = document.createElement('canvas');
+                      canvas.width = 256;
+                      canvas.height = 256;
+                      var ctx = canvas.getContext('2d');
+                      ctx.fillStyle = '#e5e7eb';
+                      ctx.fillRect(0, 0, 256, 256);
+                      // Çapraz çizgiler çiz
+                      ctx.strokeStyle = '#d1d5db';
+                      ctx.lineWidth = 1;
+                      ctx.beginPath();
+                      ctx.moveTo(0, 0);
+                      ctx.lineTo(256, 256);
+                      ctx.moveTo(256, 0);
+                      ctx.lineTo(0, 256);
+                      ctx.stroke();
+                      // Metin ekle
+                      ctx.fillStyle = '#9ca3af';
+                      ctx.font = '12px Arial';
+                      ctx.textAlign = 'center';
+                      ctx.fillText('Offline', 128, 120);
+                      ctx.fillText('Cache yok', 128, 140);
+                      tile.src = canvas.toDataURL();
+                      if (done) done(null, tile);
+                    }
+                    delete window['tileCacheCallback_' + requestId];
+                  };
+                  
+                  // Timeout - 500ms sonra hala yanıt gelmezse placeholder
+                  setTimeout(function() {
+                    if (window['tileCacheCallback_' + requestId]) {
+                      delete window['tileCacheCallback_' + requestId];
+                      // Placeholder tile
+                      var canvas = document.createElement('canvas');
+                      canvas.width = 256;
+                      canvas.height = 256;
+                      var ctx = canvas.getContext('2d');
+                      ctx.fillStyle = '#f3f4f6';
+                      ctx.fillRect(0, 0, 256, 256);
+                      ctx.strokeStyle = '#e5e7eb';
+                      ctx.lineWidth = 1;
+                      ctx.strokeRect(0, 0, 256, 256);
+                      tile.src = canvas.toDataURL();
+                      if (done) done(null, tile);
+                    }
+                  }, 500);
+                } else {
+                  // ReactNativeWebView yok, placeholder
+                  var canvas = document.createElement('canvas');
+                  canvas.width = 256;
+                  canvas.height = 256;
+                  var ctx = canvas.getContext('2d');
+                  ctx.fillStyle = '#f3f4f6';
+                  ctx.fillRect(0, 0, 256, 256);
+                  tile.src = canvas.toDataURL();
+                  if (done) done(null, tile);
+                }
+                
+                return tile;
+              }
+            });
+            
+            tileLayer = new OfflineTileLayer('', {
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors (Offline)',
+              maxZoom: 19,
+              minZoom: 1,
+              bounds: null,
+              keepBuffer: 0
+            });
+          } else {
+            // Online modda: Backend proxy üzerinden yükle
+            // Version parametresi ile backend cache bypass (CartoDB'ye geçiş için)
+            tileLayer = L.tileLayer(window.API_URL + '/tiles/{z}/{x}/{y}.png?v=cartodb', {
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+              errorTileUrl: '',
+              maxZoom: 19,
+              minZoom: 1
+            });
+            
+            // Online modda - tile'ları cache'le
+            tileLayer.on('tileload', function(e) {
+              if (window.ReactNativeWebView && e.coords) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'cacheTile',
+                  z: e.coords.z,
+                  x: e.coords.x,
+                  y: e.coords.y
+                }));
+              }
+            });
+          }
+          
+          tileLayer.addTo(map);
 
           // Eğer harita üzerinde bir konum seçildiyse ve kamp alanı listeleniyorsa, harita zoomu tüm kamp alanlarını kapsayacak şekilde ayarlanır
           if (${mapMoveQuery ? 'true' : 'false'} && ${Array.isArray(markers) ? markers.length : 0} > 0) {
@@ -1541,6 +1919,36 @@ export default function MapScreen() {
         setShowMapPopup(true);
       } else if (data.type === 'popupclose') {
         setShowMapPopup(false);
+      } else if (data.type === 'requestCachedTile') {
+        // Offline modda cache'den tile iste
+        (async () => {
+          try {
+            const cachedTile = await getCachedTile(data.z, data.x, data.y);
+            // WebView'a yanıt gönder
+            if (webViewRef.current) {
+              webViewRef.current.injectJavaScript(`
+                if (window.tileCacheCallback_${data.requestId}) {
+                  window.tileCacheCallback_${data.requestId}(${cachedTile ? `"${cachedTile}"` : 'null'});
+                  delete window.tileCacheCallback_${data.requestId};
+                }
+                true;
+              `);
+            }
+          } catch (error) {
+            if (__DEV__) console.error('[MapTileCache] Cache okuma hatası:', error);
+          }
+        })();
+      } else if (data.type === 'cacheTile') {
+        // Online modda tile'ı cache'le
+        if (isConnected) {
+          (async () => {
+            try {
+              await cacheTile(data.z, data.x, data.y);
+            } catch (error) {
+              if (__DEV__) console.error('[MapTileCache] Cache yazma hatası:', error);
+            }
+          })();
+        }
       }
     } catch (error) {
       console.error('Error parsing WebView message:', error);
@@ -1966,6 +2374,12 @@ export default function MapScreen() {
           <Text style={styles.syncBannerText}>🔄 Lütfen senkronizasyonun tamamlanmasını bekleyin</Text>
         </View>
       )}
+      {/* Offline Mode Banner */}
+      {!isConnected && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>📵 Offline Mod - Cache'lenmiş harita gösteriliyor</Text>
+        </View>
+      )}
       {/* Location Picker Mode Banner */}
       {isLocationPickerMode && (
         <View style={styles.locationPickerBanner} pointerEvents={isBusy ? 'none' : 'auto'}>
@@ -2047,7 +2461,29 @@ export default function MapScreen() {
                     setIsWebViewReady(true);
                   }
                 }}
-                onError={() => setIsWebViewReady(false)}
+                onError={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  if (__DEV__) {
+                    console.warn('[WebView] Error:', nativeEvent);
+                  }
+                  setIsWebViewReady(false);
+                }}
+                onHttpError={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  if (__DEV__) {
+                    console.warn('[WebView] HTTP Error:', nativeEvent.statusCode);
+                  }
+                }}
+                onRenderProcessGone={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  if (__DEV__) {
+                    console.error('[WebView] Render process gone:', nativeEvent.didCrash);
+                  }
+                  // WebView crash oldu, yeniden yükle
+                  if (isMounted.current) {
+                    setMapKey(prev => prev + 1);
+                  }
+                }}
               />
             )}
             {/* Harita kaydırıldığında çıkan buton */}
@@ -2603,6 +3039,23 @@ const styles = StyleSheet.create({
     color: '#b91c1c',
     fontWeight: '700',
     flex: 1,
+    textAlign: 'center',
+  },
+  offlineBanner: {
+    backgroundColor: '#fef3c7',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f59e0b',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 99,
+  },
+  offlineBannerText: {
+    fontSize: 13,
+    color: '#92400e',
+    fontWeight: '600',
     textAlign: 'center',
   },
   debugText: {

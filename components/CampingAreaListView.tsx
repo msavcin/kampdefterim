@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -26,54 +26,14 @@ interface CampingAreaListViewProps {
   onToggleFavorite: (area: CampingArea) => void;
 }
 
-import * as Location from 'expo-location';
-import { getDatabase } from '../lib/database';
-import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { getMe } from '../lib/userCommunityApi';
-
 const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
+  campingAreas,
   onSelectArea,
   onNavigate,
   currentLocation,
   favorites,
   onToggleFavorite,
 }) => {
-  const [areas, setAreas] = useState<CampingArea[]>([]);
-  const isConnected = useNetworkStatus();
-
-  useEffect(() => {
-    let isMounted = true;
-    async function loadNearbyAreas() {
-      try {
-        // Kullanıcı konumunu al
-        const { coords } = await Location.getCurrentPositionAsync({});
-        // Lokal veritabanından yakın kamp alanlarını çek
-        const db = getDatabase();
-        const nearby = await db.searchCampingAreasByLocation(
-          coords.latitude,
-          coords.longitude,
-          50 // 50km radius
-        );
-        if (isMounted) setAreas(nearby);
-        // Arka planda tam senkronizasyon başlat
-        if (isConnected) {
-          try {
-            const user = await getMe();
-            const userId = user?.id;
-            if (userId) {
-              import('../lib/syncManager').then(({ syncAll }) => syncAll({ userId }));
-            }
-          } catch (e) {
-            console.log('[DEBUG] Kullanıcı bilgisi alınamadı, syncAll çağrısı atlandı:', e);
-          }
-        }
-      } catch (err) {
-        console.log('[DEBUG] Konum veya veri yükleme hatası:', err);
-      }
-    }
-    loadNearbyAreas();
-    return () => { isMounted = false; };
-  }, [isConnected]);
   const getTypeLabel = (type: string) => {
     return getCampingTypeLabel(type);
   };
@@ -158,20 +118,12 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
         onPress={() => onSelectArea(item)}
         activeOpacity={0.7}
       >
-        {/* Banner/Kapak Görseli */}
         <View style={styles.imageContainer}>
-          {coverImage ? (
-            <Image
-              source={{ uri: coverImage }}
-              style={styles.coverImage}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.placeholderImage}>
-              <Feather name="image" size={48} color="#9ca3af" />
-            </View>
-          )}
-          {/* Favori Butonu */}
+          <Image
+            source={coverImage ? { uri: coverImage } : require('../assets/images/image-placeholder.png')}
+            style={coverImage ? styles.coverImage : styles.placeholderCoverImage}
+            resizeMode={coverImage ? 'cover' : 'contain'}
+          />
           <TouchableOpacity
             style={[styles.favoriteButton, isFavorite && styles.favoriteButtonActive]}
             onPress={() => onToggleFavorite(item)}
@@ -180,7 +132,6 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* İçerik Alanı */}
         <View style={styles.contentContainer}>
           {/* Başlık */}
           <Text style={styles.title} numberOfLines={2}>
@@ -236,7 +187,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   return (
     <View style={styles.container}>
       <FlatList
-        data={areas}
+        data={campingAreas}
         renderItem={renderItem}
         keyExtractor={(item) => String((item as any).id)}
         contentContainerStyle={styles.listContent}
@@ -279,17 +230,18 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 180,
     position: 'relative',
+    backgroundColor: '#f3f4f6',
   },
   coverImage: {
     width: '100%',
     height: '100%',
   },
-  placeholderImage: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
+  placeholderCoverImage: {
+    width: '60%',
+    height: '60%',
+    alignSelf: 'center',
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
   favoriteButton: {
     position: 'absolute',

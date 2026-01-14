@@ -2,6 +2,18 @@
 
 ## Son Güncellemeler
 
+### ✨ Yeni Özellikler (2026-01-14)
+- **🗺️ Offline Harita Cache Sistemi**: Artık offline modda da harita kullanılabilir!
+  - Online modda görüntülediğiniz harita bölgeleri otomatik olarak cache'lenir
+  - **Akıllı Konum Takibi:** Konumunuz 1 km'den fazla değiştiğinde otomatik cache başlar
+  - **20 km Çapında Cache:** Her konum değişikliğinde 20 km çapında bölge indirilir
+  - **Çoklu Zoom Seviyesi:** 5 farklı zoom seviyesinde (9-13) toplam ~453 tile
+  - **Duplicate Cache Önleme:** Daha önce cache'lenmiş bölgeler (5 km içinde) tekrar indirilmez
+  - Maksimum 500 tile (yaklaşık 20-30 farklı bölge) depolanır
+  - Offline modda cache'lenmiş bölgeler sorunsuz görüntülenir
+  - Sarı banner ile offline mod durumu bildirilir
+  - Detaylı dokümantasyon: [OFFLINE_MAP_CACHE.md](OFFLINE_MAP_CACHE.md)
+
 ### Düzeltilen Hatalar
 - **AddChecklistItemModal.tsx**: Duplicate `useState` import hatası düzeltildi
   - İki ayrı import satırı tek satırda birleştirildi
