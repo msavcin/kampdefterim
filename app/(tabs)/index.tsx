@@ -56,6 +56,7 @@ import { getMe, listCommunityMembers } from '@/lib/userCommunityApi';
 import { API_URL } from '@/lib/config';
 import { UserPlus } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
+import { on as onEvent, off as offEvent } from '@/lib/eventBus';
 import { Animated, Easing, AppState } from 'react-native';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -150,9 +151,18 @@ export default function MapScreen() {
     }, [navigation])
   );
 
+  // Router hook
+  const router = useRouter();
+
   // Component mount durumunu takip etmek için ref
   const isMounted = useRef(true);
   const timeoutRefs = useRef<number[]>([]);
+  const routerRef = useRef(router);
+  
+  // Router ref'ini güncelle
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
   
   // Sync progress tracking
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, isLoading: false });
@@ -210,60 +220,178 @@ export default function MapScreen() {
   // Duyurular ve checklist arka plan fetch fonksiyonları
   // Yeni duyuru bildirimi için localde gösterilen duyuru id'lerini sakla
   const fetchAnnouncementsSilently = async (router: any, skipNotification = false) => {
-    if (__DEV__) console.log('[ANNOUNCEMENT] fetchAnnouncementsSilently çağrıldı, skipNotification:', skipNotification, 'isFullSyncInProgressRef:', isFullSyncInProgressRef.current);
+    const functionStartTime = Date.now();
+    // Eğer zaten fetch ediliyorsa tekrarı atla
+    if (isFetchingAnnouncementsRef.current) {
+      if (__DEV__) console.log('[ANNOUNCEMENT] fetchAnnouncementsSilently: Zaten devam eden işlem var, atlanıyor');
+      return;
+    }
+    isFetchingAnnouncementsRef.current = true;
+    if (__DEV__) console.log('[ANNOUNCEMENT] fetchAnnouncementsSilently BAŞLADI, skipNotification:', skipNotification, 'isFullSyncInProgressRef:', isFullSyncInProgressRef.current);
     try {
-      // Kullanıcıyı çek
-      const user = await getMe();
       // Önce localde gösterilen duyuru id'lerini al
       const shownAnnouncementIdsStr = await AsyncStorage.getItem('shownAnnouncementIds');
       const shownAnnouncementIds = shownAnnouncementIdsStr ? JSON.parse(shownAnnouncementIdsStr) : [];
-      // Duyuruları fetch et
+      const isFirstLaunch = shownAnnouncementIds.length === 0;
       const db = getDatabase();
-      // Konum bilgisini al ve valilik_id bul
-      let matchedValilikIdLocal = null;
+
+      // İlk açılış: konum bazlı görünürlük kontrolü için önce kısa bir konum denemesi yap
+      let matchedValilikIdLocal: any = null;
       try {
-        const location = await Location.getCurrentPositionAsync({});
+        const locationPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 500));
+        const location = await Promise.race([locationPromise, timeoutPromise]) as any;
         if (location && location.coords) {
           const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
           if (provinceName) {
             const normalized = provinceName.toLocaleLowerCase('tr').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u').replace(/Ç/g, 'c').replace(/Ğ/g, 'g').replace(/İ/g, 'i').replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u').replace(/\s+/g, '');
             const { districtToProvinceMap, provinceNameToValilikId } = require('@/lib/provinceMap');
             const matchedProvince = districtToProvinceMap[normalized] || null;
-            if (matchedProvince) {
-              matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
-            }
+            if (matchedProvince) matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
           }
         }
-      } catch {}
-      // Aktif duyuruları çek
+      } catch (err) {
+        if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış için konum alınamadı (timeout veya hata):', err?.message);
+      }
+
+      // İlk açılış: local DB'deki duyuruları hemen göster ve çık (hızlı yol)
+      if (isFirstLaunch) {
+        if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Lokal veritabanından hızlı gösterim başlatılıyor');
+        const allAnnouncementsLocal = await db.listAnnouncementsLocal({ onlyActive: true });
+
+        // Konum/valilik filtresi uygula (sadece genel/valilik duyurularına)
+        let visibleAnnouncementsLocal = allAnnouncementsLocal;
+        if (matchedValilikIdLocal && Array.isArray(allAnnouncementsLocal)) {
+          visibleAnnouncementsLocal = allAnnouncementsLocal.filter(a => {
+            if (a.community_id === 0) {
+              return String(a.valilik_id) === String(matchedValilikIdLocal);
+            }
+            return true;
+          });
+        }
+
+        if (Array.isArray(visibleAnnouncementsLocal) && visibleAnnouncementsLocal.length > 0) {
+          if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Lokal veritabanındaki (görünür) duyuru sayısı gösteriliyor (hızlı yol):', visibleAnnouncementsLocal.length);
+          const visibleIds = visibleAnnouncementsLocal.map(a => a.id);
+          await AsyncStorage.setItem('shownAnnouncementIds', JSON.stringify(visibleIds));
+
+          if (!skipNotification && !isFullSyncInProgressRef.current) {
+            setNotifications([{
+              id: visibleAnnouncementsLocal[0].id,
+              type: 'announcement',
+              message: `${visibleAnnouncementsLocal.length} duyurunuz var!`,
+              goto: () => router.push('/announcements'),
+            }]);
+            setNotificationIndex(0);
+            setShowNotificationBar(true);
+            setTimeout(() => setShowNotificationBar(false), 5000);
+          }
+          return;
+        }
+      }
+
+      // Lokal duyuruları kontrol et (yeni local duyuru varsa hemen göster)
+      if (__DEV__) console.log('[ANNOUNCEMENT] Lokal duyurular çekiliyor (hızlı kontrol)...');
+      const dbStartTime = Date.now();
+      const allAnnouncementsLocal = await db.listAnnouncementsLocal({ onlyActive: true });
+      const dbDuration = Date.now() - dbStartTime;
+      if (__DEV__) console.log(`[ANNOUNCEMENT] Lokal duyurular çekildi (hızlı kontrol: ${dbDuration}ms, ${Array.isArray(allAnnouncementsLocal) ? allAnnouncementsLocal.length : 0} kayıt)`);
+
+      // Eğer daha önce ilk açılışta alınan matchedValilikIdLocal varsa kullan, yoksa null kalacak ve filtre uygulanmayacak
+      let filteredLocalAnnouncements = allAnnouncementsLocal;
+      if (typeof matchedValilikIdLocal !== 'undefined' && matchedValilikIdLocal) {
+        filteredLocalAnnouncements = Array.isArray(allAnnouncementsLocal)
+          ? allAnnouncementsLocal.filter(a => {
+              if (a.community_id === 0) {
+                return String(a.valilik_id) === String(matchedValilikIdLocal);
+              }
+              return true;
+            })
+          : [];
+      }
+
+      const newAnnouncementsLocal = Array.isArray(filteredLocalAnnouncements)
+        ? filteredLocalAnnouncements.filter((a: any) => !shownAnnouncementIds.includes(a.id))
+        : [];
+
+      if (Array.isArray(newAnnouncementsLocal) && newAnnouncementsLocal.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
+        if (__DEV__) console.log('[ANNOUNCEMENT] Lokal yeni duyuru bulundu, gösteriliyor (hızlı yol):', newAnnouncementsLocal.length);
+        const updatedIds = [...shownAnnouncementIds, ...newAnnouncementsLocal.map(a => a.id)];
+        await AsyncStorage.setItem('shownAnnouncementIds', JSON.stringify(updatedIds));
+        setNotifications([{
+          id: newAnnouncementsLocal[0].id,
+          type: 'announcement',
+          message: `Okunmamış ${newAnnouncementsLocal.length} yeni duyurunuz var!`,
+          goto: () => router.push('/announcements'),
+        }]);
+        setNotificationIndex(0);
+        setShowNotificationBar(true);
+        setTimeout(() => {
+          if (isMounted.current) setShowNotificationBar(false);
+        }, 30000);
+        return;
+      }
+
+      // Localde yeni yoksa, daha detaylı kontrol: kullanıcı, konum ve API
+      const userStartTime = Date.now();
+      const user = await getMe();
+      const userDuration = Date.now() - userStartTime;
+      if (__DEV__) console.log(`[ANNOUNCEMENT] getMe() tamamlandı (${userDuration}ms)`);
+
+      // Konum bilgisini al ve valilik_id bul (kısa timeout) — yalnızca daha önce belirlenmediyse çalıştır
+      if (!matchedValilikIdLocal) {
+        try {
+          const locationPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 500));
+          const location = await Promise.race([locationPromise, timeoutPromise]) as any;
+          if (location && location.coords) {
+            const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
+            if (provinceName) {
+              const normalized = provinceName.toLocaleLowerCase('tr').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u').replace(/Ç/g, 'c').replace(/Ğ/g, 'g').replace(/İ/g, 'i').replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u').replace(/\s+/g, '');
+              const { districtToProvinceMap, provinceNameToValilikId } = require('@/lib/provinceMap');
+              const matchedProvince = districtToProvinceMap[normalized] || null;
+              if (matchedProvince) matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
+            }
+          }
+        } catch (err) {
+          if (__DEV__) console.log('[ANNOUNCEMENT] Konum alınamadı (timeout veya hata):', err?.message);
+        }
+      }
+
+      // Aktif duyuruları local DB'den tekrar al (valilik filtresi uygulanacak)
+      if (__DEV__) console.log('[ANNOUNCEMENT] Lokal duyurular tekrar çekiliyor (filtre uygulanacak)...');
       let allAnnouncements = await db.listAnnouncementsLocal({ onlyActive: true });
-      // Valilik_id filtresi sadece genel duyurular (community_id === 0) için uygula
-      // Topluluk duyuruları (community_id !== 0) direkt kabul edilir
       if (matchedValilikIdLocal) {
+        // Valilik filtresi uygula
         allAnnouncements = allAnnouncements.filter(a => {
           if (a.community_id === 0) {
-            // Genel duyuru: valilik_id kontrolü yap
             return String(a.valilik_id) === String(matchedValilikIdLocal);
           }
-          // Topluluk duyurusu: direkt kabul et
           return true;
         });
       }
-      const valilikAnnouncements = allAnnouncements.filter(a => a.community_id === 0);
-      const communityAnnouncements = allAnnouncements.filter(a => a.community_id !== 0);
-      // Son güncelleme sonrası eşitlenen duyurulara göre yeni duyuruları bul
-      let newAnnouncements = Array.isArray(allAnnouncements)
+      // Yeni duyuruları local'den hesapla (henüz API'ye gerek yoksa bu hızlı yol kullanılır)
+      let newAnnouncements: any[] = Array.isArray(allAnnouncements)
         ? allAnnouncements.filter((a: any) => !shownAnnouncementIds.includes(a.id))
         : [];
       // Eğer localde yoksa API'den çek
       if (!Array.isArray(allAnnouncements) || allAnnouncements.length === 0) {
         try {
+          if (__DEV__) console.log('[ANNOUNCEMENT] API çağrısı başlatılıyor...');
+          const apiStartTime = Date.now();
           // Hem valilik duyurularını (community_id=0) hem de topluluk duyurularını çek
           const promises = [listAnnouncements(0)]; // Valilik duyuruları
           if (user?.community_id && user.community_id !== 0) {
             promises.push(listAnnouncements(user.community_id)); // Topluluk duyuruları
           }
-          const results = await Promise.all(promises);
+          // API çağrısına timeout ekle (3 saniye)
+          const apiPromise = Promise.all(promises);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('API timeout')), 3000)
+          );
+          const results = await Promise.race([apiPromise, timeoutPromise]) as any[];
+          const apiDuration = Date.now() - apiStartTime;
+          if (__DEV__) console.log(`[ANNOUNCEMENT] API çağrısı tamamlandı (${apiDuration}ms)`);
           allAnnouncements = ([] as any[]).concat(...results);
           // Duplicate id'leri filtrele
           const seen = new Set();
@@ -273,6 +401,7 @@ export default function MapScreen() {
             return true;
           });
         } catch (e) {
+          if (__DEV__) console.log('[ANNOUNCEMENT] API çağrısı hatası:', e?.message);
           console.warn('Duyurular fetch hatası:', e);
           allAnnouncements = [];
         }
@@ -317,11 +446,14 @@ export default function MapScreen() {
       }
     } catch (e) {
       if (__DEV__) console.warn('Duyuru bildirim fetch hatası:', e);
+    } finally {
+      isFetchingAnnouncementsRef.current = false;
+      const functionDuration = Date.now() - functionStartTime;
+      if (__DEV__) console.log(`[ANNOUNCEMENT] fetchAnnouncementsSilently TAMAMLANDI (Toplam: ${functionDuration}ms)`);
     }
   };
 
   // Checklist arka plan fetch fonksiyonu kaldırıldı. Checklist işlemleri için custom hook veya context kullanılmalı.
-  const router = useRouter();
   // Bildirim alanı için state
   const [notifications, setNotifications] = useState<any[]>([]);
   const [notificationIndex, setNotificationIndex] = useState(0);
@@ -626,7 +758,7 @@ export default function MapScreen() {
             // İlk kez, bilgilendirme göster
             Alert.alert(
               'Offline Mod: Kısıtlı Özellikler',
-              'Konum izniniz "Yalnızca uygulama kullanılırken" olarak ayarlandı.\n\n✅ Manuel harita cache yapabilirsiniz\n❌ Otomatik arka plan senkronizasyonu devre dışı\n\nTam özellikler için: Ayarlar > Uygulamalar > Kamp Defterim > Konum > "Her zaman izin ver"',
+              'Konum izniniz "Yalnızca uygulama kullanılırken" olarak ayarlandı.\n\n✅ Manuel harita cache yapabilirsiniz\n❌ Otomatik arka plan senkronizasyonu devre dışı\n\nTam özellikler için: Ayarlar > Uygulamalar > Kamp Defterim > Konum > "Her zaman izin ver\n\n\nProfil sayfasından da konum izninizi düzenleyebilirsiniz."',
               [
                 {
                   text: 'Anladım',
@@ -981,8 +1113,20 @@ export default function MapScreen() {
 
   // AppState listener: Uygulama arka plandan ön plana geldiğinde veri yenile
   useEffect(() => {
+    let lastActiveTime = 0;
+    const MIN_INTERVAL = 2000; // En az 2 saniye arayla tetiklenmesine izin ver
+    
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active' && isMounted.current) {
+        const now = Date.now();
+        
+        // Çok sık tetiklenmeyi önle (debounce)
+        if (now - lastActiveTime < MIN_INTERVAL) {
+          if (__DEV__) console.log('[DEBUG] AppState tetikleme çok sık, atlanıyor');
+          return;
+        }
+        
+        lastActiveTime = now;
         if (__DEV__) console.log('[DEBUG] Uygulama ön plana geldi, veriler yenileniyor...');
         
         // Önceki timeout'u temizle
@@ -1004,7 +1148,7 @@ export default function MapScreen() {
           }
           // Duyuruları da yenile (full sync sırasında bildirim gösterme)
           try {
-            fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
+            fetchAnnouncementsSilently(routerRef.current, isFullSyncInProgressRef.current);
           } catch (err) {
             if (__DEV__) console.warn('[AppState] fetchAnnouncements error:', err);
           }
@@ -1018,7 +1162,23 @@ export default function MapScreen() {
         clearTimeout(appStateTimeoutRef.current);
       }
     };
-  }, [router]);
+  }, []); // Dependency array boş - router yerine ref kullan
+
+  // Arka plandan/periodik sync sonrası yeni duyuru event'lerini dinle
+  useEffect(() => {
+    const handler = (payload: any) => {
+      if (__DEV__) console.log('[ANNOUNCEMENT][EVENT] Yeni duyuru event alındı:', payload);
+      try {
+        fetchAnnouncementsSilently(routerRef.current, false);
+      } catch (e) {
+        if (__DEV__) console.warn('[ANNOUNCEMENT][EVENT] fetchAnnouncementsSilently hata:', e);
+      }
+    };
+    onEvent('announcements:new', handler);
+    return () => {
+      offEvent('announcements:new', handler);
+    };
+  }, []);
 
   // Konum izni durumunu kontrol et
   useEffect(() => {
@@ -1114,6 +1274,8 @@ export default function MapScreen() {
   // API senkronizasyonu sadece ilk mount'ta çalışsın
   const isSyncingRef = useRef(false);
   const hasInitialSyncRef = useRef(false);
+  // Duyuru fetch işlemlerinin çakışmasını önlemek için ref
+  const isFetchingAnnouncementsRef = useRef(false);
   
   // İlk açılışta API'dan senkronizasyon
   useEffect(() => {

@@ -1234,41 +1234,96 @@ export default function ProfileScreen(props: any) {
                   const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
                   
                   let statusText = '';
+                  let needsPermission = false;
+                  
                   if (foregroundStatus === 'granted' && backgroundStatus === 'granted') {
                     statusText = '✅ Her zaman izin verilmiş (Offline mod aktif)';
                   } else if (foregroundStatus === 'granted') {
                     statusText = '⚠️ Yalnızca uygulamayı kullanırken (Offline mod için "Her zaman" gerekli)';
+                    needsPermission = true;
                   } else {
                     statusText = '❌ İzin verilmemiş';
+                    needsPermission = true;
                   }
+                  
+                  const buttons: any[] = [
+                    { text: 'Kapat', style: 'cancel' }
+                  ];
+                  
+                  if (needsPermission) {
+                    // Önce izin iste
+                    buttons.push({
+                      text: 'İzin İste',
+                      onPress: async () => {
+                        try {
+                          // Önce foreground izni iste
+                          if (foregroundStatus !== 'granted') {
+                            const { status: newForegroundStatus } = await Location.requestForegroundPermissionsAsync();
+                            if (newForegroundStatus !== 'granted') {
+                              Alert.alert('Uyarı', 'Konum izni verilmedi. Offline mod için izin gereklidir.');
+                              return;
+                            }
+                          }
+                          
+                          // Sonra background izni iste
+                          const { status: newBackgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+                          if (newBackgroundStatus === 'granted') {
+                            Alert.alert('Başarılı', 'Konum izni verildi! Artık offline mod kullanabilirsiniz.');
+                          } else {
+                            Alert.alert(
+                              'Uyarı', 
+                              'Arka plan konum izni verilmedi. Lütfen ayarlardan "Her zaman izin ver" seçeneğini seçin.',
+                              [
+                                { text: 'Tamam', style: 'cancel' },
+                                {
+                                  text: 'Ayarları Aç',
+                                  onPress: () => {
+                                    if (Platform.OS === 'ios') {
+                                      Linking.openURL('app-settings:');
+                                    } else {
+                                      Linking.openSettings();
+                                    }
+                                  }
+                                }
+                              ]
+                            );
+                          }
+                        } catch (error) {
+                          console.error('[Location Permission] Hata:', error);
+                          Alert.alert('Hata', 'Konum izni istenemedi.');
+                        }
+                      }
+                    });
+                  }
+                  
+                  buttons.push({
+                    text: 'Ayarları Aç',
+                    onPress: () => {
+                      if (Platform.OS === 'ios') {
+                        Linking.openURL('app-settings:');
+                      } else {
+                        Linking.openSettings();
+                      }
+                    }
+                  });
+                  
+                  buttons.push({
+                    text: 'Uyarıyı Sıfırla',
+                    onPress: async () => {
+                      // Tüm offline mod uyarı flag'lerini sıfırla
+                      await AsyncStorage.removeItem('offlineLimitedModeAlertSeen');
+                      Alert.alert('Başarılı', 'Konum izni uyarısı sıfırlandı. Uygulamayı yeniden başlattığınızda tekrar gösterilecek.');
+                    },
+                    style: 'default'
+                  });
                   
                   Alert.alert(
                     'Konum İzni Durumu',
-                    `Mevcut durum: ${statusText}\n\nOffline harita özelliğini kullanabilmek için "Her zaman izin ver" seçeneğini seçmelisiniz.`,
-                    [
-                      { text: 'Kapat', style: 'cancel' },
-                      {
-                        text: 'Ayarları Aç',
-                        onPress: () => {
-                          if (Platform.OS === 'ios') {
-                            Linking.openURL('app-settings:');
-                          } else {
-                            Linking.openSettings();
-                          }
-                        }
-                      },
-                      {
-                        text: 'Uyarıyı Sıfırla',
-                        onPress: async () => {
-                          // Tüm offline mod uyarı flag'lerini sıfırla
-                          await AsyncStorage.removeItem('offlineLimitedModeAlertSeen');
-                          Alert.alert('Başarılı', 'Konum izni uyarısı sıfırlandı. Uygulamayı yeniden başlattığınızda tekrar gösterilecek.');
-                        },
-                        style: 'default'
-                      }
-                    ]
+                    `Mevcut durum: ${statusText}\n\nOffline harita özelliğini kullanabilmek için "Her zaman izin ver" seçeneğini seçmelisiniz.\n\nAndroid 11+ cihazlarda, önce "Uygulamayı kullanırken" seçip ardından ayarlardan "Her zaman" olarak değiştirmeniz gerekebilir.`,
+                    buttons
                   );
                 } catch (error) {
+                  console.error('[Location Permission Check] Hata:', error);
                   Alert.alert('Hata', 'Konum izni kontrol edilirken bir hata oluştu.');
                 }
               }}

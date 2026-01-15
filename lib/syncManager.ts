@@ -27,13 +27,22 @@ export function stopAnnouncementSyncBackground() {
 }
 // --- DUYURU SENKRONİZASYONU ---
 import { API_URL } from './config';
+import { emit } from './eventBus';
 
 // Online ise API'den duyuruları çekip lokal veritabanına kaydeder
 export async function syncAnnouncements() {
   const db = getDatabase();
   try {
-    await db.fetchAndStoreAnnouncementsFromAPI(API_URL + '/announcements/', true);
-    if (__DEV__) console.log('[syncAnnouncements] ✅ Duyurular başarıyla senkronize edildi');
+    const inserted = await db.fetchAndStoreAnnouncementsFromAPI(API_URL + '/announcements/', true);
+    if (__DEV__) console.log('[syncAnnouncements] ✅ Duyurular başarıyla senkronize edildi, inserted:', inserted);
+    try {
+      if (inserted && inserted > 0) {
+        // Arka planda yeni duyuru bulunduğunu yayınla
+        emit('announcements:new', { count: inserted });
+      }
+    } catch (e) {
+      console.warn('[syncAnnouncements] event emit hatası:', e);
+    }
     return true;
   } catch (error) {
     if (error instanceof Error) {

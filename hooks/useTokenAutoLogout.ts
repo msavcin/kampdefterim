@@ -11,57 +11,72 @@ const TEST_TIMEOUT_SECONDS = 30;
 export default function useTokenAutoLogout() {
   const router = useRouter();
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const routerRef = useRef(router);
+  const checkingRef = useRef(false);
+
+  // Router'ı ref'te güncelle
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
 
   useEffect(() => {
     async function checkToken() {
-      const token = await getToken();
-      
-      // Token yoksa kontrol etmeye gerek yok
-      if (!token) {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-        return;
-      }
+      // Eğer zaten kontrol yapılıyorsa, tekrar etme
+      if (checkingRef.current) return;
+      checkingRef.current = true;
 
       try {
-        const decoded: any = jwtDecode(token);
-        if (decoded && decoded.exp) {
-          const now = Date.now() / 1000;
-          let expiresIn = decoded.exp - now;
-
-          // TEST MODU: Token süresini zorla kısalt
-          if (TEST_MODE) {
-            expiresIn = TEST_TIMEOUT_SECONDS;
-            console.log(`[TOKEN - TEST MODU] Token ${TEST_TIMEOUT_SECONDS} saniye sonra otomatik sona erecek`);
-          } else {
-            console.log(`[TOKEN] Token süre kontrolü: ${Math.floor(expiresIn / 60)} dakika kaldı`);
-          }
-
-          if (expiresIn <= 0) {
-            console.log('[TOKEN] Token süresi dolmuş, çıkış yapılıyor');
-            await removeToken();
-            router.replace('/(auth)/login');
-            return;
-          }
-
-          // Mevcut timeout'u temizle
+        const token = await getToken();
+        
+        // Token yoksa kontrol etmeye gerek yok
+        if (!token) {
           if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
           }
-
-          // Yeni timeout oluştur
-          timeoutRef.current = setTimeout(async () => {
-            console.log('[TOKEN] Token süresi doldu, otomatik çıkış yapılıyor');
-            await removeToken();
-            router.replace('/(auth)/login');
-          }, expiresIn * 1000);
+          return;
         }
-      } catch (e) {
-        console.error('[TOKEN] Token decode hatası, çıkış yapılıyor:', e);
-        await removeToken();
-        router.replace('/(auth)/login');
+
+        try {
+          const decoded: any = jwtDecode(token);
+          if (decoded && decoded.exp) {
+            const now = Date.now() / 1000;
+            let expiresIn = decoded.exp - now;
+
+            // TEST MODU: Token süresini zorla kısalt
+            if (TEST_MODE) {
+              expiresIn = TEST_TIMEOUT_SECONDS;
+              if (__DEV__) console.log(`[TOKEN - TEST MODU] Token ${TEST_TIMEOUT_SECONDS} saniye sonra otomatik sona erecek`);
+            } else {
+              if (__DEV__) console.log(`[TOKEN] Token süre kontrolü: ${Math.floor(expiresIn / 60)} dakika kaldı`);
+            }
+
+            if (expiresIn <= 0) {
+              console.log('[TOKEN] Token süresi dolmuş, çıkış yapılıyor');
+              await removeToken();
+              routerRef.current.replace('/(auth)/login');
+              return;
+            }
+
+            // Mevcut timeout'u temizle
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+            }
+
+            // Yeni timeout oluştur
+            timeoutRef.current = setTimeout(async () => {
+              console.log('[TOKEN] Token süresi doldu, otomatik çıkış yapılıyor');
+              await removeToken();
+              routerRef.current.replace('/(auth)/login');
+            }, expiresIn * 1000);
+          }
+        } catch (e) {
+          console.error('[TOKEN] Token decode hatası, çıkış yapılıyor:', e);
+          await removeToken();
+          routerRef.current.replace('/(auth)/login');
+        }
+      } finally {
+        checkingRef.current = false;
       }
     }
 
@@ -71,15 +86,15 @@ export default function useTokenAutoLogout() {
     // AppState değişikliklerini dinle (uygulama ön plana geldiğinde kontrol et)
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active') {
-        console.log('[TOKEN] Uygulama ön plana geldi, token kontrol ediliyor');
+        if (__DEV__) console.log('[TOKEN] Uygulama ön plana geldi, token kontrol ediliyor');
         checkToken();
       }
     });
 
-    // Her 1 dakikada bir periyodik kontrol
+    // Her 5 dakikada bir periyodik kontrol (1 dakikadan 5 dakikaya çıkarıldı)
     const interval = setInterval(() => {
       checkToken();
-    }, 60000); // 60 saniye
+    }, 300000); // 5 dakika
 
     return () => {
       if (timeoutRef.current) {
@@ -88,5 +103,5 @@ export default function useTokenAutoLogout() {
       clearInterval(interval);
       subscription.remove();
     };
-  }, [router]);
+  }, []); // Dependency array boş - sadece bir kez mount
 }

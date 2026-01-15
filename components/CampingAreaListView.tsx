@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Dimensions,
   Linking,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { MapPin, Navigation, Info } from 'lucide-react-native';
@@ -34,6 +35,8 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   favorites,
   onToggleFavorite,
 }) => {
+  const [loadingImages, setLoadingImages] = useState<Set<string | number>>(new Set());
+
   const getTypeLabel = (type: string) => {
     return getCampingTypeLabel(type);
   };
@@ -111,6 +114,19 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
     const distance = item.distance_km ? `${item.distance_km.toFixed(1)} km` : '';
     const areaId = (item as any).id;
     const isFavorite = favorites.has(areaId);
+    const isImageLoading = loadingImages.has(areaId);
+
+    const handleImageLoadStart = () => {
+      setLoadingImages(prev => new Set(prev).add(areaId));
+    };
+
+    const handleImageLoadEnd = () => {
+      setLoadingImages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(areaId);
+        return newSet;
+      });
+    };
 
     return (
       <TouchableOpacity
@@ -123,7 +139,15 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
             source={coverImage ? { uri: coverImage } : require('../assets/images/image-placeholder.png')}
             style={coverImage ? styles.coverImage : styles.placeholderCoverImage}
             resizeMode={coverImage ? 'cover' : 'contain'}
+            onLoadStart={coverImage ? handleImageLoadStart : undefined}
+            onLoadEnd={coverImage ? handleImageLoadEnd : undefined}
+            onError={coverImage ? handleImageLoadEnd : undefined}
           />
+          {isImageLoading && coverImage && (
+            <View style={styles.loadingOverlay}>
+              <ActivityIndicator size="large" color="#059669" />
+            </View>
+          )}
           <TouchableOpacity
             style={[styles.favoriteButton, isFavorite && styles.favoriteButtonActive]}
             onPress={() => onToggleFavorite(item)}
@@ -242,6 +266,16 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginTop: 'auto',
     marginBottom: 'auto',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   favoriteButton: {
     position: 'absolute',
