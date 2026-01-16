@@ -1,7 +1,7 @@
 /**
  * Delta Sync için son senkronizasyon zamanını yöneten yardımcı fonksiyonlar
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const LAST_CAMPING_AREA_SYNC_KEY = 'lastCampingAreaSync';
 
@@ -11,7 +11,7 @@ const LAST_CAMPING_AREA_SYNC_KEY = 'lastCampingAreaSync';
  */
 export async function setLastCampingAreaSync(timestamp: string): Promise<void> {
   try {
-    await AsyncStorage.setItem(LAST_CAMPING_AREA_SYNC_KEY, timestamp);
+    await SecureStore.setItemAsync(LAST_CAMPING_AREA_SYNC_KEY, timestamp);
     console.log('[deltaSyncStorage] Son sync zamanı kaydedildi:', timestamp);
   } catch (error) {
     console.error('[deltaSyncStorage] Son sync zamanı kaydedilemedi:', error);
@@ -24,7 +24,7 @@ export async function setLastCampingAreaSync(timestamp: string): Promise<void> {
  */
 export async function getLastCampingAreaSync(): Promise<string | null> {
   try {
-    const timestamp = await AsyncStorage.getItem(LAST_CAMPING_AREA_SYNC_KEY);
+    const timestamp = await SecureStore.getItemAsync(LAST_CAMPING_AREA_SYNC_KEY);
     return timestamp;
   } catch (error) {
     console.error('[deltaSyncStorage] Son sync zamanı alınamadı:', error);
@@ -37,7 +37,7 @@ export async function getLastCampingAreaSync(): Promise<string | null> {
  */
 export async function clearLastCampingAreaSync(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(LAST_CAMPING_AREA_SYNC_KEY);
+    await SecureStore.deleteItemAsync(LAST_CAMPING_AREA_SYNC_KEY);
     console.log('[deltaSyncStorage] Son sync zamanı temizlendi');
   } catch (error) {
     console.error('[deltaSyncStorage] Son sync zamanı temizlenemedi:', error);
@@ -56,16 +56,16 @@ const FULL_SYNC_INTERVAL = 10; // Her 10 delta sync'de bir full check
  */
 export async function incrementAnnouncementSyncCounter(): Promise<boolean> {
   try {
-    const counterStr = await AsyncStorage.getItem(ANNOUNCEMENT_SYNC_COUNTER_KEY);
+    const counterStr = await SecureStore.getItemAsync(ANNOUNCEMENT_SYNC_COUNTER_KEY);
     const counter = counterStr ? parseInt(counterStr, 10) : 0;
     const newCounter = counter + 1;
     
     if (newCounter >= FULL_SYNC_INTERVAL) {
-      await AsyncStorage.setItem(ANNOUNCEMENT_SYNC_COUNTER_KEY, '0');
+      await SecureStore.setItemAsync(ANNOUNCEMENT_SYNC_COUNTER_KEY, '0');
       console.log('[deltaSyncStorage] Sync counter reset, full check gerekli');
       return true;
     } else {
-      await AsyncStorage.setItem(ANNOUNCEMENT_SYNC_COUNTER_KEY, String(newCounter));
+      await SecureStore.setItemAsync(ANNOUNCEMENT_SYNC_COUNTER_KEY, String(newCounter));
       console.log('[deltaSyncStorage] Sync counter:', newCounter);
       return false;
     }
@@ -81,7 +81,7 @@ export async function incrementAnnouncementSyncCounter(): Promise<boolean> {
  */
 export async function setLastAnnouncementSync(timestamp: string): Promise<void> {
   try {
-    await AsyncStorage.setItem(LAST_ANNOUNCEMENT_SYNC_KEY, timestamp);
+    await SecureStore.setItemAsync(LAST_ANNOUNCEMENT_SYNC_KEY, timestamp);
     console.log('[deltaSyncStorage] Son duyuru sync zamanı kaydedildi:', timestamp);
   } catch (error) {
     console.error('[deltaSyncStorage] Son duyuru sync zamanı kaydedilemedi:', error);
@@ -94,7 +94,7 @@ export async function setLastAnnouncementSync(timestamp: string): Promise<void> 
  */
 export async function getLastAnnouncementSync(): Promise<string | null> {
   try {
-    const timestamp = await AsyncStorage.getItem(LAST_ANNOUNCEMENT_SYNC_KEY);
+    const timestamp = await SecureStore.getItemAsync(LAST_ANNOUNCEMENT_SYNC_KEY);
     return timestamp;
   } catch (error) {
     console.error('[deltaSyncStorage] Son duyuru sync zamanı alınamadı:', error);
@@ -107,7 +107,7 @@ export async function getLastAnnouncementSync(): Promise<string | null> {
  */
 export async function clearLastAnnouncementSync(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(LAST_ANNOUNCEMENT_SYNC_KEY);
+    await SecureStore.deleteItemAsync(LAST_ANNOUNCEMENT_SYNC_KEY);
     console.log('[deltaSyncStorage] Son duyuru sync zamanı temizlendi');
   } catch (error) {
     console.error('[deltaSyncStorage] Son duyuru sync zamanı temizlenemedi:', error);

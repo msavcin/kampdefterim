@@ -1,3 +1,4 @@
+import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import { clearTileCache, getTileCacheStats } from '@/lib/mapTileCache';
 // Sunucu eşleştirme fonksiyonu: source_id:1 olan tüm kamp alanlarını lokal veritabanına kaydet
@@ -45,7 +46,7 @@ import { API_URL } from '@/lib/config';
 import { syncPendingChanges } from '@/lib/syncPendingChanges';
 import React, { useEffect, useState } from 'react';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { View, Text, Image, Button, StyleSheet, ActivityIndicator, ScrollView, Switch, Alert, TouchableOpacity, Modal, TextInput, BackHandler, Linking, Platform } from 'react-native';
 import { Friend } from '../../types/friend';
 import FriendAvatar from '../../components/FriendAvatar';
@@ -159,7 +160,7 @@ export default function ProfileScreen(props: any) {
       // Bildirim gösterme mantığı
       if (showNotification && mapped.length > 0) {
         try {
-          const shownIdsStr = await AsyncStorage.getItem('shownFriendRequestIds');
+          const shownIdsStr = await SecureStore.getItemAsync('shownFriendRequestIds');
           const shownIds = shownIdsStr ? JSON.parse(shownIdsStr) : [];
           const newRequests = mapped.filter(req => !shownIds.includes(req.id));
           if (newRequests.length > 0) {
@@ -169,7 +170,7 @@ export default function ProfileScreen(props: any) {
               [
                 { text: 'Tamam', onPress: async () => {
                   const allIds = [...shownIds, ...newRequests.map(r => r.id)];
-                  await AsyncStorage.setItem('shownFriendRequestIds', JSON.stringify(allIds));
+                  await SecureStore.setItemAsync('shownFriendRequestIds', JSON.stringify(allIds));
                 }}
               ]
             );
@@ -1311,7 +1312,7 @@ export default function ProfileScreen(props: any) {
                     text: 'Uyarıyı Sıfırla',
                     onPress: async () => {
                       // Tüm offline mod uyarı flag'lerini sıfırla
-                      await AsyncStorage.removeItem('offlineLimitedModeAlertSeen');
+                      await SecureStore.deleteItemAsync('offlineLimitedModeAlertSeen');
                       Alert.alert('Başarılı', 'Konum izni uyarısı sıfırlandı. Uygulamayı yeniden başlattığınızda tekrar gösterilecek.');
                     },
                     style: 'default'

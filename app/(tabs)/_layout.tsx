@@ -7,7 +7,7 @@ import { getDatabase } from '../../lib/database';
 import { Map, Heart, User, SquareCheck as CheckSquare, Bell } from 'lucide-react-native';
 import { View, TouchableOpacity, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -37,17 +37,17 @@ export default function TabLayout() {
       
       // Initial sync durumunu kontrol et
       const checkInitialSync = async () => {
-        const syncComplete = await AsyncStorage.getItem('isInitialSyncComplete');
+        const syncComplete = await SecureStore.getItemAsync('isInitialSyncComplete');
         setIsInitialSyncComplete(syncComplete === 'true');
       };
       await checkInitialSync();
-      
-      // AsyncStorage değişikliklerini dinle (polling ile)
+
+      // SecureStore değişikliklerini dinle (polling ile)
       const interval = setInterval(async () => {
-        const syncComplete = await AsyncStorage.getItem('isInitialSyncComplete');
+        const syncComplete = await SecureStore.getItemAsync('isInitialSyncComplete');
         setIsInitialSyncComplete(syncComplete === 'true');
       }, 1000);
-      
+
       return () => clearInterval(interval);
     })();
   }, []);

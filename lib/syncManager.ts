@@ -1,18 +1,22 @@
-import NetInfo from '@react-native-community/netinfo';
+// NetInfo kaldırıldı, navigator.onLine ile kontrol
+
+function isOnline() {
+  if (typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean') {
+    return navigator.onLine;
+  }
+  return true; // Mobilde her zaman true kabul et (AppState ile daha iyi kontrol için useNetworkStatus kullanılabilir)
+}
 // Duyuru senkronizasyonunu arka planda periyodik olarak çalıştır
 let announcementSyncInterval: number | null = null;
 export function startAnnouncementSyncBackground({ intervalMs = 5 * 60 * 1000 } = {}) {
   if (announcementSyncInterval) return; // Zaten başlatıldıysa tekrar başlatma
   announcementSyncInterval = setInterval(async () => {
     try {
-      const state = await NetInfo.fetch();
-      if (state.isConnected) {
+      if (isOnline()) {
         await syncAnnouncements();
-      } else {
-  // ...existing code...
       }
     } catch (e) {
-      console.warn('[syncManager] NetInfo kontrolünde hata:', e);
+      console.warn('[syncManager] Online kontrolünde hata:', e);
     }
   }, intervalMs);
   // ...existing code...
@@ -107,7 +111,7 @@ export async function deleteCampingAreaSmart({ campingArea, isConnected }) {
 }
 // Merkezi senkronizasyon yöneticisi
 // Tüm offline/online veri (kamp alanı, fotoğraf, checklist, vs.) burada yönetilir
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { getDatabase } from './database';
 import { uploadCampgroundImage } from './campgroundImageApi';
 import { updateCampingAreaOnServer, createCampingAreaOnServer, sanitizeCampingAreaData } from './campingAreaApi';
@@ -121,7 +125,7 @@ async function syncPendingChecklists() {
 // Pending Images kuyruğunu işle
 async function syncPendingImages(userId) {
   const db = getDatabase();
-  const pendingImagesStr = await AsyncStorage.getItem('pendingImages');
+  const pendingImagesStr = await SecureStore.getItemAsync('pendingImages');
   let pendingImages = pendingImagesStr ? JSON.parse(pendingImagesStr) : [];
   if (!pendingImages.length) return;
   const updatedPending = [];
@@ -225,17 +229,17 @@ async function syncPendingImages(userId) {
       // Orphan kaydına campingAreaId ekle (artık orphan değil)
       orphan.campingAreaId = area.id;
       // PendingImages kuyruğunu güncelle
-      const piStr = await AsyncStorage.getItem('pendingImages');
+      const piStr = await SecureStore.getItemAsync('pendingImages');
       let piArr = piStr ? JSON.parse(piStr) : [];
       piArr = piArr.map(p => (p.local_uri === orphan.local_uri && !p.campingAreaId) ? { ...p, campingAreaId: area.id } : p);
-      await AsyncStorage.setItem('pendingImages', JSON.stringify(piArr));
+      await SecureStore.setItemAsync('pendingImages', JSON.stringify(piArr));
       // Sonraki sync'te bu görsel doğrudan campingAreaId ile işlenecek
       updatedPending.push({ ...orphan, campingAreaId: area.id });
     }
     // Bu sync'te S3 upload denenmez, bir sonraki sync'te campingAreaId ile işlenir
   }
   // Sadece yüklenemeyenleri pending'de tut
-  await AsyncStorage.setItem('pendingImages', JSON.stringify(updatedPending));
+  await SecureStore.setItemAsync('pendingImages', JSON.stringify(updatedPending));
 }
 
 

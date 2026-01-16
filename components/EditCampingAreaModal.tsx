@@ -70,7 +70,7 @@ import { X, Save, Camera, Trash2, ChevronUp, ChevronDown } from 'lucide-react-na
 import { Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { getDatabase, CampingArea } from '@/lib/database';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { updateCampingAreaOnServer, sanitizeCampingAreaData } from '@/lib/campingAreaApi';
 import { getMe } from '@/lib/userCommunityApi';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
@@ -448,13 +448,29 @@ useEffect(() => {
     const friendsToUse = overrideFriends ?? formData.friends;
 
     try {
-      let ownerId = campingArea?.owner_id;
+      let ownerId: number | undefined = undefined;
+      if (campingArea?.owner_id) {
+        ownerId = typeof campingArea.owner_id === 'number' ? campingArea.owner_id : Number(campingArea.owner_id) || undefined;
+      }
       if (!ownerId) {
         try {
           const user = await getMe();
-          ownerId = user?.id?.toString() || '';
+          ownerId = typeof user?.id === 'number' ? user.id : Number(user?.id) || undefined;
         } catch (e) {
-          console.warn('[handleSubmit] getMe failed', e);
+          // getMe başarısızsa localUser'dan dene
+          try {
+            const { getLargeItemAsync } = await import('@/lib/largeStorage');
+            const localUserStr = await getLargeItemAsync('localUser');
+            if (localUserStr) {
+              const localUser = JSON.parse(localUserStr);
+              ownerId = typeof localUser?.id === 'number' ? localUser.id : Number(localUser?.id) || undefined;
+              console.log('[EditCampingAreaModal] [OFFLINE] localUser.id ile ownerId atandı:', ownerId);
+            } else {
+              console.log('[EditCampingAreaModal] [OFFLINE] localUser bulunamadı. ownerId atanamadı.');
+            }
+          } catch (err) {
+            console.log('[EditCampingAreaModal] [OFFLINE] localUser okunamadı:', err);
+          }
         }
       }
 
@@ -467,13 +483,13 @@ useEffect(() => {
       let allImages: string[] = Array.isArray(formData.images) ? [...formData.images] : [];
       allImages = allImages.slice(0, 5);
       if (!isConnected && allImages.some(img => img && img.startsWith('file://'))) {
-        const pendingImagesStr = await AsyncStorage.getItem('pendingImages');
+        const pendingImagesStr = await SecureStore.getItemAsync('pendingImages');
         let pendingImages = pendingImagesStr ? JSON.parse(pendingImagesStr) : [];
         const newPending = allImages
           .filter(img => img && img.startsWith('file://'))
           .map(img => ({ local_uri: img, campingAreaId: campingArea?.id || null }));
         pendingImages = [...pendingImages, ...newPending];
-        await AsyncStorage.setItem('pendingImages', JSON.stringify(pendingImages));
+        await SecureStore.setItemAsync('pendingImages', JSON.stringify(pendingImages));
       } else if (isConnected) {
         // S3 upload işlemi (online)
         for (let i = 0; i < allImages.length; i++) {

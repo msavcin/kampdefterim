@@ -2,7 +2,7 @@ import { SvgXml } from 'react-native-svg';
 import { useState, useEffect, useMemo } from 'react';
 import { Edit } from 'lucide-react-native';
 import * as React from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, BackHandler, RefreshControl, Platform, ToastAndroid } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 // Logout adımlarını göstermek için yardımcı fonksiyon
@@ -30,6 +30,19 @@ import { getToken } from '../../lib/auth';
 import { API_URL } from '../../lib/config';
 import { getMe } from '../../lib/userCommunityApi';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+
+// AsyncStorage yerine SecureStore kullanımı
+const SecureStorage = {
+  async getItem(key: string) {
+    return await SecureStore.getItemAsync(key);
+  },
+  async setItem(key: string, value: string) {
+    await SecureStore.setItemAsync(key, value);
+  },
+  async removeItem(key: string) {
+    await SecureStore.deleteItemAsync(key);
+  },
+};
 
 interface ChecklistItem {
   id: string;
@@ -111,7 +124,7 @@ export default function ChecklistScreen({ navigation }: any) {
     // Tüm işaretleri temizle fonksiyonu (buton için)
     const clearChecklist = async () => {
       setCheckedItems({});
-      await AsyncStorage.removeItem('checklist_checkedItems');
+      await SecureStore.deleteItemAsync('checklist_checkedItems');
     };
   const searchParams = useLocalSearchParams();
   const router = useRouter();
@@ -626,10 +639,11 @@ export default function ChecklistScreen({ navigation }: any) {
   const [sharedCheckedItems, setSharedCheckedItems] = useState<Record<string, boolean>>({});
 
   // Checklist işaretlerini AsyncStorage'dan yükle
+
   useEffect(() => {
     const loadCheckedItems = async () => {
       try {
-        const saved = await AsyncStorage.getItem('checklist_checkedItems');
+        const saved = await SecureStorage.getItem('checklist_checkedItems');
         if (saved) setCheckedItems(JSON.parse(saved));
       } catch {}
     };
@@ -638,7 +652,7 @@ export default function ChecklistScreen({ navigation }: any) {
 
   // İşaretler değişince kaydet
   useEffect(() => {
-    AsyncStorage.setItem('checklist_checkedItems', JSON.stringify(checkedItems));
+    SecureStorage.setItem('checklist_checkedItems', JSON.stringify(checkedItems));
   }, [checkedItems]);
   // const [customItems, setCustomItems] = useState<Record<string, ChecklistItem[]>>({}); // Artık kullanılmıyor
   const [showAddModal, setShowAddModal] = useState(false);
@@ -987,7 +1001,7 @@ const removeSharedChecklist = async (shareId: string) => {
     // Tüm işaretleri temizle
     const clearChecklist = async () => {
       setCheckedItems({});
-      await AsyncStorage.removeItem('checklist_checkedItems');
+      await SecureStorage.removeItem('checklist_checkedItems');
     };
   };
 

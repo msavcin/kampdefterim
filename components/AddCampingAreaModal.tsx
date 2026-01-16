@@ -20,7 +20,7 @@ import { addPendingChange } from '@/lib/pendingChanges';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { createCampingAreaOnServer, sanitizeCampingAreaData } from '@/lib/campingAreaApi';
 import { getMe } from '@/lib/userCommunityApi';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 interface AddCampingAreaModalProps {
   visible: boolean;
@@ -527,36 +527,39 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     console.log('[AddCampingArea] handleSubmit başladı');
     // DEBUG: localUser ve userId logları kaldırıldı
     // Kullanıcı bilgisini çek
-    let userId = '';
+    let userId: number | undefined = undefined;
     let user = null;
     try {
       // Öncelik: getMe ile kullanıcıyı çek
       user = await getMe();
-      userId = user?.id?.toString() || '';
+      userId = typeof user?.id === 'number' ? user.id : Number(user?.id) || undefined;
       // Eğer online ve getMe'den kullanıcı geldiyse localUser kaydını kontrol et
       if (userId && user) {
-        const localUserStr = await AsyncStorage.getItem('localUser');
+        const { getLargeItemAsync, setLargeItemAsync } = await import('@/lib/largeStorage');
+        const localUserStr = await getLargeItemAsync('localUser');
         if (!localUserStr) {
-          await AsyncStorage.setItem('localUser', JSON.stringify(user));
+          await setLargeItemAsync('localUser', JSON.stringify(user));
           console.log('[AddCampingArea] localUser kaydedildi:', userId);
         }
       }
       if (!userId) {
         // getMe başarısızsa localUser'dan dene
-        const localUserStr = await AsyncStorage.getItem('localUser');
+        const { getLargeItemAsync } = await import('@/lib/largeStorage');
+        const localUserStr = await getLargeItemAsync('localUser');
         if (localUserStr) {
           const localUser = JSON.parse(localUserStr);
-          userId = localUser?.id?.toString() || '';
+          userId = typeof localUser?.id === 'number' ? localUser.id : Number(localUser?.id) || undefined;
         }
       }
       console.log('[AddCampingArea] Kullanıcı ID:', userId);
     } catch (e) {
       // getMe başarısızsa localUser'dan dene (OFFLINE mod)
       try {
-        const localUserStr = await AsyncStorage.getItem('localUser');
+        const { getLargeItemAsync } = await import('@/lib/largeStorage');
+        const localUserStr = await getLargeItemAsync('localUser');
         if (localUserStr) {
           const localUser = JSON.parse(localUserStr);
-          userId = localUser?.id?.toString() || '';
+          userId = typeof localUser?.id === 'number' ? localUser.id : Number(localUser?.id) || undefined;
           console.log('[AddCampingArea] [OFFLINE] localUser.id ile userId atandı:', userId);
         } else {
           console.log('[AddCampingArea] [OFFLINE] localUser bulunamadı. userId atanamadı.');
@@ -591,13 +594,13 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     setLoading(true);
     // Offline modda file:// ile başlayan görselleri pendingImages kuyruğuna ekle
     if (!isConnected && formData.images.some(img => img.local_uri && img.local_uri.startsWith('file://'))) {
-      const pendingImagesStr = await AsyncStorage.getItem('pendingImages');
+      const pendingImagesStr = await SecureStore.getItemAsync('pendingImages');
       let pendingImages = pendingImagesStr ? JSON.parse(pendingImagesStr) : [];
       const newPending = formData.images
         .filter(img => img.local_uri && img.local_uri.startsWith('file://'))
         .map(img => ({ local_uri: img.local_uri, campingAreaId: null }));
       pendingImages = [...pendingImages, ...newPending];
-      await AsyncStorage.setItem('pendingImages', JSON.stringify(pendingImages));
+      await SecureStore.setItemAsync('pendingImages', JSON.stringify(pendingImages));
     }
     console.log('[AddCampingArea] Form verileri:', formData);
 
@@ -694,7 +697,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       social_media: {},
       status: 'active',
       source_id: '0',
-      owner_id: userId,
+      owner_id: userId ? userId.toString() : '',
       visibility: formData.visibility,
       community_id: communityIdValue,
     };

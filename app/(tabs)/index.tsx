@@ -1,3 +1,4 @@
+import * as SecureStore from 'expo-secure-store';
 // İki koordinat arası mesafe (metre cinsinden) hesaplama
 function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
   const toRad = (value: number) => (value * Math.PI) / 180;
@@ -19,7 +20,7 @@ import { campingTypes, getCampingTypeLabel, getCampingAreaBgColor } from '../../
 import { filterCampingAreasByUser } from '../../lib/accessControl';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import HelpModal from '../../components/HelpModal';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { Svg, Path } from 'react-native-svg';
 import { Modal } from 'react-native';
 import CampingAreaSearchBar from '../../components/CampingAreaSearchBar';
@@ -204,10 +205,10 @@ export default function MapScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const seen = await AsyncStorage.getItem('helpModalSeen');
+        const seen = await SecureStore.getItemAsync('helpModalSeen');
         if (!seen && isMounted.current) {
           setHelpVisible(true);
-          await AsyncStorage.setItem('helpModalSeen', '1');
+          await SecureStore.setItemAsync('helpModalSeen', '1');
         }
       } catch {}
     })();
@@ -230,7 +231,7 @@ export default function MapScreen() {
     if (__DEV__) console.log('[ANNOUNCEMENT] fetchAnnouncementsSilently BAŞLADI, skipNotification:', skipNotification, 'isFullSyncInProgressRef:', isFullSyncInProgressRef.current);
     try {
       // Önce localde gösterilen duyuru id'lerini al
-      const shownAnnouncementIdsStr = await AsyncStorage.getItem('shownAnnouncementIds');
+      const shownAnnouncementIdsStr = await SecureStore.getItemAsync('shownAnnouncementIds');
       const shownAnnouncementIds = shownAnnouncementIdsStr ? JSON.parse(shownAnnouncementIdsStr) : [];
       const isFirstLaunch = shownAnnouncementIds.length === 0;
       const db = getDatabase();
@@ -273,7 +274,7 @@ export default function MapScreen() {
         if (Array.isArray(visibleAnnouncementsLocal) && visibleAnnouncementsLocal.length > 0) {
           if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Lokal veritabanındaki (görünür) duyuru sayısı gösteriliyor (hızlı yol):', visibleAnnouncementsLocal.length);
           const visibleIds = visibleAnnouncementsLocal.map(a => a.id);
-          await AsyncStorage.setItem('shownAnnouncementIds', JSON.stringify(visibleIds));
+          await SecureStore.setItemAsync('shownAnnouncementIds', JSON.stringify(visibleIds));
 
           if (!skipNotification && !isFullSyncInProgressRef.current) {
             setNotifications([{
@@ -317,7 +318,7 @@ export default function MapScreen() {
       if (Array.isArray(newAnnouncementsLocal) && newAnnouncementsLocal.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
         if (__DEV__) console.log('[ANNOUNCEMENT] Lokal yeni duyuru bulundu, gösteriliyor (hızlı yol):', newAnnouncementsLocal.length);
         const updatedIds = [...shownAnnouncementIds, ...newAnnouncementsLocal.map(a => a.id)];
-        await AsyncStorage.setItem('shownAnnouncementIds', JSON.stringify(updatedIds));
+        await SecureStore.setItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
         setNotifications([{
           id: newAnnouncementsLocal[0].id,
           type: 'announcement',
@@ -428,7 +429,7 @@ export default function MapScreen() {
       if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
         // Yeni duyuru id'lerini hemen kaydet
         const updatedIds = [...shownAnnouncementIds, ...newAnnouncements.map(a => a.id)];
-        await AsyncStorage.setItem('shownAnnouncementIds', JSON.stringify(updatedIds));
+        await SecureStore.setItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
         
         // Bildirim göster (full sync sırasında değil)
         setNotifications([{
@@ -753,7 +754,7 @@ export default function MapScreen() {
           console.log('[BackgroundLocation] Arka plan konum izni reddedildi - Kısıtlı mod');
           
           // İlk kez gösterildi mi kontrol et (sadece bilgilendirme için)
-          const limitedModeAlertSeen = await AsyncStorage.getItem('offlineLimitedModeAlertSeen');
+          const limitedModeAlertSeen = await SecureStore.getItemAsync('offlineLimitedModeAlertSeen');
           if (!limitedModeAlertSeen) {
             // İlk kez, bilgilendirme göster
             Alert.alert(
@@ -763,14 +764,14 @@ export default function MapScreen() {
                 {
                   text: 'Anladım',
                   onPress: async () => {
-                    await AsyncStorage.setItem('offlineLimitedModeAlertSeen', '1');
+                    await SecureStore.setItemAsync('offlineLimitedModeAlertSeen', '1');
                   },
                   style: 'cancel'
                 },
                 {
                   text: 'Ayarlara Aç',
                   onPress: async () => {
-                    await AsyncStorage.setItem('offlineLimitedModeAlertSeen', '1');
+                    await SecureStore.setItemAsync('offlineLimitedModeAlertSeen', '1');
                     if (Platform.OS === 'ios') {
                       Linking.openURL('app-settings:');
                     } else {
@@ -898,7 +899,7 @@ export default function MapScreen() {
             headers: { Authorization: `Bearer ${token}` }
           });
           const data = await res.json();
-          const shownIdsStr = await AsyncStorage.getItem('shownFriendRequestIds');
+          const shownIdsStr = await SecureStore.getItemAsync('shownFriendRequestIds');
           const shownIds = shownIdsStr ? JSON.parse(shownIdsStr) : [];
           const newRequests = Array.isArray(data)
             ? data.filter((req: any) => !shownIds.includes(req.id))
@@ -910,7 +911,7 @@ export default function MapScreen() {
               message: `${req.username || 'Bir kullanıcı'} size arkadaşlık isteği gönderdi!`,
               goto: () => router.push('/profile'),
             }));
-            AsyncStorage.setItem('shownFriendRequestIds', JSON.stringify([...shownIds, ...newRequests.map(r => r.id)]));
+            await SecureStore.setItemAsync('shownFriendRequestIds', JSON.stringify([...shownIds, ...newRequests.map(r => r.id)]));
           }
         }
 
@@ -924,7 +925,7 @@ export default function MapScreen() {
             });
             const data = await res.json();
             // Her paylaşım kaydının id'sini kontrol et
-            const shownSharedStr = await AsyncStorage.getItem('shownSharedChecklistIds');
+            const shownSharedStr = await SecureStore.getItemAsync('shownSharedChecklistIds');
             const shownSharedIds = shownSharedStr ? JSON.parse(shownSharedStr) : [];
             // Sadece yeni (gösterilmemiş) paylaşımlar
             const newShares = Array.isArray(data)
@@ -940,7 +941,7 @@ export default function MapScreen() {
                 },
               ];
               // Gösterilenleri kaydet
-              AsyncStorage.setItem('shownSharedChecklistIds', JSON.stringify([...shownSharedIds, ...newShares.map(s => s.id)]));
+              await SecureStore.setItemAsync('shownSharedChecklistIds', JSON.stringify([...shownSharedIds, ...newShares.map(s => s.id)]));
             }
           } catch (e) {
             console.warn('[Checklist Notification] Hata:', e);
@@ -975,7 +976,7 @@ export default function MapScreen() {
             });
 
             // Daha önce gösterilenleri kontrol et
-            const shownCampingAreasStr = await AsyncStorage.getItem('shownSharedCampingAreaIds');
+            const shownCampingAreasStr = await SecureStore.getItemAsync('shownSharedCampingAreaIds');
             const shownCampingAreaIds = shownCampingAreasStr ? JSON.parse(shownCampingAreasStr) : [];
             
             // Son 7 gün içinde oluşturulan/güncellenen ve daha önce gösterilmeyen alanlar
@@ -1030,7 +1031,7 @@ export default function MapScreen() {
                 },
               ];
               // Gösterilenleri kaydet
-              AsyncStorage.setItem('shownSharedCampingAreaIds', JSON.stringify([...shownCampingAreaIds, ...newSharedAreas.map((a: any) => a.id)]));
+              await SecureStore.setItemAsync('shownSharedCampingAreaIds', JSON.stringify([...shownCampingAreaIds, ...newSharedAreas.map((a: any) => a.id)]));
             }
           } catch (e) {
             console.warn('[Camping Area Notification] Hata:', e);
@@ -1303,7 +1304,7 @@ export default function MapScreen() {
             }
             // Delta Sync: İlk açılışta forceFull: true, sonraki açılışlarda delta sync
             // hasInitialSync flag'ini kontrol et
-            const hasInitialSync = await AsyncStorage.getItem('hasInitialSync');
+            const hasInitialSync = await SecureStore.getItemAsync('hasInitialSync');
             const shouldForceFullSync = !hasInitialSync;
             
             if (__DEV__) console.log('[DEBUG][SYNC] hasInitialSync flag:', hasInitialSync, '| shouldForceFullSync:', shouldForceFullSync);
@@ -1311,7 +1312,7 @@ export default function MapScreen() {
             if (shouldForceFullSync) {
               if (__DEV__) console.log('[DEBUG][PROGRESS] İLK FULL SYNC başlıyor...');
               isFullSyncInProgressRef.current = true; // Bildirimleri kapat
-              await AsyncStorage.setItem('isInitialSyncComplete', 'false'); // Duyurular tab'ını kapat
+              await SecureStore.setItemAsync('isInitialSyncComplete', 'false'); // Duyurular tab'ını kapat
               setSyncProgress({ current: 0, total: 0, isLoading: true });
             } else {
               if (__DEV__) console.log('[DEBUG][SYNC] Delta sync yapılacak (full sync atlanıyor)');
@@ -1327,8 +1328,8 @@ export default function MapScreen() {
             
             if (shouldForceFullSync) {
               if (__DEV__) console.log('[DEBUG][PROGRESS] Full sync tamamlandı:', count, 'kayıt');
-              await AsyncStorage.setItem('hasInitialSync', 'true');
-              await AsyncStorage.setItem('isInitialSyncComplete', 'true'); // Duyurular tab'ını aç
+              await SecureStore.setItemAsync('hasInitialSync', 'true');
+              await SecureStore.setItemAsync('isInitialSyncComplete', 'true'); // Duyurular tab'ını aç
               isFullSyncInProgressRef.current = false; // Bildirimleri aç
               setSyncProgress({ current: 0, total: 0, isLoading: false });
             }

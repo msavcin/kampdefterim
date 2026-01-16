@@ -1,19 +1,19 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 
 const TOKEN_KEY = 'jwt_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 // Refresh token işlemleri
 export async function saveRefreshToken(token: string) {
-  await AsyncStorage.setItem(REFRESH_TOKEN_KEY, token);
+  await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, token);
 }
 
 export async function getRefreshToken(): Promise<string | null> {
-  return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
 }
 
 export async function removeRefreshToken() {
-  await AsyncStorage.removeItem(REFRESH_TOKEN_KEY);
+  await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
 }
 
 export async function saveToken(token: string) {
@@ -27,11 +27,11 @@ export async function saveToken(token: string) {
     }
   }
   console.log(`[AUTH] saveToken çağrıldı. Token: ${token ? token.substring(0, 20) + '...' : 'BOŞ'} | Çağıran: ${caller}`);
-  await AsyncStorage.setItem(TOKEN_KEY, token);
+  await SecureStore.setItemAsync(TOKEN_KEY, token);
 }
 
 export async function getToken(): Promise<string | null> {
-  return AsyncStorage.getItem(TOKEN_KEY);
+  return SecureStore.getItemAsync(TOKEN_KEY);
 }
 
 export async function removeToken() {
@@ -45,8 +45,8 @@ export async function removeToken() {
     }
   }
   console.log(`[AUTH] removeToken çağrıldı. Çağıran: ${caller}`);
-  await AsyncStorage.removeItem(TOKEN_KEY);
-  await AsyncStorage.removeItem(REFRESH_TOKEN_KEY);
+  await SecureStore.deleteItemAsync(TOKEN_KEY);
+  await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
 }
 
 export async function isLoggedIn(): Promise<boolean> {

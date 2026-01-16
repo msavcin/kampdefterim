@@ -1,16 +1,16 @@
 // Basit bir in-memory + async storage cache (expo için)
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const CACHE_PREFIX = 'osm_cache_';
 const CACHE_TTL = 60 * 60 * 1000; // 1 saat (ms)
 
 export async function getCachedOsmResult(key: string): Promise<any | null> {
   try {
-    const raw = await AsyncStorage.getItem(CACHE_PREFIX + key);
+    const raw = await SecureStore.getItemAsync(CACHE_PREFIX + key);
     if (!raw) return null;
     const { data, timestamp } = JSON.parse(raw);
     if (Date.now() - timestamp > CACHE_TTL) {
-      await AsyncStorage.removeItem(CACHE_PREFIX + key);
+      await SecureStore.deleteItemAsync(CACHE_PREFIX + key);
       return null;
     }
     return data;
@@ -21,7 +21,7 @@ export async function getCachedOsmResult(key: string): Promise<any | null> {
 
 export async function setCachedOsmResult(key: string, data: any) {
   try {
-    await AsyncStorage.setItem(
+    await SecureStore.setItemAsync(
       CACHE_PREFIX + key,
       JSON.stringify({ data, timestamp: Date.now() })
     );

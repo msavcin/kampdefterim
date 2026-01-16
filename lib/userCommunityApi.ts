@@ -1,21 +1,14 @@
 // Topluluk üyesini tamamen sil (DELETE)
 import { addPendingChange } from './pendingChanges';
-import NetInfo from '@react-native-community/netinfo';
 
+
+// Topluluk üyesini tamamen sil (DELETE)
 export async function removeMember(communityId: number, userId: number) {
   const token = await getToken();
-  const isConnected = (await NetInfo.fetch()).isConnected;
+  // isConnected parametresi dışarıdan alınmalı, NetInfo kullanılmıyor
+  // Bağlantı kontrolü üst katmanda yapılmalı
   const url = `${API_URL}/communities/${communityId}/members/${userId}`;
-  if (!isConnected) {
-    // Offline ise pending changes kuyruğuna ekle
-    await addPendingChange({
-      type: 'delete',
-      campground_id: null,
-      data: { communityId, userId, url, entity: 'community_member' }
-    });
-    console.log('[removeMember] OFFLINE, pending changes kuyruğuna eklendi:', { communityId, userId, url });
-    return { success: true, pending: true };
-  }
+  // Eğer bağlantı yoksa, üst katman bu fonksiyonu çağırmamalı veya pending'e eklemeli
   try {
     const res = await fetch(url, {
       method: 'DELETE',

@@ -1,3 +1,4 @@
+import * as SecureStore from 'expo-secure-store';
 // Yardımcı fonksiyonlar en üste taşındı
 // Valilik adını id'den döndüren basit bir fonksiyon (geliştirilebilir)
 function getValilik(valilikId: number) {
@@ -64,7 +65,7 @@ import { API_URL } from '@/lib/config';
 import { getDatabase } from '@/lib/database';
 import { getProvinceFromOSM } from '@/lib/osmReverseGeocode';
 import { View, Text, ScrollView, ActivityIndicator, TouchableOpacity, Alert, Image, Modal, BackHandler, Platform, ToastAndroid } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { getToken } from '@/lib/auth';
 import { getMe, getCommunityById } from '@/lib/userCommunityApi';
 import { deleteAnnouncement } from '@/lib/announcementApi';
@@ -237,7 +238,7 @@ export default function AnnouncementsScreen() {
     // matchedValilikIdLocal'ı async olarak belirle (ve bekle)
     let matchedValilikIdLocal: number | null = null;
     try {
-      const storedValilikId = await AsyncStorage.getItem('matchedValilikId');
+      const storedValilikId = await SecureStore.getItemAsync('matchedValilikId');
       if (storedValilikId) {
         matchedValilikIdLocal = parseInt(storedValilikId);
       } else {
@@ -251,7 +252,7 @@ export default function AnnouncementsScreen() {
             if (matchedProvince) {
               matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
               if (matchedValilikIdLocal) {
-                await AsyncStorage.setItem('matchedValilikId', String(matchedValilikIdLocal));
+                await SecureStore.setItemAsync('matchedValilikId', String(matchedValilikIdLocal));
               }
             }
           }
@@ -358,7 +359,7 @@ export default function AnnouncementsScreen() {
           if (userData) {
             let filtered = localAnnouncements;
             if (userData.role !== 'superadmin') {
-              const storedValilikId = await AsyncStorage.getItem('matchedValilikId');
+              const storedValilikId = await SecureStore.getItemAsync('matchedValilikId');
               const valilikId = storedValilikId ? parseInt(storedValilikId) : null;
               
               filtered = localAnnouncements.filter((a: any) => {

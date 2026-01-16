@@ -5,7 +5,7 @@ import { loginUser, getMe, listCommunityMembers } from '../../lib/userCommunityA
 import { saveToken } from '../../lib/auth';
 import { API_URL } from '../../lib/config';
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 export default function LoginScreen() {
   const [identifier, setIdentifier] = useState(''); // email veya username
@@ -30,7 +30,7 @@ export default function LoginScreen() {
         await saveToken(result.token);
         const me = await getMe();
         try {
-          await AsyncStorage.setItem('localUser', JSON.stringify(me));
+          await SecureStore.setItemAsync('localUser', JSON.stringify(me));
         } catch {}
         guestLoginPendingRedirect.current = true;
         setGuestModalVisible(true);
@@ -85,16 +85,16 @@ export default function LoginScreen() {
       if (result && result.token) {
         console.log('[LOGIN] Token kaydediliyor:', result.token);
         await saveToken(result.token);
-        const justSavedToken = await AsyncStorage.getItem('jwt_token');
-        console.log('[LOGIN] AsyncStorage jwt_token:', justSavedToken);
-        const tokenCheck = await saveToken ? await AsyncStorage.getItem('jwt_token') : null;
+        const justSavedToken = await SecureStore.getItemAsync('jwt_token');
+        console.log('[LOGIN] SecureStore jwt_token:', justSavedToken);
+        const tokenCheck = await saveToken ? await SecureStore.getItemAsync('jwt_token') : null;
         console.log('[LOGIN] saveToken sonrası kontrol:', tokenCheck);
         // Kullanıcı ve topluluk üyeliği durumunu kontrol et
         const me = await getMe();
         console.log('[LOGIN] getMe sonucu:', me);
         // Kullanıcıyı local storage'a kaydet
         try {
-          await AsyncStorage.setItem('localUser', JSON.stringify(me));
+          await SecureStore.setItemAsync('localUser', JSON.stringify(me));
           console.log('[LOGIN] localUser kaydedildi:', me);
         } catch (e) {
           console.log('[LOGIN] localUser kaydedilemedi:', e);
