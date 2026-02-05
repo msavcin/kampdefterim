@@ -270,7 +270,11 @@ export default function AnnouncementsScreen() {
           if (matchedValilikIdLocal && a.valilik_id) {
             return String(a.valilik_id) === String(matchedValilikIdLocal);
           }
-          // Valilik_id yoksa tüm genel duyuruları göster
+          // Eğer offline modda ve premium değilse, valilik_id yoksa genel duyuru gösterme
+          if (!isConnected && !(userData?.offline_enabled)) {
+            return false;
+          }
+          // Valilik_id yoksa ve online ise tüm genel duyuruları göster
           return true;
         }
         // Topluluk duyuruları

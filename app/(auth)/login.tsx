@@ -197,7 +197,10 @@ export default function LoginScreen() {
           setGuestModalVisible(false);
           if (guestLoginPendingRedirect.current) {
             guestLoginPendingRedirect.current = false;
-            router.replace('/(auth)/community');
+            // Modal animasyonu tamamlansın diye küçük gecikme
+            setTimeout(() => {
+              router.replace('/(auth)/community');
+            }, 200);
           }
         }}
       />

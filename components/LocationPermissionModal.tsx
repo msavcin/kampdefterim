@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, Linking, Platform } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { Modal, View, Text, StyleSheet, TouchableOpacity, Linking, Platform, AppState } from 'react-native';
 import * as Location from 'expo-location';
 import { Navigation } from 'lucide-react-native';
+import * as SecureStore from 'expo-secure-store';
+import { eventBus } from '../lib/eventBus';
 
 
 
@@ -11,9 +13,23 @@ interface LocationPermissionModalProps {
   onPermissionGranted?: () => void;
 }
 
-function LocationPermissionModal({ visible, onClose, onPermissionGranted }: LocationPermissionModalProps) {
 
+function LocationPermissionModal({ visible, onClose, onPermissionGranted }: LocationPermissionModalProps) {
   const [isPremium, setIsPremium] = useState(false);
+  const [doNotRemind, setDoNotRemind] = useState(false);
+  const isMounted = useRef(true);
+  const appStateListener = useRef<any>(null);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      if (appStateListener.current) {
+        appStateListener.current.remove();
+        appStateListener.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!visible) return;
@@ -31,51 +47,116 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
     })();
   }, [visible]);
 
+  // Uygulama ön plana geldiğinde izin durumunu kontrol et
+  useEffect(() => {
+    if (!visible) {
+      if (appStateListener.current) {
+        appStateListener.current.remove();
+        appStateListener.current = null;
+      }
+      return;
+    }
+
+    const checkPermissionOnFocus = async () => {
+      if (!isMounted.current || !visible) return;
+      try {
+        const foreground = await Location.getForegroundPermissionsAsync();
+        if (!isMounted.current || !visible) return;
+        console.log('[PERMISSION MODAL] AppState check - Foreground izin:', foreground.status);
+        if (foreground.status === 'granted') {
+          if (isPremium && Platform.OS !== 'web') {
+            const background = await Location.getBackgroundPermissionsAsync();
+            if (!isMounted.current || !visible) return;
+            console.log('[PERMISSION MODAL] AppState check - Background izin:', background.status);
+            if (background.status === 'granted') {
+              try { eventBus.emit('locationPermissionGranted', { fromModal: true }); } catch (e) {}
+              if (!isMounted.current || !visible) return;
+              onPermissionGranted?.();
+              onClose();
+            }
+          } else {
+            try { eventBus.emit('locationPermissionGranted', { fromModal: true }); } catch (e) {}
+            if (!isMounted.current || !visible) return;
+            onPermissionGranted?.();
+            onClose();
+          }
+        }
+      } catch (error) {
+        console.error('[PERMISSION MODAL] İzin kontrolü hatası:', error);
+      }
+    };
+
+    checkPermissionOnFocus();
+    if (appStateListener.current) {
+      appStateListener.current.remove();
+      appStateListener.current = null;
+    }
+    appStateListener.current = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && isMounted.current && visible) {
+        checkPermissionOnFocus();
+      }
+    });
+    return () => {
+      if (appStateListener.current) {
+        appStateListener.current.remove();
+        appStateListener.current = null;
+      }
+    };
+  }, [visible, isPremium, onPermissionGranted, onClose]);
+
   const handleRequestPermission = async () => {
+    if (!isMounted.current || !visible) return;
     console.log('[PERMISSION MODAL] İzin isteniyor... isPremium:', isPremium);
     try {
-      // Önce mevcut izin durumunu kontrol et
       const existingStatus = await Location.getForegroundPermissionsAsync();
+      if (!isMounted.current || !visible) return;
       if (existingStatus.status === 'denied' && !existingStatus.canAskAgain) {
         Linking.openSettings();
         return;
       }
-      // Foreground izin iste
       const { status } = await Location.requestForegroundPermissionsAsync();
+      if (!isMounted.current || !visible) return;
       console.log('[PERMISSION MODAL] Foreground izin sonucu:', status);
-
       if (status === 'granted') {
+        // Foreground izin verildi - her durumda event emit et
+        console.log('[PERMISSION MODAL] Foreground izin verildi');
+        try {
+          eventBus.emit('locationPermissionGranted', { fromModal: true });
+        } catch (e) {
+          console.error('[PERMISSION MODAL] EventBus hatası:', e);
+        }
         if (isPremium && Platform.OS !== 'web') {
-          // Premium kullanıcıda background izni de iste
           const bgStatus = await Location.getBackgroundPermissionsAsync();
+          if (!isMounted.current || !visible) return;
           if (bgStatus.status !== 'granted') {
             const { status: bgRequestStatus } = await Location.requestBackgroundPermissionsAsync();
+            if (!isMounted.current || !visible) return;
             if (bgRequestStatus !== 'granted') {
-              alert('Offline Mode için konum iznini "Her zaman izin ver" olarak ayarlamanız gerekmektedir. Lütfen uygulama ayarlarından izin verin.');
-              Linking.openSettings();
-              // Modalı açık bırak (return ile çık)
+              alert('Offline Mode için konum iznini "Her zaman izin ver" olarak ayarlamanız gerekmektedir. Profil sayfasından veya sistem ayarlarından izin verebilirsiniz.');
+              if (!isMounted.current || !visible) return;
+              onPermissionGranted?.();
+              onClose();
               return;
             } else {
-              // Background izin verildi, modalı kapat
+              if (!isMounted.current || !visible) return;
               onPermissionGranted?.();
               onClose();
               return;
             }
           } else {
-            // Zaten background izin granted, modalı kapat
+            if (!isMounted.current || !visible) return;
             onPermissionGranted?.();
             onClose();
             return;
           }
         } else {
-          // Premium değilse, foreground izin yeterli, modalı kapat
+          if (!isMounted.current || !visible) return;
           onPermissionGranted?.();
           onClose();
           return;
         }
       } else {
         Linking.openSettings();
-        // Modalı açık bırak
         return;
       }
     } catch (error) {
@@ -83,10 +164,27 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
     }
   };
 
+  // Eğer modal görünür değilse, hiçbir şey render etme
+
+  // pointerEvents'i visible'a göre ayarla
+  const overlayPointerEvents = visible ? 'box-none' : 'none';
+  const containerPointerEvents = visible ? 'auto' : 'none';
+
+  if (!visible) {
+    return null;
+  }
+
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.overlay}>
-        <View style={styles.container}>
+    <Modal 
+      visible={visible} 
+      transparent 
+      animationType="slide" 
+      onRequestClose={onClose}
+      hardwareAccelerated
+      statusBarTranslucent
+    >
+      <View style={styles.overlay} pointerEvents={overlayPointerEvents}>
+        <View style={styles.container} pointerEvents={containerPointerEvents}>
           <View style={styles.iconContainer}>
             <Navigation size={48} color="#059669" />
           </View>
@@ -112,9 +210,34 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
           <TouchableOpacity style={styles.button} onPress={handleRequestPermission}>
             <Text style={styles.buttonText}>Konum İzni Ver</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+          <TouchableOpacity style={styles.closeButton} onPress={async () => {
+            if (!isMounted.current) return;
+            let storeError = null;
+            if (doNotRemind) {
+              try {
+                await SecureStore.setItemAsync('doNotShowLocationPermissionModal', 'true');
+              } catch (e) {
+                storeError = e;
+                console.error('[PERMISSION MODAL] SecureStore hatası:', e);
+              }
+            }
+            // SecureStore işlemi tamamlandıktan sonra modalı kapat
+            if (!isMounted.current) return;
+            onClose();
+          }}>
             <Text style={styles.closeButtonText}>Daha Sonra</Text>
           </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.checkboxContainer} 
+            onPress={() => setDoNotRemind(!doNotRemind)}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.checkbox, doNotRemind && styles.checkboxChecked]}>
+              {doNotRemind && <Text style={styles.checkmark}>✓</Text>}
+            </View>
+            <Text style={styles.checkboxLabel}>Bir daha hatırlatma</Text>
+          </TouchableOpacity>
+          <Text style={styles.hint}>Profil sayfasından tekrar açabilirsiniz</Text>
         </View>
       </View>
     </Modal>
@@ -203,6 +326,41 @@ const styles = StyleSheet.create({
   closeButtonText: {
     color: '#6b7280',
     fontSize: 15,
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#9ca3af',
+    marginRight: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#059669',
+    borderColor: '#059669',
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  checkboxLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  hint: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 4,
+    textAlign: 'center',
   },
 });
 

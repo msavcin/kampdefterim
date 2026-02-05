@@ -10,9 +10,11 @@ const HelpModal: React.FC<HelpModalProps> = ({ visible, onClose }) => {
   return (
     <Modal
       visible={visible}
-      animationType="fade"
+      animationType="slide"
       transparent
       onRequestClose={onClose}
+      hardwareAccelerated
+      statusBarTranslucent
     >
       <View style={styles.overlay}>
         <View style={styles.container}>
