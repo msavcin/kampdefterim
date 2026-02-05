@@ -135,8 +135,22 @@ export default function AnnouncementsScreen() {
 
   const isConnected = useNetworkStatus(); // log kaldırıldı
 
-  // matchedValilikId'yi component scope'unda tut
-  let matchedValilikId: number | null = null;
+
+  // Konum değişikliği index.tsx'te hallediliyor
+  // valilikIdChanged event'ini dinle ve refresh tetikle
+  useEffect(() => {
+    const { eventBus } = require('@/lib/eventBus');
+    const handleValilikIdChanged = (newValilikId: number) => {
+      console.log('[ANNOUNCEMENTS] Valilik ID değişti, duyurular güncelleniyor:', newValilikId);
+      refreshAnnouncements(true); // Throttle'ı bypass et
+    };
+    
+    eventBus.on('valilikIdChanged', handleValilikIdChanged);
+    
+    return () => {
+      eventBus.off('valilikIdChanged', handleValilikIdChanged);
+    };
+  }, []);
 
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [announcementsLoading, setAnnouncementsLoading] = useState(false);
@@ -226,56 +240,48 @@ export default function AnnouncementsScreen() {
     }
     
     console.log('[ANNOUNCEMENTS_REFRESH] Local DB\'den güncel veriler okunuyor...');
+    // Lokal DB'den tüm aktif duyuruları oku
     let localAnnouncements = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
     console.log('[ANNOUNCEMENTS_REFRESH] Local DB\'den', localAnnouncements.length, 'aktif duyuru okundu');
     
-    // Kullanıcıyı paralel çek
+    // Kullanıcı bilgisini güncelle
     let userData: any = null;
     try {
       userData = await getMe();
       setUser(userData);
     } catch {}
-    // matchedValilikIdLocal'ı async olarak belirle (ve bekle)
+    
+    // matchedValilikId'yi al
     let matchedValilikIdLocal: number | null = null;
     try {
       const storedValilikId = await SecureStore.getItemAsync('matchedValilikId');
       if (storedValilikId) {
         matchedValilikIdLocal = parseInt(storedValilikId);
-      } else {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({});
-          const provinceName = await getProvinceFromOSM(loc.coords.latitude, loc.coords.longitude);
-          if (provinceName) {
-            const normalized = provinceName.toLocaleLowerCase('tr').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u').replace(/Ç/g, 'c').replace(/Ğ/g, 'g').replace(/İ/g, 'i').replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u').replace(/\s+/g, '');
-            const matchedProvince = districtToProvinceMap[normalized] || null;
-            if (matchedProvince) {
-              matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
-              if (matchedValilikIdLocal) {
-                await SecureStore.setItemAsync('matchedValilikId', String(matchedValilikIdLocal));
-              }
-            }
-          }
-        }
       }
     } catch {}
-    // Superadmin ise tüm local duyuruları göster, filtreleme sadece search alanında yapılacak
+    
+    // Filtreleme: Superadmin dışındaki kullanıcılar için
     let filtered = localAnnouncements;
     if (userData?.role !== 'superadmin' && userData) {
       filtered = localAnnouncements.filter((a: any) => {
+        // Genel duyurular (community_id === 0)
         if (a.community_id === 0) {
-          // Eğer valilik_id eşleştirmesi varsa filtrele, yoksa tüm genel duyuruları göster
+          // Eğer valilik_id eşleştirmesi varsa filtrele
           if (matchedValilikIdLocal && a.valilik_id) {
             return String(a.valilik_id) === String(matchedValilikIdLocal);
           }
-          // Valilik_id yoksa veya eşleştirme yapılamadıysa tüm genel duyuruları göster
+          // Valilik_id yoksa tüm genel duyuruları göster
           return true;
         }
+        // Topluluk duyuruları
         if (userData?.community_id && String(a.community_id) === String(userData.community_id)) return true;
         return false;
       });
     }
-    // Sıralama fonksiyonu
+    
+    console.log('[ANNOUNCEMENTS_REFRESH] Filtrelenmiş duyuru sayısı:', filtered.length);
+    
+    // Sıralama: Topluluk duyuruları önce, sonra valilik duyuruları (tarih sıralı)
     const sortLeaderFirst = (arr: any[]) => {
       const communityAnnouncements = arr.filter(a => a.community_id !== 0);
       const valilikAnnouncements = arr
@@ -290,12 +296,9 @@ export default function AnnouncementsScreen() {
         ...valilikAnnouncements
       ];
     };
-    filtered = [
-      ...filtered.filter((a: any) => a.community_id === 0),
-      ...filtered.filter((a: any) => a.community_id !== 0)
-    ];
-    filtered = sortLeaderFirst(filtered);
-    setAnnouncements(filtered);
+    
+    const sortedAnnouncements = sortLeaderFirst(filtered);
+    setAnnouncements(sortedAnnouncements);
     setAnnouncementsLoading(false);
     setRefreshing(false);
     setLocalLoading(false);
@@ -333,76 +336,15 @@ export default function AnnouncementsScreen() {
     }
   }, [searchParams.refresh]);
 
-  // Sekmeye her odaklanıldığında (haritadan gelindiğinde) güncel local verileri oku
+  // Sekmeye her odaklanıldığında herhangi bir işlem yapma
+  // Duyurular zaten uygulama açılışında çekilip valilik id'ye göre filtrelenmiş durumda
+  // refreshAnnouncements fonksiyonu gerektiğinde manuel olarak çağrılıyor
   useFocusEffect(
     React.useCallback(() => {
-      // Harita sayfası zaten delta sync yapıyor, sadece güncel local verileri oku
-      (async () => {
-        try {
-          console.log('[ANNOUNCEMENTS_FOCUS] Sekmeye odaklanıldı, güncel local veriler okunuyor...');
-          const db = getDatabase();
-          const localAnnouncements = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
-          console.log('[ANNOUNCEMENTS_FOCUS] Local DB\'den', localAnnouncements.length, 'aktif duyuru okundu');
-          
-          // Kullanıcı bilgisi yoksa önce çek
-          let userData = user;
-          if (!userData) {
-            try {
-              userData = await getMe();
-              setUser(userData);
-            } catch (err) {
-              console.warn('[ANNOUNCEMENTS_FOCUS] Kullanıcı bilgisi alınamadı:', err);
-            }
-          }
-          
-          // Kullanıcı bilgisi varsa filtrele
-          if (userData) {
-            let filtered = localAnnouncements;
-            if (userData.role !== 'superadmin') {
-              const storedValilikId = await SecureStore.getItemAsync('matchedValilikId');
-              const valilikId = storedValilikId ? parseInt(storedValilikId) : null;
-              
-              filtered = localAnnouncements.filter((a: any) => {
-                if (a.community_id === 0) {
-                  // Eğer valilik_id eşleştirmesi varsa filtrele, yoksa tüm genel duyuruları göster
-                  if (valilikId && a.valilik_id) {
-                    return String(a.valilik_id) === String(valilikId);
-                  }
-                  // Valilik_id yoksa veya eşleştirme yapılamadıysa tüm genel duyuruları göster
-                  return true;
-                }
-                if (userData?.community_id && String(a.community_id) === String(userData.community_id)) return true;
-                return false;
-              });
-            }
-            
-            // Sıralama
-            filtered = [
-              ...filtered.filter((a: any) => a.community_id === 0),
-              ...filtered.filter((a: any) => a.community_id !== 0)
-            ];
-            
-            const sortLeaderFirst = (arr: any[]) => {
-              const communityAnnouncements = arr.filter(a => a.community_id !== 0);
-              const valilikAnnouncements = arr
-                .filter(a => a.community_id === 0)
-                .sort((a, b) => {
-                  const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-                  const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-                  return dateB - dateA;
-                });
-              return [...communityAnnouncements, ...valilikAnnouncements];
-            };
-            
-            filtered = sortLeaderFirst(filtered);
-            setAnnouncements(filtered);
-            console.log('[ANNOUNCEMENTS_FOCUS] Filtrelenmiş', filtered.length, 'duyuru gösteriliyor');
-          }
-        } catch (err) {
-          console.error('[ANNOUNCEMENTS_FOCUS] Güncel verileri okuma hatası:', err);
-        }
-      })();
-    }, [user])
+      // Sekmeye odaklanıldığında herhangi bir işlem yapma
+      // State'teki mevcut filtrelenmiş duyurular gösterilecek
+      console.log('[ANNOUNCEMENTS_FOCUS] Sekmeye odaklanıldı, mevcut state kullanılıyor');
+    }, [])
   );
 
   // Duyuru silme

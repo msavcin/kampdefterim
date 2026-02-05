@@ -16,14 +16,15 @@ export function useNetworkStatus(onOnline?: () => void) {
       const state = await Network.getNetworkStateAsync();
       setIsConnected(!!state.isConnected && !!state.isInternetReachable);
       if (__DEV__) console.log('[DEBUG][NetInfo][expo-network] Durum:', state);
-      if (!!state.isConnected && !!state.isInternetReachable && lastStateRef.current === false && typeof onOnlineRef.current === 'function') {
-        onOnlineRef.current();
-      }
-      lastStateRef.current = !!state.isConnected && !!state.isInternetReachable;
-      // Online olduysa pending değişiklikleri sync et
-      if (!!state.isConnected && !!state.isInternetReachable) {
+      // Sadece offline -> online geçişinde callback çağır ve sync yap
+      if (!!state.isConnected && !!state.isInternetReachable && lastStateRef.current === false) {
+        if (typeof onOnlineRef.current === 'function') {
+          onOnlineRef.current();
+        }
+        // Sadece offline'dan online'a geçişte sync et (her network kontrolünde değil!)
         syncPendingChanges();
       }
+      lastStateRef.current = !!state.isConnected && !!state.isInternetReachable;
     } catch (e) {
       setIsConnected(true); // Hata olursa online varsay
     }

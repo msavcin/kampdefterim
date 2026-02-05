@@ -6,8 +6,26 @@ import { createCampingAreaOnServer, deleteCampingAreaOnServer, updateCampingArea
 import { Platform } from 'react-native';
 import { getDatabase } from '@/lib/database';
 
+// Paralel sync çağrılarını önlemek için flag
+let isSyncing = false;
+
 // currentUserId parametresi eklendi
 export async function syncPendingChanges(currentUserId?: string | number, onProgress?: (current: number, total: number) => void) {
+  // Eğer zaten bir sync çalışıyorsa, yeni çağrıyı atla
+  if (isSyncing) {
+    console.log('[syncPendingChanges] Zaten bir sync çalışıyor, yeni çağrı atlandı.');
+    return;
+  }
+  
+  isSyncing = true;
+  try {
+    await _syncPendingChanges(currentUserId, onProgress);
+  } finally {
+    isSyncing = false;
+  }
+}
+
+async function _syncPendingChanges(currentUserId?: string | number, onProgress?: (current: number, total: number) => void) {
   console.log('[syncPendingChanges] başlatıldı');
   // DEBUG: Localde adı 'B7' geçen kamp alanı var mı?
   try {
@@ -217,13 +235,9 @@ export async function syncPendingChanges(currentUserId?: string | number, onProg
   }
   } // pending.length > 0 bloğunun sonu
   
-  // Her durumda Delta Sync çağrısı (pending değişiklik olmasa da)
-  try {
-    console.log('[syncPendingChanges] Local değişiklik olmasa da Delta Sync başlatılıyor...');
-    await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, onProgress });
-    console.log('[syncPendingChanges] Delta Sync tamamlandı.');
-  } catch (e) {
-    console.log('[syncPendingChanges] Delta Sync HATASI:', e);
-    throw e;
+  // Pending değişiklik olmadığında gereksiz Delta Sync yapma
+  // Delta Sync zaten uygun yerlerde (uygulama başlangıcı, manuel yenileme vs.) çağrılıyor
+  if (pending.length === 0) {
+    console.log('[syncPendingChanges] Pending değişiklik yok, Delta Sync atlandı.');
   }
 }

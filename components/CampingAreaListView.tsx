@@ -25,6 +25,7 @@ interface CampingAreaListViewProps {
   currentLocation?: { latitude: number; longitude: number } | null;
   favorites: Set<string | number>;
   onToggleFavorite: (area: CampingArea) => void;
+  disabled?: boolean;
 }
 
 const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
@@ -34,6 +35,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   currentLocation,
   favorites,
   onToggleFavorite,
+  disabled = false,
 }) => {
   const [loadingImages, setLoadingImages] = useState<Set<string | number>>(new Set());
 
@@ -130,9 +132,10 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
 
     return (
       <TouchableOpacity
-        style={styles.listItem}
-        onPress={() => onSelectArea(item)}
-        activeOpacity={0.7}
+        style={[styles.listItem, disabled && styles.listItemDisabled]}
+        onPress={() => !disabled && onSelectArea(item)}
+        activeOpacity={disabled ? 1 : 0.7}
+        disabled={disabled}
       >
         <View style={styles.imageContainer}>
           <Image
@@ -150,7 +153,8 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
           )}
           <TouchableOpacity
             style={[styles.favoriteButton, isFavorite && styles.favoriteButtonActive]}
-            onPress={() => onToggleFavorite(item)}
+            onPress={() => !disabled && onToggleFavorite(item)}
+            disabled={disabled}
           >
             <Feather name="heart" size={18} color={isFavorite ? '#fff' : '#ef4444'} />
           </TouchableOpacity>
@@ -187,20 +191,22 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
           <View style={styles.actionsContainer}>
             {/* Detaylı Bilgi */}
             <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => onSelectArea(item)}
+              style={[styles.actionButton, disabled && styles.actionButtonDisabled]}
+              onPress={() => !disabled && onSelectArea(item)}
+              disabled={disabled}
             >
-              <Info size={16} color="#059669" />
-              <Text style={styles.actionButtonText}>Detay</Text>
+              <Info size={16} color={disabled ? "#9ca3af" : "#059669"} />
+              <Text style={[styles.actionButtonText, disabled && styles.actionButtonTextDisabled]}>Detay</Text>
             </TouchableOpacity>
 
             {/* Navigasyon */}
             <TouchableOpacity
-              style={[styles.actionButton, styles.navigationButton]}
-              onPress={() => handleNavigationMenu(item)}
+              style={[styles.actionButton, styles.navigationButton, disabled && styles.actionButtonDisabled]}
+              onPress={() => !disabled && handleNavigationMenu(item)}
+              disabled={disabled}
             >
-              <Navigation size={16} color="#3b82f6" />
-              <Text style={[styles.actionButtonText, styles.navigationButtonText]}>Yol Tarifi</Text>
+              <Navigation size={16} color={disabled ? "#9ca3af" : "#3b82f6"} />
+              <Text style={[styles.actionButtonText, styles.navigationButtonText, disabled && styles.actionButtonTextDisabled]}>Yol Tarifi</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -249,6 +255,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  listItemDisabled: {
+    opacity: 0.5,
   },
   imageContainer: {
     width: '100%',
@@ -344,10 +353,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 6,
   },
+  actionButtonDisabled: {
+    opacity: 0.5,
+  },
   actionButtonText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#059669',
+  },
+  actionButtonTextDisabled: {
+    color: '#9ca3af',
   },
   navigationButton: {
     backgroundColor: '#eff6ff',

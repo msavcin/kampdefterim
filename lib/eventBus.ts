@@ -23,3 +23,10 @@ export function emit(event: string, payload?: any) {
     }
   }
 }
+
+// Default export olarak da ekle
+export const eventBus = {
+  on,
+  off,
+  emit,
+};

@@ -101,7 +101,7 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
       setLoading(true);
       setError(null);
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
         // Konum izni reddedildi, Türkiye'nin merkezi (Ankara - Anıtkabir) varsayılan olarak ayarla
         const defaultLocation: Location.LocationObject = {

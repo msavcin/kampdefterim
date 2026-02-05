@@ -19,6 +19,9 @@ const BACKGROUND_LOCATION_TASK = 'background-location-task';
 import { campingTypes, getCampingTypeLabel, getCampingAreaBgColor } from '../../lib/categories';
 import { filterCampingAreasByUser } from '../../lib/accessControl';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+
+import LocationPermissionModal from '../../components/LocationPermissionModal';
+import { checkLocationPermissionsForPremium } from '../../lib/checkLocationPermissionsForPremium';
 import HelpModal from '../../components/HelpModal';
 
 import { Svg, Path } from 'react-native-svg';
@@ -199,8 +202,62 @@ export default function MapScreen() {
   // Yardım modalı (sadece ilk açılışta göster)
   const [helpVisible, setHelpVisible] = useState(false);
   
+  // Kullanıcı ve topluluk üyeliği state'leri
+  const [user, setUser] = useState<any>(null);
+  const [communityMember, setCommunityMember] = useState<any>(null);
+  
   // Konum izni uyarı modalı
   const [locationPermissionModalVisible, setLocationPermissionModalVisible] = useState(false);
+  const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
+  
+  // İlk mount'ta sistem konum iznini kontrol et (sadece kontrol, native izin ekranı açılmaz)
+  useEffect(() => {
+    const checkInitialPermission = async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        const granted = status === 'granted';
+        setHasLocationPermission(granted);
+      } catch (error) {
+        setHasLocationPermission(false);
+      }
+    };
+    checkInitialPermission();
+  }, []);
+  
+  // Konum izni verilmediyse modal ilk render ve her ekrana gelişte açılsın
+  useEffect(() => {
+    (async () => {
+      if (!isMounted.current) return;
+      // Kullanıcı premium ise background izin de kontrol edilmeli
+      let showModal = false;
+      if (user?.offline_enabled) {
+        const hasAll = await checkLocationPermissionsForPremium(user);
+        showModal = !hasAll;
+      } else {
+        showModal = !hasLocationPermission;
+      }
+      setLocationPermissionModalVisible(showModal);
+    })();
+  }, [hasLocationPermission, user]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      // Ekran focus'a geldiğinde izni yeniden kontrol et (native izin ekranı açılmaz)
+      const recheckPermission = async () => {
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          const granted = status === 'granted';
+          setHasLocationPermission(granted);
+          if (!granted && isMounted.current) {
+            setLocationPermissionModalVisible(true);
+          } else {
+            setLocationPermissionModalVisible(false);
+          }
+        } catch (error) {}
+      };
+      recheckPermission();
+    }, [])
+  );
   
   useEffect(() => {
     (async () => {
@@ -248,7 +305,14 @@ export default function MapScreen() {
             const normalized = provinceName.toLocaleLowerCase('tr').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u').replace(/Ç/g, 'c').replace(/Ğ/g, 'g').replace(/İ/g, 'i').replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u').replace(/\s+/g, '');
             const { districtToProvinceMap, provinceNameToValilikId } = require('@/lib/provinceMap');
             const matchedProvince = districtToProvinceMap[normalized] || null;
-            if (matchedProvince) matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
+            if (matchedProvince) {
+              matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
+              // SecureStore'a kaydet
+              if (matchedValilikIdLocal) {
+                await SecureStore.setItemAsync('matchedValilikId', String(matchedValilikIdLocal));
+                console.log('[ANNOUNCEMENT] Valilik ID kaydedildi:', matchedValilikIdLocal);
+              }
+            }
           }
         }
       } catch (err) {
@@ -327,6 +391,7 @@ export default function MapScreen() {
         }]);
         setNotificationIndex(0);
         setShowNotificationBar(true);
+        // Bildirim 30 saniye sonra kapanacak
         setTimeout(() => {
           if (isMounted.current) setShowNotificationBar(false);
         }, 30000);
@@ -375,7 +440,7 @@ export default function MapScreen() {
       let newAnnouncements: any[] = Array.isArray(allAnnouncements)
         ? allAnnouncements.filter((a: any) => !shownAnnouncementIds.includes(a.id))
         : [];
-      // Eğer localde yoksa API'den çek
+      // Eğer localde yoksa, API'den çek
       if (!Array.isArray(allAnnouncements) || allAnnouncements.length === 0) {
         try {
           if (__DEV__) console.log('[ANNOUNCEMENT] API çağrısı başlatılıyor...');
@@ -444,6 +509,7 @@ export default function MapScreen() {
         setTimeout(() => {
           if (isMounted.current) setShowNotificationBar(false);
         }, 30000);
+        return;
       }
     } catch (e) {
       if (__DEV__) console.warn('Duyuru bildirim fetch hatası:', e);
@@ -534,63 +600,6 @@ export default function MapScreen() {
     // isConnected veya harita sync sonrası tetiklenebilir (full sync sırasında bildirim gösterme)
     fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
   }, [isConnected]);
-  // Konumu güncelleyen fonksiyon
-  const getCurrentLocation = async () => {
-    try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        // Konum izni reddedildi, varsayılan olarak Türkiye'nin merkezi kullanılacak
-        // useCampingAreas hook'u otomatik olarak varsayılan konumu ayarlayacak
-        setHasLocationPermission(false);
-        await refreshData();
-        return;
-      }
-      const loc = await Location.getCurrentPositionAsync({});
-      setHasLocationPermission(true);
-      // Eğer useCampingAreas gibi bir hook ile location state yönetiliyorsa, burada bir şekilde location'ı güncellemelisiniz.
-      // Eğer location doğrudan değiştirilemiyorsa, refreshData ile yeniden çekilmesini sağlayabilirsiniz.
-      await refreshData();
-    } catch (e) {
-      // Hata durumunda da varsayılan konum kullanılacak
-      setHasLocationPermission(false);
-      await refreshData();
-    }
-  };
-
-  // Konum izni isteme fonksiyonu
-  const requestLocationPermission = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        setHasLocationPermission(true);
-        await refreshData();
-        if (Platform.OS === 'android') {
-          ToastAndroid.show('Konum izni verildi', ToastAndroid.SHORT);
-        } else {
-          Alert.alert('Başarılı', 'Konum izni verildi');
-        }
-      } else {
-        setHasLocationPermission(false);
-        // İzin reddedildi - kullanıcıyı ayarlara yönlendir
-        Alert.alert(
-          'Konum İzni Gerekli',
-          'Konum özelliklerini kullanmak için lütfen cihaz ayarlarından konum iznini açın.',
-          [
-            { text: 'İptal', style: 'cancel' },
-            { 
-              text: 'Ayarlara Git', 
-              onPress: () => {
-                Linking.openSettings();
-              }
-            }
-          ]
-        );
-      }
-    } catch (e) {
-      console.error('[DEBUG] Konum izni hatası:', e);
-      setHasLocationPermission(false);
-    }
-  };
 
   // Mevcut konuma odaklanma fonksiyonu
   const handleShowCurrentLocation = async () => {
@@ -683,7 +692,7 @@ export default function MapScreen() {
         if (token) {
           // Konum kontrolü - değişmişse haritayı güncelle
           try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
+            const { status } = await Location.getForegroundPermissionsAsync();
             if (status === 'granted') {
               const newLocation = await Location.getCurrentPositionAsync({});
               if (newLocation && newLocation.coords) {
@@ -742,46 +751,17 @@ export default function MapScreen() {
         console.log(`[BackgroundLocation] Offline özelliği aktif (${userData.offline_radius_km || 20} km)`);
         
         // Konum izni kontrolü
-        const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+        const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
         if (foregroundStatus !== 'granted') {
           console.log('[BackgroundLocation] Konum izni reddedildi');
           return;
         }
         
-        // Arka plan konum izni (sadece iOS için gerekli)
-        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+        // Arka plan konum izni (sadece mevcut durumu kontrol et, otomatik isteme!)
+        const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
         if (backgroundStatus !== 'granted') {
-          console.log('[BackgroundLocation] Arka plan konum izni reddedildi - Kısıtlı mod');
-          
-          // İlk kez gösterildi mi kontrol et (sadece bilgilendirme için)
-          const limitedModeAlertSeen = await SecureStore.getItemAsync('offlineLimitedModeAlertSeen');
-          if (!limitedModeAlertSeen) {
-            // İlk kez, bilgilendirme göster
-            Alert.alert(
-              'Offline Mod: Kısıtlı Özellikler',
-              'Konum izniniz "Yalnızca uygulama kullanılırken" olarak ayarlandı.\n\n✅ Manuel harita cache yapabilirsiniz\n❌ Otomatik arka plan senkronizasyonu devre dışı\n\nTam özellikler için: Ayarlar > Uygulamalar > Kamp Defterim > Konum > "Her zaman izin ver\n\n\nProfil sayfasından da konum izninizi düzenleyebilirsiniz."',
-              [
-                {
-                  text: 'Anladım',
-                  onPress: async () => {
-                    await SecureStore.setItemAsync('offlineLimitedModeAlertSeen', '1');
-                  },
-                  style: 'cancel'
-                },
-                {
-                  text: 'Ayarlara Aç',
-                  onPress: async () => {
-                    await SecureStore.setItemAsync('offlineLimitedModeAlertSeen', '1');
-                    if (Platform.OS === 'ios') {
-                      Linking.openURL('app-settings:');
-                    } else {
-                      Linking.openSettings();
-                    }
-                  }
-                }
-              ]
-            );
-          }
+          console.log('[BackgroundLocation] Arka plan konum izni yok, kısıtlı modda çalışacak.');
+          // Kullanıcıya bilgilendirme göstermek isterseniz burada Alert bırakabilirsiniz (isteğe bağlı)
           return; // Arka plan tracking başlatma
         }
         
@@ -823,14 +803,11 @@ export default function MapScreen() {
   
   // ...existing code...
 
-  const [user, setUser] = useState<any>(null);
-
   // Arkadaş sayısını logla
   useEffect(() => {
     if (user && Array.isArray(user.friends)) {
     }
   }, [user?.friends]);
-  const [communityMember, setCommunityMember] = useState<any>(null);
 
   useEffect(() => {
     // Kullanıcı ve community_members rolünü ve arkadaş listesini çek
@@ -1068,7 +1045,6 @@ export default function MapScreen() {
   const [selectedLocation, setSelectedLocation] = useState<{latitude: number, longitude: number} | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
   // Artık filtreler merkezi kategori yönetiminden geliyor
   const [selectedTags, setSelectedTags] = useState(campingTypes.map(t => t.id));
 
@@ -1098,7 +1074,7 @@ export default function MapScreen() {
   // Sadece kullanıcıya ait private ve tüm public alanları kapsayacak şekilde sorgu
 
   // Varsayılan olarak konumdan başlat, harita hareket ettirilirse mapMoveQuery ile güncelle
-  const { campingAreas, loading, error, location, refreshData } = useCampingAreas({
+  const { campingAreas, loading, error, location, refreshData, getCurrentLocation } = useCampingAreas({
     tags: selectedTags,
     radius: mapMoveQuery ? 20 : 30, // default 10 : 20
     latitude: mapMoveQuery ? mapMoveQuery.latitude : undefined,
@@ -1182,95 +1158,71 @@ export default function MapScreen() {
   }, []);
 
   // Konum izni durumunu kontrol et
-  useEffect(() => {
-    (async () => {
-      try {
-        const { status } = await Location.getForegroundPermissionsAsync();
-        const hasPermission = status === 'granted';
-        console.log('[DEBUG] Konum izni durumu:', status, 'hasPermission:', hasPermission);
-        setHasLocationPermission(hasPermission);
-      } catch {
-        console.log('[DEBUG] Konum izni kontrol hatası');
-        setHasLocationPermission(false);
-      }
-    })();
-  }, [location]);
+  // Konum izni durumu sadece requestLocationPermission ile güncellenir
 
   // Ekran focus'a geldiğinde konum izni ve mesafe kontrolü yap
   useFocusEffect(
     React.useCallback(() => {
-      (async () => {
-        try {
-          const { status } = await Location.getForegroundPermissionsAsync();
-          const hasPermission = status === 'granted';
-          console.log('[DEBUG] Focus - Konum izni durumu:', status);
-          setHasLocationPermission(hasPermission);
-          
-          // Konum izni varsa ve ilk yüklemeden sonraysa mesafe kontrolü yap
-          if (hasPermission && hasInitialSyncRef.current) {
-            let currentLat: number | undefined;
-            let currentLng: number | undefined;
-            
-            if (mapMoveQuery) {
-              currentLat = mapMoveQuery.latitude;
-              currentLng = mapMoveQuery.longitude;
-            } else if (location?.coords) {
-              currentLat = location.coords.latitude;
-              currentLng = location.coords.longitude;
-            }
-            
-            if (currentLat !== undefined && currentLng !== undefined) {
-              // Son sorgulanan konum varsa mesafe kontrolü yap
-              if (lastQueriedLocationRef.current) {
-                const dist = getDistanceMeters(
-                  lastQueriedLocationRef.current.latitude,
-                  lastQueriedLocationRef.current.longitude,
-                  currentLat,
-                  currentLng
-                );
-                
-                // 100 metreden az değiştiyse sorgu yapma
-                if (dist < 100) {
-                  if (__DEV__) console.log('[DEBUG] Focus - Konum anlamlı değişmedi, sorgu yapılmayacak:', dist.toFixed(2), 'metre');
-                  return;
-                }
-                if (__DEV__) console.log('[DEBUG] Focus - Konum değişti, yeni sorgu yapılacak:', dist.toFixed(2), 'metre');
-              }
-              
-              // Konumu güncelle ve veriyi yenile
-              lastQueriedLocationRef.current = { latitude: currentLat, longitude: currentLng };
-              await refreshData();
-            }
-          }
-        } catch {
-          setHasLocationPermission(false);
+      // Sadece focus olduğunda mesafe kontrolü yapılacak, izin durumu değişmeyecek
+      if (hasLocationPermission && hasInitialSyncRef.current) {
+        let currentLat: number | undefined;
+        let currentLng: number | undefined;
+        if (mapMoveQuery) {
+          currentLat = mapMoveQuery.latitude;
+          currentLng = mapMoveQuery.longitude;
+        } else if (location?.coords) {
+          currentLat = location.coords.latitude;
+          currentLng = location.coords.longitude;
         }
-      })();
-    }, [location, mapMoveQuery])
+        if (currentLat !== undefined && currentLng !== undefined) {
+          // Son sorgulanan konum varsa mesafe kontrolü yap
+          if (lastQueriedLocationRef.current) {
+            const dist = getDistanceMeters(
+              lastQueriedLocationRef.current.latitude,
+              lastQueriedLocationRef.current.longitude,
+              currentLat,
+              currentLng
+            );
+            // 100 metreden az değiştiyse sorgu yapma
+            if (dist < 100) {
+              if (__DEV__) console.log('[DEBUG] Focus - Konum anlamlı değişmedi, sorgu yapılmayacak:', dist.toFixed(2), 'metre');
+              return;
+            }
+            if (__DEV__) console.log('[DEBUG] Focus - Konum değişti, yeni sorgu yapılacak:', dist.toFixed(2), 'metre');
+          }
+          // Konumu güncelle ve veriyi yenile
+          lastQueriedLocationRef.current = { latitude: currentLat, longitude: currentLng };
+          refreshData();
+        }
+      }
+    }, [location, mapMoveQuery, hasLocationPermission])
   );
 
   // Guest kullanıcılar sadece kendi oluşturduğu kamp alanlarını görebilsin
   const isGuest = user?.role === 'guest';
-  // log kaldırıldı
-  // console.log('[DEBUG] Tüm kamp alanları:', campingAreas);
-  let filteredCampingAreas = filterCampingAreasByUser(campingAreas, user, isGuest);
-  filteredCampingAreas = filteredCampingAreas.filter(area => {
-    // Kendi kamp alanlarım
-    if (!selectedFilters.includes('own') && String(area.owner_id) === String(user?.id)) return false;
-    // Topluluk paylaşımları
-    if (!selectedFilters.includes('community') && area.community_id && String(area.community_id) === String(user?.community_id)) return false;
-    // Arkadaş paylaşımları
-    if (!selectedFilters.includes('friend') && area.friend_user_ids && Array.isArray(user?.friends) && user.friends.length > 0) {
-      const friendList = Array.isArray(area.friend_user_ids) ? area.friend_user_ids : (typeof area.friend_user_ids === 'string' ? JSON.parse(area.friend_user_ids) : []);
-      const userFriendIds = user.friends.map((f: any) => String(f.id));
-      if (friendList.some((id: any) => userFriendIds.includes(String(id)))) return false;
-    }
-    // Kullanıcı paylaşımları (public, owner_id DOLU olmalı)
-    if (!selectedFilters.includes('user') && area.visibility === 'public' && area.owner_id) return false;
-    // KampDefterim Paylaşımları (owner_id BOŞ olanlar)
-    if (!selectedFilters.includes('system') && (!area.owner_id || area.owner_id === '')) return false;
-    return true;
-  });
+  
+  // filteredCampingAreas'ı memoize et - gereksiz re-render'ları önle
+  const filteredCampingAreas = useMemo(() => {
+    let filtered = filterCampingAreasByUser(campingAreas, user, isGuest);
+    filtered = filtered.filter(area => {
+      // Kendi kamp alanlarım
+      if (!selectedFilters.includes('own') && String(area.owner_id) === String(user?.id)) return false;
+      // Topluluk paylaşımları
+      if (!selectedFilters.includes('community') && area.community_id && String(area.community_id) === String(user?.community_id)) return false;
+      // Arkadaş paylaşımları
+      if (!selectedFilters.includes('friend') && area.friend_user_ids && Array.isArray(user?.friends) && user.friends.length > 0) {
+        const friendList = Array.isArray(area.friend_user_ids) ? area.friend_user_ids : (typeof area.friend_user_ids === 'string' ? JSON.parse(area.friend_user_ids) : []);
+        const userFriendIds = user.friends.map((f: any) => String(f.id));
+        if (friendList.some((id: any) => userFriendIds.includes(String(id)))) return false;
+      }
+      // Kullanıcı paylaşımları (public, owner_id DOLU olmalı)
+      if (!selectedFilters.includes('user') && area.visibility === 'public' && area.owner_id) return false;
+      // KampDefterim Paylaşımları (owner_id BOŞ olanlar)
+      if (!selectedFilters.includes('system') && (!area.owner_id || area.owner_id === '')) return false;
+      return true;
+    });
+    return filtered;
+  }, [campingAreas, user, isGuest, selectedFilters]);
 
   // API senkronizasyonu sadece ilk mount'ta çalışsın
   const isSyncingRef = useRef(false);
@@ -1392,6 +1344,41 @@ export default function MapScreen() {
     lastQueriedLocationRef.current = { latitude: currentLat, longitude: currentLng };
     refreshData();
   }, [mapMoveQuery, location]);
+
+  // Konum değiştiğinde valilik_id'yi güncelle (announcements için)
+  useEffect(() => {
+    if (!location?.coords) return;
+    
+    const updateValilikId = async () => {
+      try {
+        const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
+        if (provinceName) {
+          const normalized = provinceName.toLocaleLowerCase('tr').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u').replace(/Ç/g, 'c').replace(/Ğ/g, 'g').replace(/İ/g, 'i').replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u').replace(/\s+/g, '');
+          const { districtToProvinceMap, provinceNameToValilikId } = require('@/lib/provinceMap');
+          const matchedProvince = districtToProvinceMap[normalized] || null;
+          const newValilikId = matchedProvince ? provinceNameToValilikId[matchedProvince] || null : null;
+          
+          // Mevcut valilik_id'yi oku
+          const storedValilikId = await SecureStore.getItemAsync('matchedValilikId');
+          const storedValilikIdNum = storedValilikId ? parseInt(storedValilikId) : null;
+          
+          // Değiştiyse güncelle ve event bus ile bildir
+          if (newValilikId && newValilikId !== storedValilikIdNum) {
+            await SecureStore.setItemAsync('matchedValilikId', String(newValilikId));
+            console.log('[VALILIK UPDATE] Valilik ID güncellendi:', storedValilikIdNum, '->', newValilikId);
+            
+            // Event bus ile duyuruları güncelleme sinyali gönder
+            const { eventBus } = require('@/lib/eventBus');
+            eventBus.emit('valilikIdChanged', newValilikId);
+          }
+        }
+      } catch (error) {
+        console.error('[VALILIK UPDATE] Hata:', error);
+      }
+    };
+    
+    updateValilikId();
+  }, [location]);
 
   // Online modda konum değiştiğinde harita tile'larını ön-cache'le
   useEffect(() => {
@@ -1558,9 +1545,15 @@ export default function MapScreen() {
 
 
   const generateMapHTML = () => {
-    if (!location) {
-      return '';
-    }
+    // Location null ise varsayılan konum kullan (Türkiye - Ankara)
+    const defaultLocation = {
+      coords: {
+        latitude: 39.9251,
+        longitude: 32.8375,
+      }
+    };
+    // location null ise defaultLocation kullan, asla boş string dönme
+    const currentLocation = (location && location.coords && typeof location.coords.latitude === 'number' && typeof location.coords.longitude === 'number') ? location : defaultLocation;
 
     // Guest kontrolü
     const isGuest = user?.role === 'guest';
@@ -1664,7 +1657,7 @@ export default function MapScreen() {
       <body>
         <div id="map"></div>
         <script>
-          var map = L.map('map').setView([${mapMoveQuery ? mapMoveQuery.latitude : location.coords.latitude}, ${mapMoveQuery ? mapMoveQuery.longitude : location.coords.longitude}], 14);
+          var map = L.map('map').setView([${mapMoveQuery ? mapMoveQuery.latitude : currentLocation.coords.latitude}, ${mapMoveQuery ? mapMoveQuery.longitude : currentLocation.coords.longitude}], 14);
           var isLocationPickerMode = ${isLocationPickerMode};
           var selectedLocationMarker = null;
           var isOffline = ${!isConnected};
@@ -1854,7 +1847,7 @@ export default function MapScreen() {
           }
           
           // Kullanıcı konumu
-          L.marker([${location.coords.latitude}, ${location.coords.longitude}], {
+          L.marker([${currentLocation.coords.latitude}, ${currentLocation.coords.longitude}], {
             icon: L.divIcon({
               className: 'user-location',
               html: '<div style="background: #3b82f6; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
@@ -1882,7 +1875,7 @@ export default function MapScreen() {
             }).addTo(map).bindPopup(\`
           <div class="custom-popup" style="display: flex; flex-direction: row; gap: 0; min-width: 320px; max-width: 380px; align-items: stretch;">
             <div style="position: relative; flex: 0 0 45%; width: 45%; min-width: 90px; max-width: 160px; aspect-ratio: 1/1; border-radius: 0; background: #f3f4f6; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0; padding: 0; left: 0; top: 0; border: none;">
-              ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='Kapak' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" />` : `<div style=\"width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;\">
+              ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='Kapak' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" />` : `<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
                 <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 137.5 137.5"><g><path fill="none" d="M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z"/><path fill="#444444ff" d="M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z"/></g></svg>
               </div>`}
               <!-- Favori butonu sol üstte, fotoğraf üzerinde -->
@@ -1967,8 +1960,8 @@ export default function MapScreen() {
             if (window.ReactNativeWebView) {
               window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'addCampingAreaAtCurrentLocation',
-                latitude: ${location.coords.latitude},
-                longitude: ${location.coords.longitude}
+                latitude: ${currentLocation.coords.latitude},
+                longitude: ${currentLocation.coords.longitude}
               }));
             }
           };
@@ -2033,6 +2026,11 @@ export default function MapScreen() {
       </html>
     `;
   };
+
+  // HTML çıktısını memoize et - gereksiz re-render'ları önle
+  const mapHTML = useMemo(() => {
+    return generateMapHTML();
+  }, [location, filteredCampingAreas, mapMoveQuery, isLocationPickerMode, isConnected, favorites]);
 
   const handleWebViewMessage = (event: any) => {
     try {
@@ -2285,7 +2283,7 @@ export default function MapScreen() {
     try {
       // Konum kontrolü - manuel sync başında da kontrol et
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        const { status } = await Location.getForegroundPermissionsAsync();
         if (status === 'granted') {
           const newLocation = await Location.getCurrentPositionAsync({});
           if (newLocation && newLocation.coords) {
@@ -2384,14 +2382,36 @@ export default function MapScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <HelpModal visible={helpVisible} onClose={() => setHelpVisible(false)} />
+      <LocationPermissionModal
+        visible={locationPermissionModalVisible}
+        onClose={() => setLocationPermissionModalVisible(false)}
+        onPermissionGranted={async () => {
+          console.log('[PERMISSION] İzin verildi, konum güncelleniyor...');
+          setHasLocationPermission(true);
+          setLocationPermissionModalVisible(false);
+          
+          // Haritayı kullanıcının konumuna döndür
+          setMapMoveQuery(null);
+          setMapCenter(null);
+          
+          // Hook'taki getCurrentLocation çağır - location state'i güncellenecek
+          await getCurrentLocation();
+          
+          // Veriyi yenile
+          await refreshData();
+        }}
+      />
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Kamp Alanları</Text>
         <View style={styles.headerActions}>
           {/* Görünüm Değiştirme Butonu */}
           <TouchableOpacity
-            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
+            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
             onPress={() => {
+              if (syncProgress.isLoading) {
+                return;
+              }
               if (!isConnected && !user?.offline_enabled) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
@@ -2404,7 +2424,7 @@ export default function MapScreen() {
                 setViewMode(viewMode === 'map' ? 'list' : 'map');
               }
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
           >
             {viewMode === 'map' ? (
               <List size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
@@ -2413,8 +2433,11 @@ export default function MapScreen() {
             )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
+            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
             onPress={async () => {
+              if (syncProgress.isLoading) {
+                return;
+              }
               if (!isConnected && !user?.offline_enabled) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
@@ -2436,13 +2459,16 @@ export default function MapScreen() {
                 }
               }
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
           >
             <Feather name="search" size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
+            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
             onPress={() => {
+              if (syncProgress.isLoading) {
+                return;
+              }
               if (!isConnected && !user?.offline_enabled) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
@@ -2453,7 +2479,7 @@ export default function MapScreen() {
               }
               if (isMounted.current) setShowFilters(!showFilters);
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
           >
             <Filter size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
           </TouchableOpacity>
@@ -2637,46 +2663,49 @@ export default function MapScreen() {
         <>
           {/* Map */}
           <View style={styles.mapContainer} pointerEvents="auto">
-            {location && (
-              <WebView
-                ref={webViewRef}
-                key={mapKey}
-                source={{ html: generateMapHTML() }}
-                style={styles.map}
-                javaScriptEnabled={true}
-                domStorageEnabled={true}
-                onMessage={handleWebViewMessage}
-                onLoadStart={() => setIsWebViewReady(false)}
-                onLoadEnd={() => {
-                  if (isMounted.current) {
-                    setIsWebViewReady(true);
-                  }
-                }}
-                onError={(syntheticEvent) => {
-                  const { nativeEvent } = syntheticEvent;
-                  if (__DEV__) {
-                    console.warn('[WebView] Error:', nativeEvent);
-                  }
+            <WebView
+              key={`map-${mapKey}`}
+              ref={webViewRef}
+              source={{ html: mapHTML }}
+              style={styles.map}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              onMessage={handleWebViewMessage}
+              onLoadStart={() => {
+                if (isMounted.current) {
                   setIsWebViewReady(false);
-                }}
-                onHttpError={(syntheticEvent) => {
-                  const { nativeEvent } = syntheticEvent;
-                  if (__DEV__) {
-                    console.warn('[WebView] HTTP Error:', nativeEvent.statusCode);
-                  }
-                }}
-                onRenderProcessGone={(syntheticEvent) => {
-                  const { nativeEvent } = syntheticEvent;
-                  if (__DEV__) {
-                    console.error('[WebView] Render process gone:', nativeEvent.didCrash);
-                  }
-                  // WebView crash oldu, yeniden yükle
-                  if (isMounted.current) {
-                    setMapKey(prev => prev + 1);
-                  }
-                }}
-              />
-            )}
+                }
+              }}
+              onLoadEnd={() => {
+                if (isMounted.current) {
+                  setIsWebViewReady(true);
+                }
+              }}
+              onError={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                console.warn('[WebView] Error:', nativeEvent);
+                if (isMounted.current) {
+                  setIsWebViewReady(false);
+                }
+              }}
+              onHttpError={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                console.warn('[WebView] HTTP Error:', nativeEvent.statusCode);
+              }}
+              onRenderProcessGone={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error('[WebView] Render process gone:', nativeEvent.didCrash);
+                // WebView crash oldu, yeniden yükle
+                if (isMounted.current) {
+                  setIsWebViewReady(false);
+                  setTimeout(() => {
+                    if (isMounted.current) {
+                      setMapKey(prev => prev + 1);
+                    }
+                  }, 100);
+                }
+              }}
+            />
             {/* Harita kaydırıldığında çıkan buton */}
             {showMapMoveButton && mapCenter && !isLocationPickerMode && !showMapPopup && (
               <View style={styles.mapMoveButtonContainer} pointerEvents="box-none">
@@ -2684,9 +2713,13 @@ export default function MapScreen() {
                   style={[
                     styles.fab, 
                     styles.fabBinoculars, 
-                    (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }
+                    (!user?.offline_enabled && !isConnected) && { opacity: 0.4 },
+                    syncProgress.isLoading && { opacity: 0.4 }
                   ]} 
                   onPress={() => {
+                    if (syncProgress.isLoading) {
+                      return;
+                    }
                     if (!isConnected && !user?.offline_enabled) {
                       Alert.alert(
                         'Offline Özellik Gerekli',
@@ -2697,7 +2730,7 @@ export default function MapScreen() {
                     }
                     handleShowMapMoveResults();
                   }}
-                  disabled={!isConnected && !user?.offline_enabled}
+                  disabled={(!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
                 >
                   <Binoculars size={24} color="#fff" />
                 </TouchableOpacity>
@@ -2731,8 +2764,8 @@ export default function MapScreen() {
               <TouchableOpacity
                 style={styles.locationPermissionButton}
                 onPress={() => {
-                  console.log('[DEBUG] Buton onPress tetiklendi');
-                  requestLocationPermission();
+                  console.log('[DEBUG] Konum izni butonu tıklandı, modal açılıyor');
+                  setLocationPermissionModalVisible(true);
                 }}
                 disabled={isBusy}
                 activeOpacity={0.7}
@@ -2790,6 +2823,7 @@ export default function MapScreen() {
             campingAreas={filteredCampingAreas}
             onSelectArea={(area) => {
               if (!isMounted.current) return;
+              if (syncProgress.isLoading) return;
               setSelectedCampingArea(area);
               setShowDetailModal(true);
             }}
@@ -2797,6 +2831,7 @@ export default function MapScreen() {
             currentLocation={location?.coords}
             favorites={favorites}
             onToggleFavorite={handleToggleFavorite}
+            disabled={syncProgress.isLoading}
           />
         </View>
       )}
