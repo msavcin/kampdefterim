@@ -112,6 +112,7 @@ export async function deleteCampingAreaSmart({ campingArea, isConnected }) {
 // Merkezi senkronizasyon yöneticisi
 // Tüm offline/online veri (kamp alanı, fotoğraf, checklist, vs.) burada yönetilir
 import * as SecureStore from 'expo-secure-store';
+import { setLargeItemAsync, getLargeItemAsync } from './largeStorage';
 import { getDatabase } from './database';
 import { uploadCampgroundImage } from './campgroundImageApi';
 import { updateCampingAreaOnServer, createCampingAreaOnServer, sanitizeCampingAreaData } from './campingAreaApi';
@@ -125,7 +126,7 @@ async function syncPendingChecklists() {
 // Pending Images kuyruğunu işle
 async function syncPendingImages(userId) {
   const db = getDatabase();
-  const pendingImagesStr = await SecureStore.getItemAsync('pendingImages');
+  const pendingImagesStr = await getLargeItemAsync('pendingImages');
   let pendingImages = pendingImagesStr ? JSON.parse(pendingImagesStr) : [];
   if (!pendingImages.length) return;
   const updatedPending = [];
@@ -229,17 +230,17 @@ async function syncPendingImages(userId) {
       // Orphan kaydına campingAreaId ekle (artık orphan değil)
       orphan.campingAreaId = area.id;
       // PendingImages kuyruğunu güncelle
-      const piStr = await SecureStore.getItemAsync('pendingImages');
+      const piStr = await getLargeItemAsync('pendingImages');
       let piArr = piStr ? JSON.parse(piStr) : [];
       piArr = piArr.map(p => (p.local_uri === orphan.local_uri && !p.campingAreaId) ? { ...p, campingAreaId: area.id } : p);
-      await SecureStore.setItemAsync('pendingImages', JSON.stringify(piArr));
+      await setLargeItemAsync('pendingImages', JSON.stringify(piArr));
       // Sonraki sync'te bu görsel doğrudan campingAreaId ile işlenecek
       updatedPending.push({ ...orphan, campingAreaId: area.id });
     }
     // Bu sync'te S3 upload denenmez, bir sonraki sync'te campingAreaId ile işlenir
   }
   // Sadece yüklenemeyenleri pending'de tut
-  await SecureStore.setItemAsync('pendingImages', JSON.stringify(updatedPending));
+  await setLargeItemAsync('pendingImages', JSON.stringify(updatedPending));
 }
 
 

@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Konum İzinleri - Kamp Defterim</title>
+  <link rel="icon" href="./assets/images/icon.png">
+  <style>
+    body { 
+      font-family: 'Segoe UI', Arial, sans-serif; 
+      background: #f8fafc; 
+      color: #222; 
+      margin: 0; 
+      line-height: 1.6;
+    }
+    .container { 
+      max-width: 900px; 
+      margin: 40px auto; 
+      background: #fff; 
+      border-radius: 16px; 
+      box-shadow: 0 2px 12px #0001; 
+      padding: 40px; 
+    }
+    .logo { 
+      width: 120px; 
+      display: block; 
+      margin: 0 auto 24px; 
+      border-radius: 24px; 
+      background: #f8fafc; 
+    }
+    h1 { 
+      text-align: center; 
+      color: #0e7490; 
+      margin-bottom: 8px; 
+      font-size: 2.2em;
+    }
+    h2 { 
+      color: #0e7490; 
+      margin-top: 32px; 
+      margin-bottom: 16px; 
+      font-size: 1.5em;
+      border-bottom: 2px solid #e0f2fe;
+      padding-bottom: 8px;
+    }
+    h3 { 
+      color: #0369a1; 
+      margin-top: 24px; 
+      margin-bottom: 12px; 
+      font-size: 1.2em;
+    }
+    .motto { 
+      text-align: center; 
+      color: #64748b; 
+      font-size: 1.1em; 
+      margin-bottom: 32px; 
+    }
+    .info { 
+      margin: 24px 0; 
+    }
+    .info strong { 
+      color: #0e7490; 
+    }
+    .permission-box {
+      background: #f0f9ff;
+      border-left: 4px solid #0ea5e9;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+    }
+    .warning-box {
+      background: #fef3c7;
+      border-left: 4px solid #f59e0b;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+    }
+    .premium-box {
+      background: #f0fdf4;
+      border-left: 4px solid #059669;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+    }
+    .code-block {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9em;
+      margin: 16px 0;
+    }
+    .file-reference {
+      background: #f1f5f9;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9em;
+      color: #475569;
+    }
+    ul, ol {
+      padding-left: 24px;
+    }
+    li {
+      margin: 8px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
+    th, td {
+      border: 1px solid #e2e8f0;
+      padding: 12px;
+      text-align: left;
+    }
+    th {
+      background: #f8fafc;
+      color: #0e7490;
+      font-weight: bold;
+    }
+    tr:nth-child(even) {
+      background: #f9fafb;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.85em;
+      font-weight: bold;
+      margin: 4px;
+    }
+    .badge-foreground {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+    .badge-background {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .badge-premium {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .footer { 
+      text-align: center; 
+      color: #94a3b8; 
+      font-size: 0.95em; 
+      margin-top: 48px; 
+      padding-top: 24px;
+      border-top: 1px solid #e2e8f0;
+    }
+    a {
+      color: #0e7490;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="./assets/images/login_screen.png" alt="Kamp Defterim Logo" class="logo">
+    <h1>📍 Konum İzinleri Raporu</h1>
+    <div class="motto">Kamp Defterim Uygulamasında Konum İzinlerinin Kapsamlı Analizi</div>
+
+    <div class="info">
+      <p><strong>Rapor Tarihi:</strong> 5 Şubat 2026</p>
+      <p><strong>Uygulama Versiyonu:</strong> 1.3.3</p>
+      <p><strong>Platform:</strong> Android (Expo-React Native)</p>
+    </div>
+
+    <h2>🎯 Genel Bakış</h2>
+    <p>
+      Kamp Defterim uygulaması, kullanıcılara en iyi kamp deneyimini sunabilmek için konum tabanlı özellikler sunar. 
+      Bu rapor, uygulamada kullanılan tüm konum izinlerini, kullanım amaçlarını ve teknik detaylarını içerir.
+    </p>
+
+    <h2>📋 İzin Türleri</h2>
+    <p>Uygulamada kullanılan konum izinleri üç ana kategoriye ayrılır:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>İzin Türü</th>
+          <th>Android İzni</th>
+          <th>Kullanım Amacı</th>
+          <th>Gereklilik</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="badge badge-foreground">Foreground (Ön Plan)</span></td>
+          <td><code>ACCESS_FINE_LOCATION</code><br><code>ACCESS_COARSE_LOCATION</code></td>
+          <td>Uygulama açıkken konum bilgisi alma, haritada kullanıcı konumunu gösterme</td>
+          <td>Tüm kullanıcılar için temel</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-background">Background (Arka Plan)</span></td>
+          <td><code>ACCESS_BACKGROUND_LOCATION</code><br><code>FOREGROUND_SERVICE_LOCATION</code></td>
+          <td>Offline mod için arka planda harita tile'larını otomatik indirme</td>
+          <td>Sadece Premium kullanıcılar</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-premium">Foreground Service</span></td>
+          <td><code>FOREGROUND_SERVICE</code></td>
+          <td>Arka plan konum takibi sırasında sistem bildirimleri</td>
+          <td>Premium özellikleri için</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>🔧 Teknik İmplementasyon</h2>
+
+    <h3>1. Android Manifest İzinleri</h3>
+    <div class="permission-box">
+      <p><strong>Dosya:</strong> <span class="file-reference">app.json</span></p>
+      <p>Uygulamanın Android manifestinde tanımlanan izinler:</p>
+      <div class="code-block">
+"permissions": [
+  "android.permission.ACCESS_FINE_LOCATION",
+  "android.permission.ACCESS_COARSE_LOCATION",
+  "android.permission.ACCESS_BACKGROUND_LOCATION",
+  "android.permission.FOREGROUND_SERVICE",
+  "android.permission.FOREGROUND_SERVICE_LOCATION"
+]</div>
+    </div>
+
+    <h3>2. Expo Location Konfigürasyonu</h3>
+    <div class="permission-box">
+      <p><strong>Dosya:</strong> <span class="file-reference">app.json</span> (plugins bölümü)</p>
+      <div class="code-block">
+"expo-location": {
+  "locationAlwaysAndWhenInUsePermission": 
+    "Offline harita senkronizasyonu için konum izni gereklidir.",
+  "locationAlwaysPermission": 
+    "Arka planda offline harita güncellemeleri için konum izni gereklidir.",
+  "locationWhenInUsePermission": 
+    "Harita ve kamp alanlarını görmek için konum izni gereklidir.",
+  "isAndroidBackgroundLocationEnabled": true,
+  "isAndroidForegroundServiceEnabled": true
+}</div>
+    </div>
+
+    <h3>3. Konum İzni Kontrol Fonksiyonları</h3>
+
+    <h4>3.1 Premium Kullanıcı İzin Kontrolü</h4>
+    <div class="premium-box">
+      <p><strong>Dosya:</strong> <span class="file-reference">lib/checkLocationPermissionsForPremium.ts</span></p>
+      <p><strong>Amaç:</strong> Premium kullanıcıların hem ön plan hem de arka plan izinlerinin olup olmadığını kontrol eder.</p>
+      <div class="code-block">
+export async function checkLocationPermissionsForPremium(user) {
+  // Premium kullanıcıda hem foreground hem background izin granted olmalı
+  if (!user?.offline_enabled) return true;
+  const fg = await Location.getForegroundPermissionsAsync();
+  if (fg.status !== 'granted') return false;
+  const bg = await Location.getBackgroundPermissionsAsync();
+  return bg.status === 'granted';
+}</div>
+      <p><strong>Kullanım Senaryosu:</strong></p>
+      <ul>
+        <li>Offline mod aktif olan kullanıcılar için çalışır</li>
+        <li>Foreground izni yoksa <code>false</code> döner</li>
+        <li>Background izni yoksa <code>false</code> döner</li>
+        <li>Her iki izin de varsa <code>true</code> döner</li>
+      </ul>
+    </div>
+
+    <h4>3.2 Konum İzni Modal Componenti</h4>
+    <div class="permission-box">
+      <p><strong>Dosya:</strong> <span class="file-reference">components/LocationPermissionModal.tsx</span></p>
+      <p><strong>Amaç:</strong> Kullanıcıya konum izni gereksinimlerini açıklayan ve izin isteyen modal pencere.</p>
+      <p><strong>Özellikler:</strong></p>
+      <ul>
+        <li>✅ Premium ve normal kullanıcılar için farklı mesajlar</li>
+        <li>✅ Foreground izin isteği</li>
+        <li>✅ Premium kullanıcılar için background izin isteği</li>
+        <li>✅ "Bir daha hatırlatma" seçeneği</li>
+        <li>✅ Sistem ayarlarına yönlendirme (izin reddedildiyse)</li>
+        <li>✅ AppState listener ile uygulama ön plana geldiğinde izin kontrolü</li>
+      </ul>
+      <p><strong>Kullanım Yerleri:</strong></p>
+      <ul>
+        <li>Ana ekran (index.tsx) - Uygulama ilk açıldığında</li>
+        <li>Profil sayfası - Manuel izin talebi için</li>
+      </ul>
+    </div>
+
+    <h4>3.3 Konum Takibi (useCampingAreas Hook)</h4>
+    <div class="permission-box">
+      <p><strong>Dosya:</strong> <span class="file-reference">hooks/useCampingAreas.ts</span></p>
+      <p><strong>Amaç:</strong> Kullanıcının konumunu takip eder ve kamp alanlarını getirir.</p>
+      <p><strong>İşlevler:</strong></p>
+      <ul>
+        <li><strong>getCurrentLocation():</strong> Mevcut konumu bir kez alır</li>
+        <li><strong>watchPositionAsync():</strong> Konum değişikliklerini sürekli izler</li>
+        <li><strong>Varsayılan Konum:</strong> İzin yoksa Ankara (39.9251, 32.8375) kullanılır</li>
+      </ul>
+      <div class="code-block">
+const { status } = await Location.getForegroundPermissionsAsync();
+if (status === 'granted') {
+  locationSubscription = await Location.watchPositionAsync(
+    {
+      accuracy: Location.Accuracy.Balanced,
+      distanceInterval: 100,  // 100m hareket
+      timeInterval: 30000,    // 30 saniye
+    },
+    (newLocation) => {
+      setLocation(newLocation);
+    }
+  );
+}</div>
+    </div>
+
+    <h2>📱 Kullanıcı Deneyimi Akışları</h2>
+
+    <h3>Normal Kullanıcı Akışı</h3>
+    <ol>
+      <li>Uygulama açılır</li>
+      <li>Foreground konum izni kontrol edilir</li>
+      <li>İzin yoksa <code>LocationPermissionModal</code> gösterilir</li>
+      <li>Kullanıcı "Konum İzni Ver" butonuna basar</li>
+      <li><code>requestForegroundPermissionsAsync()</code> çağrılır</li>
+      <li>İzin verilirse:
+        <ul>
+          <li>Kullanıcının konumu alınır</li>
+          <li>Harita konuma odaklanır</li>
+          <li>Yakındaki kamp alanları gösterilir</li>
+        </ul>
+      </li>
+      <li>İzin verilmezse:
+        <ul>
+          <li>Varsayılan konum (Ankara) kullanılır</li>
+          <li>Kullanıcı manuel olarak haritada gezinebilir</li>
+        </ul>
+      </li>
+    </ol>
+
+    <h3>Premium Kullanıcı Akışı (Offline Mode)</h3>
+    <ol>
+      <li>Uygulama açılır</li>
+      <li>Foreground konum izni kontrol edilir</li>
+      <li>İzin yoksa modal gösterilir (Premium mesajı ile)</li>
+      <li>Kullanıcı "Konum İzni Ver" butonuna basar</li>
+      <li><code>requestForegroundPermissionsAsync()</code> çağrılır</li>
+      <li>Foreground izin verildikten sonra:</li>
+      <li><code>getBackgroundPermissionsAsync()</code> ile mevcut durum kontrol edilir</li>
+      <li>Background izni yoksa <code>requestBackgroundPermissionsAsync()</code> çağrılır</li>
+      <li>Sistem, kullanıcıya "Her zaman izin ver" seçeneğini sunar</li>
+      <li>Kullanıcı "Her zaman izin ver" seçerse:
+        <ul>
+          <li>Offline mode tamamen aktif olur</li>
+          <li>Arka planda harita tile'ları otomatik indirilir</li>
+          <li>Konum değişikliklerinde cache güncellenir</li>
+        </ul>
+      </li>
+      <li>Kullanıcı "Sadece uygulama kullanımda" seçerse:
+        <ul>
+          <li>Uyarı mesajı gösterilir</li>
+          <li>Profil sayfasından izin ayarlanabilir</li>
+        </ul>
+      </li>
+    </ol>
+
+    <h2>⚙️ Önemli Fonksiyonlar ve Dosyalar</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Dosya</th>
+          <th>Fonksiyon/Özellik</th>
+          <th>Açıklama</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="file-reference">lib/checkLocationPermissionsForPremium.ts</span></td>
+          <td><code>checkLocationPermissionsForPremium()</code></td>
+          <td>Premium kullanıcılar için izin kontrolü</td>
+        </tr>
+        <tr>
+          <td><span class="file-reference">components/LocationPermissionModal.tsx</span></td>
+          <td><code>handleRequestPermission()</code></td>
+          <td>İzin talep etme ve modal yönetimi</td>
+        </tr>
+        <tr>
+          <td><span class="file-reference">hooks/useCampingAreas.ts</span></td>
+          <td><code>getCurrentLocation()</code></td>
+          <td>Mevcut konumu alma</td>
+        </tr>
+        <tr>
+          <td><span class="file-reference">hooks/useCampingAreas.ts</span></td>
+          <td><code>Location.watchPositionAsync()</code></td>
+          <td>Sürekli konum takibi (100m interval)</td>
+        </tr>
+        <tr>
+          <td><span class="file-reference">app/(tabs)/index.tsx</span></td>
+          <td><code>locationPermissionModalVisible</code></td>
+          <td>Ana ekranda modal kontrolü</td>
+        </tr>
+        <tr>
+          <td><span class="file-reference">app/(tabs)/profile.tsx</span></td>
+          <td>İzin talep butonları</td>
+          <td>Manuel izin talep mekanizması</td>
+        </tr>
+        <tr>
+          <td><span class="file-reference">lib/eventBus.ts</span></td>
+          <td><code>locationPermissionGranted</code></td>
+          <td>İzin verildiğinde event yayınlama</td>
+        </tr>
+        <tr>
+          <td><span class="file-reference">lib/mapTileCache.ts</span></td>
+          <td>Tile cache yönetimi</td>
+          <td>Offline harita için tile indirme</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>🔒 Gizlilik ve Güvenlik</h2>
+
+    <div class="warning-box">
+      <h3>⚠️ Konum Verisi Kullanımı</h3>
+      <ul>
+        <li><strong>Veri Saklama:</strong> Konum verileri sadece cihazda yerel olarak saklanır</li>
+        <li><strong>Sunucuya Gönderim:</strong> Kullanıcı konumu sunucuya gönderilmez</li>
+        <li><strong>Üçüncü Taraf Paylaşımı:</strong> Konum bilgileri üçüncü taraflarla paylaşılmaz</li>
+        <li><strong>Kullanım Amacı:</strong> Sadece harita görüntüleme ve kamp alanı arama için kullanılır</li>
+        <li><strong>Offline Mode:</strong> Premium kullanıcılar için arka planda sadece harita tile'ları indirilir, konum kaydedilmez</li>
+      </ul>
+    </div>
+
+    <h2>📊 İstatistikler ve Kullanım</h2>
+
+    <div class="premium-box">
+      <h3>Konum Takip Parametreleri</h3>
+      <ul>
+        <li><strong>Accuracy:</strong> <code>Location.Accuracy.Balanced</code></li>
+        <li><strong>Distance Interval:</strong> 100 metre (100m hareket edince güncelleme)</li>
+        <li><strong>Time Interval:</strong> 30 saniye (minimum güncelleme süresi)</li>
+        <li><strong>Varsayılan Radius:</strong> 20 km (kamp alanı arama çapı)</li>
+        <li><strong>Offline Cache Radius:</strong> 20 km (konum değişikliğinde otomatik cache)</li>
+        <li><strong>Konum Değişiklik Threshold:</strong> 1 km (cache tetikleme mesafesi)</li>
+      </ul>
+    </div>
+
+    <h2>🛠️ Geliştirici Notları</h2>
+
+    <h3>İzin İstek Sırası</h3>
+    <div class="code-block">
+1. getForegroundPermissionsAsync() - Mevcut durumu kontrol
+2. requestForegroundPermissionsAsync() - Foreground izin iste
+3. getBackgroundPermissionsAsync() - Background durum kontrol (sadece premium)
+4. requestBackgroundPermissionsAsync() - Background izin iste (sadece premium)
+    </div>
+
+    <h3>Hata Yönetimi</h3>
+    <ul>
+      <li><strong>İzin Reddedilirse:</strong> Varsayılan konum (Ankara) kullanılır</li>
+      <li><strong>Sistem Ayarları:</strong> <code>Linking.openSettings()</code> ile kullanıcı sistem ayarlarına yönlendirilir</li>
+      <li><strong>İzin Tekrar İstenemiyorsa:</strong> <code>canAskAgain === false</code> durumunda direkt ayarlara gönderilir</li>
+    </ul>
+
+    <h3>State Yönetimi</h3>
+    <ul>
+      <li><strong>SecureStore:</strong> <code>doNotShowLocationPermissionModal</code> tercih saklanır</li>
+      <li><strong>EventBus:</strong> <code>locationPermissionGranted</code> eventi ile komponentler arası iletişim</li>
+      <li><strong>AppState Listener:</strong> Uygulama ön plana geldiğinde izin durumu kontrol edilir</li>
+    </ul>
+
+    <h2>🔄 Bağımlılıklar</h2>
+
+    <div class="info">
+      <p><strong>Ana Paket:</strong> <code>expo-location</code> (18.1.6)</p>
+      <p><strong>Android Servisleri:</strong></p>
+      <ul>
+        <li><code>com.google.android.gms:play-services-location:21.0.1</code></li>
+        <li><code>host.exp.exponent:expo.modules.location:18.1.6</code></li>
+      </ul>
+    </div>
+
+    <h2>📝 Sonuç ve Öneriler</h2>
+
+    <div class="premium-box">
+      <h3>✅ Mevcut Güçlü Yönler</h3>
+      <ul>
+        <li>Detaylı kullanıcı bilgilendirmesi ve açık izin mesajları</li>
+        <li>Premium ve normal kullanıcılar için farklılaştırılmış izin akışları</li>
+        <li>Varsayılan konum ile izinsiz kullanım desteği</li>
+        <li>AppState listener ile aktif izin durumu kontrolü</li>
+        <li>"Bir daha hatırlatma" tercihinin saklanması</li>
+        <li>EventBus ile merkezi izin durumu yönetimi</li>
+      </ul>
+
+      <h3>💡 Gelecek İyileştirmeler</h3>
+      <ul>
+        <li>Konum accuracy ayarlarının kullanıcı tarafından özelleştirilebilmesi</li>
+        <li>Pil tasarrufu modunda daha düşük frekanslı konum güncellemeleri</li>
+        <li>İzin durum değişikliklerinde daha detaylı loglama</li>
+        <li>Offline mode için background location tracking istatistikleri</li>
+      </ul>
+    </div>
+
+    <div class="footer">
+      <p>&copy; 2025 Kamp Defterim - Konum İzinleri Teknik Dokümantasyonu</p>
+      <p style="font-size:0.9em;">"Kampını planla, anılarını sakla!"</p>
+      <p style="margin-top:16px;">
+        <a href="/index.html" style="margin:0 8px;">Ana Sayfa</a> |
+        <a href="/gizlilik-politikasi.html" style="margin:0 8px;">Gizlilik Politikası</a> |
+        <a href="/hesap-silme.html" style="margin:0 8px;">Hesap Silme</a> |
+        <a href="https://www.kampdefterim.com/surum-notlari.html" style="margin:0 8px;">Sürüm Notları</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

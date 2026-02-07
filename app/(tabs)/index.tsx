@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { setLargeItemAsync, getLargeItemAsync } from '../../lib/largeStorage';
 // İki koordinat arası mesafe (metre cinsinden) hesaplama
 function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
   const toRad = (value: number) => (value * Math.PI) / 180;
@@ -196,6 +197,29 @@ export default function MapScreen() {
     setIsWebViewReady(false);
   }, [mapKey]);
   
+  // Güvenli WebView injection helper fonksiyonu
+  const safeInjectJavaScript = (script: string, errorContext = 'WebView') => {
+    if (!isMounted.current) {
+      if (__DEV__) console.warn(`[${errorContext}] Component unmounted, injection iptal edildi`);
+      return false;
+    }
+    if (!webViewRef.current) {
+      if (__DEV__) console.warn(`[${errorContext}] WebView ref yok, injection iptal edildi`);
+      return false;
+    }
+    if (!isWebViewReady) {
+      if (__DEV__) console.warn(`[${errorContext}] WebView hazır değil, injection iptal edildi`);
+      return false;
+    }
+    try {
+      webViewRef.current.injectJavaScript(script);
+      return true;
+    } catch (error) {
+      console.error(`[${errorContext}] Injection hatası:`, error);
+      return false;
+    }
+  };
+  
   // Görünüm modu: 'map', 'list' veya 'search'
   const [viewMode, setViewMode] = useState<'map' | 'list' | 'search'>('map');
   // Video reklam aç/kapa kontrolü
@@ -356,18 +380,12 @@ export default function MapScreen() {
               setMapCenter({ latitude, longitude });
               
               // WebView'a haritayı ortala komutu gönder
-              if (webViewRef.current && isMounted.current && isWebViewReady) {
-                try {
-                  webViewRef.current.injectJavaScript(`
-                    if (window.map) {
-                      window.map.setView([${latitude}, ${longitude}], 13);
-                    }
-                    true;
-                  `);
-                } catch (injectionError) {
-                  console.error('[LocationPermission] WebView injection hatası:', injectionError);
+              safeInjectJavaScript(`
+                if (window.map) {
+                  window.map.setView([${latitude}, ${longitude}], 13);
                 }
-              }
+                true;
+              `, 'LocationPermission');
               
               // Yakındaki kamp alanlarını güncelle
               if (refreshDataRef.current && isMounted.current && typeof refreshDataRef.current === 'function') {
@@ -463,7 +481,7 @@ export default function MapScreen() {
     if (__DEV__) console.log('[ANNOUNCEMENT] fetchAnnouncementsSilently BAŞLADI, skipNotification:', skipNotification, 'isFullSyncInProgressRef:', isFullSyncInProgressRef.current);
     try {
       // Önce localde gösterilen duyuru id'lerini al
-      const shownAnnouncementIdsStr = await SecureStore.getItemAsync('shownAnnouncementIds');
+      const shownAnnouncementIdsStr = await getLargeItemAsync('shownAnnouncementIds');
       const shownAnnouncementIds = shownAnnouncementIdsStr ? JSON.parse(shownAnnouncementIdsStr) : [];
       const isFirstLaunch = shownAnnouncementIds.length === 0;
       const db = getDatabase();
@@ -513,7 +531,7 @@ export default function MapScreen() {
         if (Array.isArray(visibleAnnouncementsLocal) && visibleAnnouncementsLocal.length > 0) {
           if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Lokal veritabanındaki (görünür) duyuru sayısı gösteriliyor (hızlı yol):', visibleAnnouncementsLocal.length);
           const visibleIds = visibleAnnouncementsLocal.map(a => a.id);
-          await SecureStore.setItemAsync('shownAnnouncementIds', JSON.stringify(visibleIds));
+          await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(visibleIds));
 
           if (!skipNotification && !isFullSyncInProgressRef.current) {
             setNotifications([{
@@ -557,7 +575,7 @@ export default function MapScreen() {
       if (Array.isArray(newAnnouncementsLocal) && newAnnouncementsLocal.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
         if (__DEV__) console.log('[ANNOUNCEMENT] Lokal yeni duyuru bulundu, gösteriliyor (hızlı yol):', newAnnouncementsLocal.length);
         const updatedIds = [...shownAnnouncementIds, ...newAnnouncementsLocal.map(a => a.id)];
-        await SecureStore.setItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
+        await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
         setNotifications([{
           id: newAnnouncementsLocal[0].id,
           type: 'announcement',
@@ -621,7 +639,7 @@ export default function MapScreen() {
         // Bildirim göster (full sync sırasında değil)
         if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
           const updatedIds = [...shownAnnouncementIds, ...newAnnouncements.map(a => a.id)];
-          await SecureStore.setItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
+          await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
           setNotifications([{
             id: newAnnouncements[0].id,
             type: 'announcement',
@@ -691,7 +709,7 @@ export default function MapScreen() {
       if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
         // Yeni duyuru id'lerini hemen kaydet
         const updatedIds = [...shownAnnouncementIds, ...newAnnouncements.map(a => a.id)];
-        await SecureStore.setItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
+        await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
         
         // Bildirim göster (full sync sırasında değil)
         setNotifications([{
@@ -827,19 +845,15 @@ export default function MapScreen() {
         
         // WebView'a haritayı ortala komutu gönder
         const timeoutId = setTimeout(() => {
-          if (!isMounted.current || !webViewRef.current || !isWebViewReady) return;
+          if (!isMounted.current) return;
           
-          try {
-            webViewRef.current.injectJavaScript(`
-              if (typeof map !== 'undefined') {
-                map.setView([${latitude}, ${longitude}], 13);
-              }
-              true;
-            `);
-          } catch (injectionError) {
-            console.error('[DEBUG] WebView injection hatası:', injectionError);
-          }
-        }, 300);
+          safeInjectJavaScript(`
+            if (typeof map !== 'undefined') {
+              map.setView([${latitude}, ${longitude}], 13);
+            }
+            true;
+          `, 'DEBUG');
+        }, 300) as unknown as number;
         
         timeoutRefs.current.push(timeoutId);
         
@@ -993,21 +1007,22 @@ export default function MapScreen() {
           return;
         }
         
-        // Arka plan konum izlemeyi başlat (her 10 dakikada bir)
+        // Arka plan konum izlemeyi başlat (her 30 dakikada bir veya 5 km hareket olduğunda)
         await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
           accuracy: Location.Accuracy.Balanced,
-          timeInterval: 10 * 60 * 1000, // 10 dakika
-          distanceInterval: 1000, // 1 km
+          timeInterval: 30 * 60 * 1000, // 30 dakika (pil dostu)
+          distanceInterval: 5000, // 5 km (anlamlı hareket)
+          deferredUpdatesInterval: 30 * 60 * 1000, // Güncellemeleri 30 dakika biriktir
           foregroundService: {
             notificationTitle: 'Kamp Defterim',
             notificationBody: 'Offline harita senkronizasyonu için konum izleniyor',
             notificationColor: '#059669',
           },
-          pausesUpdatesAutomatically: true,
+          pausesUpdatesAutomatically: true, // Hareket etmediğinde otomatik duraklat
           showsBackgroundLocationIndicator: false,
         });
         
-        console.log('[BackgroundLocation] Başlatıldı - her 10 dakikada bir konum alınacak');
+        console.log('[BackgroundLocation] Başlatıldı - her 30 dakikada bir veya 5 km hareket olduğunda konum alınacak');
       } catch (error) {
         console.error('[BackgroundLocation] Başlatma hatası:', error);
       }
@@ -1097,7 +1112,7 @@ export default function MapScreen() {
             headers: { Authorization: `Bearer ${token}` }
           });
           const data = await res.json();
-          const shownIdsStr = await SecureStore.getItemAsync('shownFriendRequestIds');
+          const shownIdsStr = await getLargeItemAsync('shownFriendRequestIds');
           const shownIds = shownIdsStr ? JSON.parse(shownIdsStr) : [];
           const newRequests = Array.isArray(data)
             ? data.filter((req: any) => !shownIds.includes(req.id))
@@ -1109,7 +1124,7 @@ export default function MapScreen() {
               message: `${req.username || 'Bir kullanıcı'} size arkadaşlık isteği gönderdi!`,
               goto: () => router.push('/profile'),
             }));
-            await SecureStore.setItemAsync('shownFriendRequestIds', JSON.stringify([...shownIds, ...newRequests.map(r => r.id)]));
+            await setLargeItemAsync('shownFriendRequestIds', JSON.stringify([...shownIds, ...newRequests.map(r => r.id)]));
           }
         }
 
@@ -1123,7 +1138,7 @@ export default function MapScreen() {
             });
             const data = await res.json();
             // Her paylaşım kaydının id'sini kontrol et
-            const shownSharedStr = await SecureStore.getItemAsync('shownSharedChecklistIds');
+            const shownSharedStr = await getLargeItemAsync('shownSharedChecklistIds');
             const shownSharedIds = shownSharedStr ? JSON.parse(shownSharedStr) : [];
             // Sadece yeni (gösterilmemiş) paylaşımlar
             const newShares = Array.isArray(data)
@@ -1139,7 +1154,7 @@ export default function MapScreen() {
                 },
               ];
               // Gösterilenleri kaydet
-              await SecureStore.setItemAsync('shownSharedChecklistIds', JSON.stringify([...shownSharedIds, ...newShares.map(s => s.id)]));
+              await setLargeItemAsync('shownSharedChecklistIds', JSON.stringify([...shownSharedIds, ...newShares.map(s => s.id)]));
             }
           } catch (e) {
             console.warn('[Checklist Notification] Hata:', e);
@@ -1174,7 +1189,7 @@ export default function MapScreen() {
             });
 
             // Daha önce gösterilenleri kontrol et
-            const shownCampingAreasStr = await SecureStore.getItemAsync('shownSharedCampingAreaIds');
+            const shownCampingAreasStr = await getLargeItemAsync('shownSharedCampingAreaIds');
             const shownCampingAreaIds = shownCampingAreasStr ? JSON.parse(shownCampingAreasStr) : [];
             
             // Son 7 gün içinde oluşturulan/güncellenen ve daha önce gösterilmeyen alanlar
@@ -1209,17 +1224,13 @@ export default function MapScreen() {
                         setMapMoveQuery({ latitude: lat, longitude: lng });
                         // Marker popup'ını aç
                         const timeoutId2 = setTimeout(() => {
-                          if (!isMounted.current || !webViewRef.current || !isWebViewReady) return;
-                          try {
-                            webViewRef.current.injectJavaScript(`
-                              if (window.openMarkerPopup) {
-                                window.openMarkerPopup(${lat}, ${lng});
-                              }
-                              true;
-                            `);
-                          } catch (err) {
-                            console.warn('[DEBUG] WebView marker popup injection failed:', err);
-                          }
+                          if (!isMounted.current) return;
+                          safeInjectJavaScript(`
+                            if (window.openMarkerPopup) {
+                              window.openMarkerPopup(${lat}, ${lng});
+                            }
+                            true;
+                          `, 'MarkerPopup');
                         }, 800);
                         timeoutRefs.current.push(timeoutId2);
                       }, 100);
@@ -1229,7 +1240,7 @@ export default function MapScreen() {
                 },
               ];
               // Gösterilenleri kaydet
-              await SecureStore.setItemAsync('shownSharedCampingAreaIds', JSON.stringify([...shownCampingAreaIds, ...newSharedAreas.map((a: any) => a.id)]));
+              await setLargeItemAsync('shownSharedCampingAreaIds', JSON.stringify([...shownCampingAreaIds, ...newSharedAreas.map((a: any) => a.id)]));
             }
           } catch (e) {
             console.warn('[Camping Area Notification] Hata:', e);
@@ -2307,14 +2318,14 @@ export default function MapScreen() {
           try {
             const cachedTile = await getCachedTile(data.z, data.x, data.y);
             // WebView'a yanıt gönder
-            if (webViewRef.current) {
-              webViewRef.current.injectJavaScript(`
+            if (isMounted.current) {
+              safeInjectJavaScript(`
                 if (window.tileCacheCallback_${data.requestId}) {
                   window.tileCacheCallback_${data.requestId}(${cachedTile ? `"${cachedTile}"` : 'null'});
                   delete window.tileCacheCallback_${data.requestId};
                 }
                 true;
-              `);
+              `, 'MapTileCache');
             }
           } catch (error) {
             if (__DEV__) console.error('[MapTileCache] Cache okuma hatası:', error);
@@ -2838,17 +2849,13 @@ export default function MapScreen() {
                   setViewMode('map');
                   // Haritaya geçtikten sonra popup'ı aç
                   const timeoutId2 = setTimeout(() => {
-                    if (!isMounted.current || !webViewRef.current || !isWebViewReady) return;
-                    try {
-                      webViewRef.current.injectJavaScript(`
-                        if (window.openMarkerPopup) {
-                          window.openMarkerPopup(${lat}, ${lng});
-                        }
-                        true;
-                      `);
-                    } catch (err) {
-                      console.warn('[DEBUG] WebView popup injection failed:', err);
-                    }
+                    if (!isMounted.current) return;
+                    safeInjectJavaScript(`
+                      if (window.openMarkerPopup) {
+                        window.openMarkerPopup(${lat}, ${lng});
+                      }
+                      true;
+                    `, 'ListViewPopup');
                   }, 500);
                   timeoutRefs.current.push(timeoutId2);
                 }, 100);

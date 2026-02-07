@@ -47,6 +47,8 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress }: { img
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const isConnected = useNetworkStatus();
+  const [lastOnlineState, setLastOnlineState] = useState(isConnected);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -60,7 +62,11 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress }: { img
         } else {
           image_id = img.split('/').pop()?.split('.')[0] || '';
         }
-        const localPath = await getCachedImagePath(image_id, img);
+        
+        // Offline'dan online'a geçiş yapıldıysa cache'i yenile
+        const forceRefresh = !lastOnlineState && isConnected;
+        
+        const localPath = await getCachedImagePath(image_id, img, forceRefresh);
         if (localPath.startsWith('file://')) {
           console.log(`[image-cache] LOCAL gösteriliyor: ${localPath}`);
         } else {
@@ -75,10 +81,16 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress }: { img
         if (isMounted) setLoading(false);
       }
     };
-    console.log('[image-cache] Yükleme başlıyor:', img);
+    console.log('[image-cache] Yükleme başlıyor:', img, 'isConnected:', isConnected);
     load();
+    
+    // Online durumu güncelle
+    if (lastOnlineState !== isConnected) {
+      setLastOnlineState(isConnected);
+    }
+    
     return () => { isMounted = false; };
-  }, [img]);
+  }, [img, isConnected]);
 
   if (loading) {
     return (
@@ -130,6 +142,8 @@ const LightboxImage = ({ img }: { img: string }) => {
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const isConnected = useNetworkStatus();
+  const [lastOnlineState, setLastOnlineState] = useState(isConnected);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -143,7 +157,11 @@ const LightboxImage = ({ img }: { img: string }) => {
         } else {
           image_id = img.split('/').pop()?.split('.')[0] || '';
         }
-        const localPath = await getCachedImagePath(image_id, img);
+        
+        // Offline'dan online'a geçiş yapıldıysa cache'i yenile
+        const forceRefresh = !lastOnlineState && isConnected;
+        
+        const localPath = await getCachedImagePath(image_id, img, forceRefresh);
         if (isMounted) setUri(localPath);
       } catch (e) {
         if (isMounted) setError(true);
@@ -152,8 +170,14 @@ const LightboxImage = ({ img }: { img: string }) => {
       }
     };
     load();
+    
+    // Online durumu güncelle
+    if (lastOnlineState !== isConnected) {
+      setLastOnlineState(isConnected);
+    }
+    
     return () => { isMounted = false; };
-  }, [img]);
+  }, [img, isConnected]);
 
   if (loading) {
     return (

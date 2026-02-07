@@ -594,13 +594,13 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     setLoading(true);
     // Offline modda file:// ile başlayan görselleri pendingImages kuyruğuna ekle
     if (!isConnected && formData.images.some(img => img.local_uri && img.local_uri.startsWith('file://'))) {
-      const pendingImagesStr = await SecureStore.getItemAsync('pendingImages');
+      const pendingImagesStr = await getLargeItemAsync('pendingImages');
       let pendingImages = pendingImagesStr ? JSON.parse(pendingImagesStr) : [];
       const newPending = formData.images
         .filter(img => img.local_uri && img.local_uri.startsWith('file://'))
         .map(img => ({ local_uri: img.local_uri, campingAreaId: null }));
       pendingImages = [...pendingImages, ...newPending];
-      await SecureStore.setItemAsync('pendingImages', JSON.stringify(pendingImages));
+      await setLargeItemAsync('pendingImages', JSON.stringify(pendingImages));
     }
     console.log('[AddCampingArea] Form verileri:', formData);
 

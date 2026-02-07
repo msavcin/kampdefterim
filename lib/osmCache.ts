@@ -1,16 +1,16 @@
 // Basit bir in-memory + async storage cache (expo için)
-import * as SecureStore from 'expo-secure-store';
+import { setLargeItemAsync, getLargeItemAsync, removeLargeItemAsync } from './largeStorage';
 
 const CACHE_PREFIX = 'osm_cache_';
 const CACHE_TTL = 60 * 60 * 1000; // 1 saat (ms)
 
 export async function getCachedOsmResult(key: string): Promise<any | null> {
   try {
-    const raw = await SecureStore.getItemAsync(CACHE_PREFIX + key);
+    const raw = await getLargeItemAsync(CACHE_PREFIX + key);
     if (!raw) return null;
     const { data, timestamp } = JSON.parse(raw);
     if (Date.now() - timestamp > CACHE_TTL) {
-      await SecureStore.deleteItemAsync(CACHE_PREFIX + key);
+      await removeLargeItemAsync(CACHE_PREFIX + key);
       return null;
     }
     return data;
@@ -21,7 +21,7 @@ export async function getCachedOsmResult(key: string): Promise<any | null> {
 
 export async function setCachedOsmResult(key: string, data: any) {
   try {
-    await SecureStore.setItemAsync(
+    await setLargeItemAsync(
       CACHE_PREFIX + key,
       JSON.stringify({ data, timestamp: Date.now() })
     );

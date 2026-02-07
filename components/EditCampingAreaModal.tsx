@@ -29,6 +29,7 @@ const FriendAvatar = ({ avatar, name }: { avatar?: string; name: string }) => (
 );
 
 import { API_URL } from '@/lib/config';
+import { setLargeItemAsync, getLargeItemAsync } from '@/lib/largeStorage';
 
 // Arkadaş listesini fetch eden yardımcı fonksiyon (user_id ile)
 import { getToken } from '@/lib/auth';
@@ -483,13 +484,13 @@ useEffect(() => {
       let allImages: string[] = Array.isArray(formData.images) ? [...formData.images] : [];
       allImages = allImages.slice(0, 5);
       if (!isConnected && allImages.some(img => img && img.startsWith('file://'))) {
-        const pendingImagesStr = await SecureStore.getItemAsync('pendingImages');
+        const pendingImagesStr = await getLargeItemAsync('pendingImages');
         let pendingImages = pendingImagesStr ? JSON.parse(pendingImagesStr) : [];
         const newPending = allImages
           .filter(img => img && img.startsWith('file://'))
           .map(img => ({ local_uri: img, campingAreaId: campingArea?.id || null }));
         pendingImages = [...pendingImages, ...newPending];
-        await SecureStore.setItemAsync('pendingImages', JSON.stringify(pendingImages));
+        await setLargeItemAsync('pendingImages', JSON.stringify(pendingImages));
       } else if (isConnected) {
         // S3 upload işlemi (online)
         for (let i = 0; i < allImages.length; i++) {

@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { setLargeItemAsync, getLargeItemAsync } from '@/lib/largeStorage';
 import Constants from 'expo-constants';
 import { clearTileCache, getTileCacheStats } from '@/lib/mapTileCache';
 // Sunucu eşleştirme fonksiyonu: source_id:1 olan tüm kamp alanlarını lokal veritabanına kaydet
@@ -161,7 +162,7 @@ export default function ProfileScreen(props: any) {
       // Bildirim gösterme mantığı
       if (showNotification && mapped.length > 0) {
         try {
-          const shownIdsStr = await SecureStore.getItemAsync('shownFriendRequestIds');
+          const shownIdsStr = await getLargeItemAsync('shownFriendRequestIds');
           const shownIds = shownIdsStr ? JSON.parse(shownIdsStr) : [];
           const newRequests = mapped.filter(req => !shownIds.includes(req.id));
           if (newRequests.length > 0) {
@@ -171,7 +172,7 @@ export default function ProfileScreen(props: any) {
               [
                 { text: 'Tamam', onPress: async () => {
                   const allIds = [...shownIds, ...newRequests.map(r => r.id)];
-                  await SecureStore.setItemAsync('shownFriendRequestIds', JSON.stringify(allIds));
+                  await setLargeItemAsync('shownFriendRequestIds', JSON.stringify(allIds));
                 }}
               ]
             );

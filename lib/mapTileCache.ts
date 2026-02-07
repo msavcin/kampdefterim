@@ -4,6 +4,7 @@
  */
 import * as FileSystem from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
+import { setLargeItemAsync, getLargeItemAsync, removeLargeItemAsync } from './largeStorage';
 import { API_URL } from './config';
 
 const TILE_CACHE_DIR = FileSystem.documentDirectory + 'map_tiles/';
@@ -53,7 +54,7 @@ async function ensureCacheDirectory() {
  */
 async function loadTileIndex(): Promise<TileIndex> {
   try {
-    const raw = await SecureStore.getItemAsync(TILE_INDEX_KEY);
+    const raw = await getLargeItemAsync(TILE_INDEX_KEY);
     if (!raw) {
       return { version: TILE_CACHE_VERSION, tiles: {}, totalSize: 0 };
     }
@@ -74,7 +75,7 @@ async function loadTileIndex(): Promise<TileIndex> {
  */
 async function saveTileIndex(index: TileIndex) {
   try {
-    await SecureStore.setItemAsync(TILE_INDEX_KEY, JSON.stringify(index));
+    await setLargeItemAsync(TILE_INDEX_KEY, JSON.stringify(index));
   } catch (error) {
     console.error('[MapTileCache] Index kaydetme hatası:', error);
   }
@@ -208,8 +209,8 @@ async function enforceMaxCacheSize(index: TileIndex) {
 export async function clearTileCache() {
   try {
     await FileSystem.deleteAsync(TILE_CACHE_DIR, { idempotent: true });
-    await SecureStore.deleteItemAsync(TILE_INDEX_KEY);
-    await SecureStore.deleteItemAsync(CACHED_REGIONS_KEY);
+    await removeLargeItemAsync(TILE_INDEX_KEY);
+    await removeLargeItemAsync(CACHED_REGIONS_KEY);
     console.log('[MapTileCache] Cache temizlendi (tile index ve cached regions dahil)');
   } catch (error) {
     console.error('[MapTileCache] Cache temizleme hatası:', error);
@@ -253,7 +254,7 @@ function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: numbe
  */
 async function loadCachedRegions(): Promise<CachedRegion[]> {
   try {
-    const raw = await SecureStore.getItemAsync(CACHED_REGIONS_KEY);
+    const raw = await getLargeItemAsync(CACHED_REGIONS_KEY);
     if (!raw) return [];
     return JSON.parse(raw);
   } catch {
@@ -266,7 +267,7 @@ async function loadCachedRegions(): Promise<CachedRegion[]> {
  */
 async function saveCachedRegions(regions: CachedRegion[]) {
   try {
-    await SecureStore.setItemAsync(CACHED_REGIONS_KEY, JSON.stringify(regions));
+    await setLargeItemAsync(CACHED_REGIONS_KEY, JSON.stringify(regions));
   } catch (error) {
     console.error('[MapTileCache] Cached regions kaydetme hatası:', error);
   }
