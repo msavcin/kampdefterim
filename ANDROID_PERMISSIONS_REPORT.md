@@ -50,6 +50,8 @@
 
 #### 📁 `lib/checkLocationPermissionsForPremium.ts`
 ```typescript
+import * as Location from 'expo-location';
+
 export async function checkLocationPermissionsForPremium(user) {
   // Premium kullanıcıda hem foreground hem background izin granted olmalı
   if (!user?.offline_enabled) return true;
@@ -62,7 +64,14 @@ export async function checkLocationPermissionsForPremium(user) {
 }
 ```
 
-**Kullanım:** Offline Mode (Premium) özelliği aktif olan kullanıcılar için background izni zorunlu.
+**Kullanım:** 
+- Offline Mode (Premium) özelliği aktif olan kullanıcılar için background izni kontrolü
+- `user.offline_enabled = true` → Background izni **zorunlu**
+- `user.offline_enabled = false` → Sadece foreground izni yeterli
+
+**Çağrıldığı Yerler:**
+- Modal gösterilmeden önce izin durumu kontrolü
+- Profil sayfasında offline özellik durumu gösterimi
 
 ---
 
@@ -175,18 +184,63 @@ if (status === 'granted') {
 ```typescript
 const BACKGROUND_LOCATION_TASK = 'background-location-task';
 
-TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
+TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }: any) => {
+  if (error) {
+    console.error('[BackgroundLocation] Hata:', error);
+    return;
+  }
   if (data) {
     const { locations } = data;
-    const { latitude, longitude } = locations[0].coords;
-    
-    // Offline Mode aktif ise bölgeyi cache'le
-    const userData = await getMe();
-    if (userData?.offline_enabled) {
-      const radiusKm = userData.offline_radius_km || 20;
-      await precacheRegionWithRadius(latitude, longitude, radiusKm);
+    if (locations && locations.length > 0) {
+      const location = locations[0];
+      const { latitude, longitude } = location.coords;
+      
+      console.log(`[BackgroundLocation] Konum alındı: ${latitude}, ${longitude}`);
+      
+      try {
+        // Kullanıcı offline özelliğine sahip mi kontrol et
+        const token = await getToken();
+        if (!token) {
+          console.log('[BackgroundLocation] Token yok, cache atlandı');
+          return;
+        }
+        
+        const userData = await getMe();
+        
+        if (!userData || !userData.offline_enabled) {
+          console.log('[BackgroundLocation] Offline özelliği aktif değil, cache atlandı');
+          return;
+        }
+        
+        // Kullanıcının offline_radius_km değerini kullan (varsayılan 20 km)
+        const radiusKm = userData.offline_radius_km || 20;
+        
+        // Bölgeyi offline kullanım için cache'le
+        await precacheRegionWithRadius(latitude, longitude, radiusKm);
+        console.log(`[BackgroundLocation] Bölge cache'lendi: ${latitude}, ${longitude} (${radiusKm} km)`);
+      } catch (error) {
+        console.error('[BackgroundLocation] Cache hatası:', error);
+      }
     }
   }
+});
+```
+
+**Background Location Başlatma:**
+```typescript
+// MapScreen useEffect içinde
+await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+  accuracy: Location.Accuracy.Balanced,
+  timeInterval: 30 * 60 * 1000,         // 30 dakika (pil dostu)
+  distanceInterval: 5000,                // 5 km (anlamlı hareket)
+  deferredUpdatesInterval: 30 * 60 * 1000, // Güncellemeleri 30 dakika biriktir
+  foregroundService: {
+    notificationTitle: 'Kamp Defterim',
+    notificationBody: 'Offline harita senkronizasyonu için konum izleniyor',
+    notificationColor: '#059669',
+  },
+  pausesUpdatesAutomatically: true,     // Hareket etmediğinde otomatik duraklat
+  showsBackgroundLocationIndicator: false,
 });
 ```
 
@@ -194,6 +248,8 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 - Uygulama kapalıyken bile konum alıp harita tile'ları cache'leme
 - Offline Mode için veri senkronizasyonu
 - Premium kullanıcılar için otomatik harita güncelleme
+- **Pil Dostu:** 30 dakika veya 5 km hareket olduğunda tetiklenir
+- **Foreground Service:** Android bildiriminde kullanıcıya gösterilir
 
 ---
 
@@ -255,11 +311,13 @@ Sistem ayarlarına yönlendir (gerekirse)
 
 ## 📊 İzin Durumları
 
-| İzin | Normal Kullanıcı | Premium/Offline | Gerekli Mü |
-|------|---|---|---|
-| **ACCESS_FINE_LOCATION** | Opsiyonel | Gerekli | Harita görüntüleme |
-| **ACCESS_COARSE_LOCATION** | Opsiyonel | Gerekli | Konum tahmini |
-| **ACCESS_BACKGROUND_LOCATION** | ❌ Kullanılmaz | Gerekli | Offline cache |
+| İzin | Normal Kullanıcı | Premium/Offline | Gerekli Mü | Kullanım Amacı |
+|------|---|---|---|---|
+| **ACCESS_FINE_LOCATION** | Opsiyonel | Gerekli | Harita görüntüleme | GPS ile hassas konum alma |
+| **ACCESS_COARSE_LOCATION** | Opsiyonel | Gerekli | Konum tahmini | Network tabanlı kaba konum |
+| **ACCESS_BACKGROUND_LOCATION** | ❌ Kullanılmaz | Gerekli | Offline cache | Uygulama kapalıyken konum takibi |
+| **FOREGROUND_SERVICE** | ❌ Kullanılmaz | Gerekli | Bildirim | Android bildirim gösterimi |
+| **FOREGROUND_SERVICE_LOCATION** | ❌ Kullanılmaz | Gerekli | Arka plan servisi | Background location service |
 
 ---
 
@@ -361,14 +419,107 @@ const fg = await Location.getForegroundPermissionsAsync();
 
 ## 📈 Çağrılan API'lar Özeti
 
-| Fonksiyon | Amaç | Çağrıldığı Yerler |
-|-----------|------|------|
-| `getForegroundPermissionsAsync()` | Foreground izni durumunu kontrol | Modal, Profile, useCampingAreas |
-| `requestForegroundPermissionsAsync()` | Foreground izni iste | Modal, Profile |
-| `getBackgroundPermissionsAsync()` | Background izni durumunu kontrol | Modal, Profile, checkLocationPermissionsForPremium |
-| `requestBackgroundPermissionsAsync()` | Background izni iste (Premium) | Modal, Profile |
-| `watchPositionAsync()` | Realtime konum takibi başlat | useCampingAreas |
-| `getCurrentPositionAsync()` | Tek seferlik konum al | useCampingAreas |
+| Fonksiyon | Amaç | Çağrıldığı Yerler | İzin Gereksinimi |
+|-----------|------|------|------|
+| `getForegroundPermissionsAsync()` | Foreground izni durumunu kontrol | Modal, Profile, useCampingAreas, index.tsx | - |
+| `requestForegroundPermissionsAsync()` | Foreground izni iste | Modal, Profile | ACCESS_FINE_LOCATION<br>ACCESS_COARSE_LOCATION |
+| `getBackgroundPermissionsAsync()` | Background izni durumunu kontrol | Modal, Profile, checkLocationPermissionsForPremium | - |
+| `requestBackgroundPermissionsAsync()` | Background izni iste (Premium) | Modal, Profile | ACCESS_BACKGROUND_LOCATION |
+| `watchPositionAsync()` | Realtime konum takibi başlat | useCampingAreas | Foreground izni |
+| `getCurrentPositionAsync()` | Tek seferlik konum al | useCampingAreas, index.tsx (çoklu kullanım) | Foreground izni |
+| `startLocationUpdatesAsync()` | Arka plan konum güncellemesi başlat | index.tsx (MapScreen) | Background izni<br>FOREGROUND_SERVICE |
+| `stopLocationUpdatesAsync()` | Arka plan konum güncellemesini durdur | index.tsx unmount | - |
+
+---
+
+## 📍 Konum Kullanımı - Detaylı Dosya Analizi
+
+### **app/(tabs)/index.tsx** (Ana Harita Ekranı)
+**Konum Kullanım Sayısı:** 7+ farklı nokta
+
+1. **Background Task Tanımı** (Line 88)
+   - `TaskManager.defineTask()` ile arka plan görevi
+   - `precacheRegionWithRadius()` ile harita cache
+   
+2. **İzin Kontrolü ve Background Task Başlatma** (Line 995-1027)
+   - `TaskManager.isTaskRegisteredAsync()` kontrol
+   - `Location.startLocationUpdatesAsync()` başlatma
+   - Foreground service bildirimi
+   
+3. **LocationPermission Event Handler** (Line 373)
+   - `Location.getCurrentPositionAsync()` ile güncel konum
+   - Harita merkezini güncelleme
+   
+4. **"Beni Bul" Butonu** (Line 492, 601)
+   - `Location.getCurrentPositionAsync()` ile konum al
+   - Haritayı kullanıcı konumuna odakla
+   
+5. **Yakınımdaki Yerler** (Line 824)
+   - `Location.getCurrentPositionAsync()` ile mesafe hesaplama
+   
+6. **Yeni Kamp Alanı Eklerken** (Line 923, 1353)
+   - `Location.getCurrentPositionAsync()` ile mevcut konumu al
+   - Marker ekleme için koordinat
+   
+7. **Offline Harita Cache** (Line 1672)
+   - `precacheRegionWithRadius()` manuel cache tetikleme
+
+### **hooks/useCampingAreas.ts** (Konum Hook'u)
+**Konum Kullanım Sayısı:** 3 farklı nokta
+
+1. **Otomatik Konum Takibi** (Line 55)
+   ```typescript
+   locationSubscription = await Location.watchPositionAsync(
+     {
+       accuracy: Location.Accuracy.Balanced,
+       distanceInterval: 100,      // 100m hareket → güncelle
+       timeInterval: 30000,         // 30 saniye arası kontrol
+     },
+     (newLocation) => {
+       setLocation(newLocation);   // State güncelle
+     }
+   );
+   ```
+
+2. **İzin Durumu Kontrolü** (Line 53)
+   - `Location.getForegroundPermissionsAsync()` ile izin check
+   - İzin varsa `watchPositionAsync` başlat
+
+3. **Manuel Konum Alma** (Line 124)
+   - `Location.getCurrentPositionAsync()` ile tek seferlik konum
+   - İzin yoksa varsayılan konum (Ankara: 39.9251, 32.8375)
+
+### **components/LocationPermissionModal.tsx** (İzin Modalı)
+**Konum Kullanım Sayısı:** 4 farklı nokta
+
+1. **AppState Kontrolü** (Line 63, 68)
+   - Uygulama ön plana gelince izin kontrol
+   - `getForegroundPermissionsAsync()` ve `getBackgroundPermissionsAsync()`
+
+2. **Foreground İzin İsteme** (Line 117)
+   - `requestForegroundPermissionsAsync()` ile izin iste
+   - EventBus ile bildirim gönder
+
+3. **Background İzin İsteme - Premium** (Line 132)
+   - `requestBackgroundPermissionsAsync()` ile arka plan izni
+   - Sadece `isPremium = true` ise
+
+4. **İzin Reddedilirse** (Line 111)
+   - `canAskAgain = false` → Sistem ayarlarına yönlendir
+   - `Linking.openSettings()` çağrısı
+
+### **app/(tabs)/profile.tsx** (Profil - Manuel Ayarlar)
+**Konum Kullanım Sayısı:** 2 farklı nokta
+
+1. **İzin Durumu Yenile** (Line 595)
+   - `Location.getForegroundPermissionsAsync()`
+   - `Location.getBackgroundPermissionsAsync()`
+   - State güncellemeleri
+
+2. **Manuel İzin İsteme** (Line 629)
+   - `requestForegroundPermissionsAsync()` ile ön plan
+   - `requestBackgroundPermissionsAsync()` ile arka plan
+   - Kullanıcı tarafından tetiklenen akış
 
 ---
 
@@ -398,13 +549,209 @@ app/(tabs)/
 
 ## ✅ Özet
 
-**Proje iOS ve Android'de konum izinlerini şu şekilde yönetir:**
+**Proje Android ve iOS'ta konum izinlerini şu şekilde yönetir:**
 
-1. **İlk Başlangıçta:** Modal ile kullanıcıya konum izni neden gerekli olduğunu açıkla ve iste
-2. **Foreground İzni:** Harita ve kamp alanları görüntüleme için gerekli
-3. **Background İzni:** Sadece Premium/Offline Mode kullanıcıları için gerekli
-4. **Arka Plan Görevi:** Offline Mode aktif ise 30 saniye arası konum alıp harita cache'le
-5. **Profil Sayfası:** Kullanıcı el ile izin kontrolü ve tekrar isteme seçeneği
-6. **AppState Dinleme:** App ön plana gelince izin durumu kontrol ve konum takibi güncelle
+### 🎯 **İzin Kullanım Stratejisi**
 
-**Kritik Nokta:** Premium özellik (`offline_enabled`) aktif olan kullanıcılar için **hem Foreground hem Background** izni **zorunludur**.
+#### **Normal Kullanıcı (offline_enabled = false)**
+1. ✅ **Foreground İzni:** İsteğe bağlı
+   - Harita kullanımı için önerilir
+   - İzin verilmezse varsayılan konum: Ankara (39.9251, 32.8375)
+   - Kamp alanlarını görebilir ama mesafe hesaplanamaz
+
+2. ❌ **Background İzni:** Talep edilmez
+   - Arka plan konum takibi yok
+   - TaskManager background task çalışmaz
+   - Offline cache yapılmaz
+
+#### **Premium Kullanıcı (offline_enabled = true)**
+1. ✅ **Foreground İzni:** **ZORUNLU**
+   - Harita ve yakınlık özellikleri için gerekli
+   - İzin verilmezse offline özellikler çalışmaz
+
+2. ✅ **Background İzni:** **ZORUNLU**
+   - Offline Mode için kritik
+   - Uygulama kapalıyken harita cache
+   - TaskManager ile 30 dakika/5km aralıklarla konum alır
+   - Foreground Service bildirimi gösterilir
+
+### 📊 **İzin Kullanım İstatistikleri**
+
+| Dosya | Konum API Kullanımı | Kritik mi? |
+|-------|---------------------|-----------|
+| `app/(tabs)/index.tsx` | 7+ farklı nokta | ⭐ En yoğun |
+| `hooks/useCampingAreas.ts` | 3 farklı nokta | ⭐ Otomatik takip |
+| `components/LocationPermissionModal.tsx` | 4 farklı nokta | ⭐ İzin yönetimi |
+| `app/(tabs)/profile.tsx` | 2 farklı nokta | Manuel kontrol |
+| `lib/checkLocationPermissionsForPremium.ts` | 2 farklı nokta | Premium kontrol |
+
+### 🔄 **İzin Akış Döngüsü**
+
+```
+📱 Uygulama İlk Açılış
+    ↓
+🔍 LocationPermissionModal Göster
+    ↓
+👤 Kullanıcı "Konum İzni Ver" Tıklar
+    ↓
+📍 requestForegroundPermissionsAsync()
+    ├─ ACCESS_FINE_LOCATION
+    └─ ACCESS_COARSE_LOCATION
+    ↓
+✅ Foreground İzni Verildi
+    ↓
+🔔 eventBus.emit('locationPermissionGranted')
+    ↓
+🗺️ watchPositionAsync() Başlar (Realtime takip)
+    ↓
+⭐ Premium Kullanıcı mı?
+    ├─ YES → requestBackgroundPermissionsAsync()
+    │         ├─ ACCESS_BACKGROUND_LOCATION
+    │         ├─ FOREGROUND_SERVICE
+    │         └─ FOREGROUND_SERVICE_LOCATION
+    │         ↓
+    │    ✅ Background İzni Verildi
+    │         ↓
+    │    🔄 TaskManager Background Task Başlar
+    │         ├─ 30 dakikada bir konum al
+    │         ├─ 5 km hareket olduğunda konum al
+    │         └─ precacheRegionWithRadius() ile harita cache
+    │
+    └─ NO → Modal Kapat, Sadece Foreground Kullan
+```
+
+### 🎯 **Kullanım Senaryoları**
+
+#### **Senaryo 1: Normal Kullanıcı - Harita Gezinme**
+```typescript
+// İzin durumu: Foreground = granted, Background = yok
+// Kullanıcı haritada "Beni Bul" butonuna tıklar
+const location = await Location.getCurrentPositionAsync({
+  accuracy: Location.Accuracy.Balanced
+});
+// Harita kullanıcı konumuna odaklanır
+map.setView([location.coords.latitude, location.coords.longitude], 13);
+```
+
+#### **Senaryo 2: Premium Kullanıcı - Offline Mode Aktif**
+```typescript
+// İzin durumu: Foreground = granted, Background = granted
+// Kullanıcı araba ile seyahat ediyor, uygulama kapalı
+// TaskManager her 30 dakikada bir konum alıyor:
+TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data }) => {
+  const { locations } = data;
+  const { latitude, longitude } = locations[0].coords;
+  
+  // Kullanıcının offline_radius_km değeri: 20 km
+  await precacheRegionWithRadius(latitude, longitude, 20);
+  // → 20 km'lik bölgenin harita tile'ları cache'lendi
+});
+```
+
+#### **Senaryo 3: İzin Reddedildi - Varsayılan Konum**
+```typescript
+// İzin durumu: Foreground = denied
+// useCampingAreas hook'u çalışıyor:
+const { status } = await Location.getForegroundPermissionsAsync();
+if (status !== 'granted') {
+  // Varsayılan konum: Ankara - Anıtkabir
+  const defaultLocation = {
+    coords: {
+      latitude: 39.9251,
+      longitude: 32.8375
+    }
+  };
+  setLocation(defaultLocation);
+  // Kullanıcı Türkiye genelinde kamp alanlarını görebilir
+  // ancak "yakınımdaki" veya mesafe hesaplamaları çalışmaz
+}
+```
+
+#### **Senaryo 4: Premium Kullanıcı - Manuel Cache Tetikleme**
+```typescript
+// Kullanıcı profil sayfasından "Offline Harita İndir" tıklar
+// İzin durumu: Foreground = granted, Background = granted
+const result = await precacheRegionWithRadius(
+  userLocation.latitude,
+  userLocation.longitude,
+  userData.offline_radius_km  // Örnek: 50 km
+);
+// → 50 km çaplı bölgenin tüm zoom seviyelerinde harita tile'ları indirilir
+// → Kullanıcı internet olmadan haritayı görebilir
+```
+
+### 🔐 **Güvenlik ve Gizlilik**
+
+1. **Konum Verisi Saklama:** 
+   - Konum verileri **sadece harita cache için** kullanılır
+   - Kullanıcı konumu backend'e gönderilmez
+   - SQLite'da sadece harita tile'ları saklanır
+
+2. **Background Tracking Şeffaflığı:**
+   - Android bildiriminde açıkça belirtilir: "Offline harita senkronizasyonu için konum izleniyor"
+   - Kullanıcı bildirimden hizmeti durdurabilir
+
+3. **İzin İptali:**
+   - Kullanıcı sistem ayarlarından izni iptal ederse:
+     - Foreground tracking otomatik durur
+     - Background task otomatik durdurulur
+     - Varsayılan konuma geçilir
+
+### 📱 **Platform Uyumluluğu**
+
+| Özellik | Android | iOS | Web |
+|---------|---------|-----|-----|
+| Foreground Location | ✅ | ✅ | ✅ (Tarayıcı API) |
+| Background Location | ✅ | ✅ | ❌ |
+| Foreground Service | ✅ | ❌ | ❌ |
+| TaskManager | ✅ | ✅ | ❌ |
+| watchPositionAsync | ✅ | ✅ | ✅ (Geolocation API) |
+
+### 🔧 **Teknik Detaylar**
+
+#### **Konum Doğruluğu Seviyeleri**
+```typescript
+// Farklı kullanım alanlarında farklı doğruluk seviyeleri:
+
+// 1. Arka plan takibi (pil dostu)
+Location.Accuracy.Balanced
+
+// 2. "Beni Bul" butonu (hassas)
+Location.Accuracy.Balanced
+
+// 3. Yeni alan eklerken (en hassas)
+Location.Accuracy.High  // Bazı yerlerde varsayılan
+```
+
+#### **Konum Güncelleme Aralıkları**
+```typescript
+// watchPositionAsync (Foreground - Realtime)
+{
+  distanceInterval: 100,      // 100 metre hareket → güncelle
+  timeInterval: 30000          // 30 saniye arası kontrol
+}
+
+// startLocationUpdatesAsync (Background - Pil Dostu)
+{
+  distanceInterval: 5000,              // 5 km hareket → güncelle
+  timeInterval: 30 * 60 * 1000,        // 30 dakika arası
+  deferredUpdatesInterval: 30 * 60 * 1000  // Güncellemeleri biriktir
+}
+```
+
+---
+
+## 🎉 Sonuç
+
+**Kamp Defterim projesi konum izinlerini akıllıca kullanır:**
+
+- ✅ **Kullanıcı dostu:** İzin talep edilmeden önce açıklama gösterilir
+- ✅ **Katmanlı izin stratejisi:** Normal ve Premium kullanıcılar için farklı akışlar
+- ✅ **Pil dostu:** Background tracking 30 dk/5 km aralıklarla çalışır
+- ✅ **Offline-first:** Premium kullanıcılar için arka planda otomatik harita cache
+- ✅ **Gizlilik odaklı:** Konum verisi sadece cache için kullanılır, sunucuya gönderilmez
+- ✅ **Hata toleranslı:** İzin verilmezse varsayılan konum ile çalışmaya devam eder
+
+**Toplam Konum API Kullanımı:** 18+ farklı nokta
+**Kritik Dosyalar:** 5 dosya
+**İzin Türleri:** 5 farklı Android izni

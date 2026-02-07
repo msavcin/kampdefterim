@@ -14,16 +14,13 @@ function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-// Arka plan konum izleme görevi
-const BACKGROUND_LOCATION_TASK = 'background-location-task';
-
 import { campingTypes, getCampingTypeLabel, getCampingAreaBgColor } from '../../lib/categories';
 import { filterCampingAreasByUser } from '../../lib/accessControl';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 import LocationPermissionModal from '../../components/LocationPermissionModal';
-import { checkLocationPermissionsForPremium } from '../../lib/checkLocationPermissionsForPremium';
 import HelpModal from '../../components/HelpModal';
+import GuestInfoModal from '../../components/GuestInfoModal';
 
 import { Svg, Path } from 'react-native-svg';
 import { Modal } from 'react-native';
@@ -51,8 +48,8 @@ import BlurOverlay from '../../components/BlurOverlay';
 import { getSVGIcon } from '../icons/svgIcons';
 import { syncAll } from '@/lib/syncManager';
 import * as Location from 'expo-location';
-import * as TaskManager from 'expo-task-manager';
 import { listAnnouncements } from '@/lib/announcementApi';
+import { initSmartCache } from '@/lib/smartOfflineCache';
 import { getValilikIdFromProvinceName, getProvinceFromDistrict } from '@/lib/provinceMap';
 // If getValilikIdFromProvinceName is the default export, use:
 // import getValilikIdFromProvinceName from '@/lib/provinceMap';
@@ -83,57 +80,6 @@ import { Alert, ToastAndroid, Platform } from 'react-native';
 import { getCachedTile, cacheTile, precacheTilesForRegion, precacheRegionWithRadius } from '@/lib/mapTileCache';
 
 const { width, height } = Dimensions.get('window');
-
-// Arka plan konum izleme görevini tanımla
-TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }: any) => {
-  if (error) {
-    console.error('[BackgroundLocation] Hata:', error);
-    return;
-  }
-  if (data) {
-    const { locations } = data;
-    if (locations && locations.length > 0) {
-      const location = locations[0];
-      const { latitude, longitude } = location.coords;
-      
-      console.log(`[BackgroundLocation] Konum alındı: ${latitude}, ${longitude}`);
-      
-      try {
-        // Kullanıcı offline özelliğine sahip mi kontrol et
-        const token = await getToken();
-        if (!token) {
-          console.log('[BackgroundLocation] Token yok, cache atlandı');
-          return;
-        }
-        
-        const userData = await getMe();
-        
-        // DEBUG: Kullanıcı datasını kontrol et
-        console.log('[BackgroundLocation] 🔍 User Data:', JSON.stringify({
-          id: userData?.id,
-          email: userData?.email,
-          role: userData?.role,
-          offline_enabled: userData?.offline_enabled,
-          offline_radius_km: userData?.offline_radius_km
-        }, null, 2));
-        
-        if (!userData || !userData.offline_enabled) {
-          console.log('[BackgroundLocation] ❌ Offline özelliği aktif değil, cache atlandı');
-          return;
-        }
-        
-        // Kullanıcının offline_radius_km değerini kullan (varsayılan 20 km)
-        const radiusKm = userData.offline_radius_km || 20;
-        
-        // Bölgeyi offline kullanım için cache'le
-        await precacheRegionWithRadius(latitude, longitude, radiusKm);
-        console.log(`[BackgroundLocation] Bölge cache'lendi: ${latitude}, ${longitude} (${radiusKm} km)`);
-      } catch (error) {
-        console.error('[BackgroundLocation] Cache hatası:', error);
-      }
-    }
-  }
-});
 
 export default function MapScreen() {
     // Son sorgulanan konumu saklamak için ref
@@ -229,15 +175,20 @@ export default function MapScreen() {
   const [helpVisible, setHelpVisible] = useState(false);
   // Modal zincirleme kontrolü
   const [pendingShowPermissionModal, setPendingShowPermissionModal] = useState(false);
+  const [pendingShowGuestModal, setPendingShowGuestModal] = useState(false);
   
   // Kullanıcı ve topluluk üyeliği state'leri
   const [user, setUser] = useState<any>(null);
   const [communityMember, setCommunityMember] = useState<any>(null);
   
-  // Konum izni uyarı modalı
+  // Konum izni uyarı modalı ve durumu (ilk kez true olduğunda işlemleri başlat)
   const [locationPermissionModalVisible, setLocationPermissionModalVisible] = useState(false);
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
   const [userDismissedPermissionModal, setUserDismissedPermissionModal] = useState(false);
+  const hasStartedOperationsRef = useRef(false); // İşlemler bir kez başlatılır
+  
+  // Misafir kullanıcı bilgilendirme modalı
+  const [guestInfoModalVisible, setGuestInfoModalVisible] = useState(false);
   
   // İlk mount'ta sistem konum iznini kontrol et (sadece kontrol, native izin ekranı açılmaz)
   useEffect(() => {
@@ -253,10 +204,13 @@ export default function MapScreen() {
     checkInitialPermission();
   }, []);
   
-  // Konum izni verilmediyse modal ilk render ve her ekrana gelişte açılsın
+  // Konum izni verilmediyse modal sadece ilk açılışta ve gerekli durumlarda açılsın
   useEffect(() => {
     (async () => {
       if (!isMounted.current) return;
+      
+      // hasLocationPermission henüz kontrol edilmediyse bekle
+      if (hasLocationPermission === null) return;
       
       console.log('[PERMISSION MODAL CHECK] Başlangıç:', { 
         userDismissedPermissionModal, 
@@ -277,16 +231,9 @@ export default function MapScreen() {
         return;
       }
       
-      // Kullanıcı premium ise background izin de kontrol edilmeli
-      let showModal = false;
-      if (user?.offline_enabled) {
-        const hasAll = await checkLocationPermissionsForPremium(user);
-        showModal = !hasAll;
-        console.log('[PERMISSION MODAL CHECK] Premium kullanıcı - hasAll:', hasAll, 'showModal:', showModal);
-      } else {
-        showModal = !hasLocationPermission;
-        console.log('[PERMISSION MODAL CHECK] Normal kullanıcı - hasLocationPermission:', hasLocationPermission, 'showModal:', showModal);
-      }
+      // Konum izni kontrolü (premium kullanıcılar için background izin kaldırıldı)
+      const showModal = !hasLocationPermission;
+      console.log('[PERMISSION MODAL CHECK] Konum izni durumu - hasLocationPermission:', hasLocationPermission, 'showModal:', showModal);
       
       // Eğer help modal açıksa, permission modalı beklet
       if (showModal && helpVisible) {
@@ -313,11 +260,22 @@ export default function MapScreen() {
         try {
           const { status } = await Location.getForegroundPermissionsAsync();
           const granted = status === 'granted';
-          setHasLocationPermission(granted);
           
-          // İzin verildiğinde flag'i sıfırla (modal açılıp açılmayacağına useEffect karar verecek)
-          if (granted) {
-            setUserDismissedPermissionModal(false);
+          // Sadece izin durumu değiştiyse state'i güncelle
+          if (granted !== hasLocationPermission) {
+            setHasLocationPermission(granted);
+            
+            // İzin verildiğinde modalı kapat ve flag'i sıfırla
+            if (granted) {
+              setUserDismissedPermissionModal(false);
+              setLocationPermissionModalVisible(false);
+            } else if (!userDismissedPermissionModal) {
+              // İzin kaldırıldıysa ve kullanıcı daha önce reddetmediyse modalı aç
+              const doNotShow = await SecureStore.getItemAsync('doNotShowLocationPermissionModal');
+              if (doNotShow !== 'true') {
+                setLocationPermissionModalVisible(true);
+              }
+            }
           }
         } catch (error) {
           console.error('[AppState] İzin kontrolü hatası:', error);
@@ -328,21 +286,55 @@ export default function MapScreen() {
     return () => {
       subscription.remove();
     };
-  }, [user]);
+  }, [hasLocationPermission, userDismissedPermissionModal]);
   
-  // HelpModal kapandığında, permission modal açılması gerekiyorsa aç (küçük gecikme ile)
+  // HelpModal kapandığında, permission modal açılması gerekiyorsa aç (modal animasyonları sonrası için gecikme ile)
   useEffect(() => {
     if (!helpVisible && pendingShowPermissionModal) {
-      // Modal animasyonunun tamamlanması için 300ms bekle
-      const timeout = setTimeout(() => {
-        if (isMounted.current) {
+      // Modal animasyonunun ve render cleanup'larının tamamlanması için 500ms bekle
+      const timeout = setTimeout(async () => {
+        if (!isMounted.current) return;
+        
+        setPendingShowPermissionModal(false);
+        
+        // LocationPermissionModal açılmalı mı kontrol et
+        const shouldShowLocationModal = !hasLocationPermission && !userDismissedPermissionModal;
+        
+        if (shouldShowLocationModal) {
           setLocationPermissionModalVisible(true);
-          setPendingShowPermissionModal(false);
+        } else if (user?.role === 'guest') {
+          // LocationPermissionModal açılmayacak ama guest kullanıcıysa guest modalını aç
+          try {
+            const doNotShowGuest = await SecureStore.getItemAsync('doNotShowGuestInfoModal');
+            if (doNotShowGuest !== 'true') {
+              setTimeout(() => {
+                if (isMounted.current) {
+                  setGuestInfoModalVisible(true);
+                }
+              }, 500);
+            }
+          } catch (e) {
+            console.error('[GUEST MODAL] SecureStore hatası:', e);
+          }
         }
-      }, 300);
+      }, 500);
       return () => clearTimeout(timeout);
     }
-  }, [helpVisible, pendingShowPermissionModal]);
+  }, [helpVisible, pendingShowPermissionModal, hasLocationPermission, userDismissedPermissionModal, user]);
+  
+  // LocationPermissionModal kapandığında, guest modal açılması gerekiyorsa aç (modal animasyonları sonrası için gecikme ile)
+  useEffect(() => {
+    if (!locationPermissionModalVisible && pendingShowGuestModal) {
+      // Modal animasyonunun ve render cleanup'larının tamamlanması için 500ms bekle
+      const timeout = setTimeout(() => {
+        if (isMounted.current) {
+          setGuestInfoModalVisible(true);
+          setPendingShowGuestModal(false);
+        }
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [locationPermissionModalVisible, pendingShowGuestModal]);
 
   // Profil sayfasından konum izni verildiğinde haritayı güncelle
   useEffect(() => {
@@ -431,26 +423,6 @@ export default function MapScreen() {
       }
     };
   }, []);
-
-  useFocusEffect(
-    React.useCallback(() => {
-      // Ekran focus'a geldiğinde izni yeniden kontrol et (native izin ekranı açılmaz)
-      const recheckPermission = async () => {
-        try {
-          const { status } = await Location.getForegroundPermissionsAsync();
-          const granted = status === 'granted';
-          setHasLocationPermission(granted);
-          
-          // İzin verildiğinde flag'i sıfırla (modal açılıp açılmayacağına useEffect karar verecek)
-          if (granted) {
-            setUserDismissedPermissionModal(false);
-          }
-          // Modal açma/kapama işlemi diğer useEffect'te yapılacak
-        } catch (error) {}
-      };
-      recheckPermission();
-    }, [user])
-  );
   
   useEffect(() => {
     (async () => {
@@ -495,16 +467,14 @@ export default function MapScreen() {
         if (location && location.coords) {
           const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
           if (provinceName) {
-            const normalized = provinceName.toLocaleLowerCase('tr').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u').replace(/Ç/g, 'c').replace(/Ğ/g, 'g').replace(/İ/g, 'i').replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u').replace(/\s+/g, '');
-            const { districtToProvinceMap, provinceNameToValilikId } = require('@/lib/provinceMap');
-            const matchedProvince = districtToProvinceMap[normalized] || null;
-            if (matchedProvince) {
-              matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
-              // SecureStore'a kaydet
-              if (matchedValilikIdLocal) {
-                await SecureStore.setItemAsync('matchedValilikId', String(matchedValilikIdLocal));
-                console.log('[ANNOUNCEMENT] Valilik ID kaydedildi:', matchedValilikIdLocal);
-              }
+            const { getValilikIdFromProvinceName } = require('@/lib/provinceMap');
+            // getValilikIdFromProvinceName fonksiyonu: il adı → valilik_id, ilçe → il → valilik_id fallback'i yapar
+            matchedValilikIdLocal = getValilikIdFromProvinceName(provinceName);
+            if (matchedValilikIdLocal) {
+              await SecureStore.setItemAsync('matchedValilikId', String(matchedValilikIdLocal));
+              console.log('[ANNOUNCEMENT] Konum:', provinceName, ' → Valilik ID kaydedildi:', matchedValilikIdLocal);
+            } else {
+              console.log('[ANNOUNCEMENT] Konum alındı ama valilik ID bulunamadı:', provinceName);
             }
           }
         }
@@ -606,10 +576,10 @@ export default function MapScreen() {
           if (location && location.coords) {
             const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
             if (provinceName) {
-              const normalized = provinceName.toLocaleLowerCase('tr').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u').replace(/Ç/g, 'c').replace(/Ğ/g, 'g').replace(/İ/g, 'i').replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u').replace(/\s+/g, '');
-              const { districtToProvinceMap, provinceNameToValilikId } = require('@/lib/provinceMap');
-              const matchedProvince = districtToProvinceMap[normalized] || null;
-              if (matchedProvince) matchedValilikIdLocal = provinceNameToValilikId[matchedProvince] || null;
+              const { getValilikIdFromProvinceName } = require('@/lib/provinceMap');
+              // getValilikIdFromProvinceName fonksiyonu: il adı → valilik_id, ilçe → il → valilik_id fallback'i yapar
+              matchedValilikIdLocal = getValilikIdFromProvinceName(provinceName);
+              if (__DEV__) console.log('[ANNOUNCEMENT] Konum:', provinceName, ' → Valilik ID:', matchedValilikIdLocal);
             }
           }
         } catch (err) {
@@ -809,13 +779,6 @@ export default function MapScreen() {
     }
   }, [showNotificationBar]);
 
-
-  // Harita senkronizasyonundan sonra da yeni duyuru bildirimi tetiklensin
-  useEffect(() => {
-    // isConnected veya harita sync sonrası tetiklenebilir (full sync sırasında bildirim gösterme)
-    fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
-  }, [isConnected]);
-
   // Mevcut konuma odaklanma fonksiyonu
   const handleShowCurrentLocation = async () => {
     try {
@@ -842,20 +805,15 @@ export default function MapScreen() {
         // Haritayı kullanıcının konumuna döndür
         setMapMoveQuery(null);
         setMapCenter({ latitude, longitude });
-        
-        // WebView'a haritayı ortala komutu gönder
-        const timeoutId = setTimeout(() => {
-          if (!isMounted.current) return;
-          
+        // WebView'a haritayı ortala komutu hemen gönder
+        if (isMounted.current) {
           safeInjectJavaScript(`
             if (typeof map !== 'undefined') {
               map.setView([${latitude}, ${longitude}], 13);
             }
             true;
           `, 'DEBUG');
-        }, 300) as unknown as number;
-        
-        timeoutRefs.current.push(timeoutId);
+        }
         
         // getCurrentLocation hook'ını çağırarak location state'i güncelle
         await getCurrentLocation();
@@ -960,82 +918,44 @@ export default function MapScreen() {
     })();
   }, [isConnected]);
   
-  // Arka plan konum izlemeyi başlat
+  // Akıllı offline cache sistemi (WiFi'da otomatik favorileri cache'ler)
+  // Sadece bir kez başlatılır (izin verildiğinde)
   useEffect(() => {
-    let isActive = true;
+    // Zaten başlatıldıysa bir daha başlatma
+    if (hasStartedOperationsRef.current) return;
     
-    const startBackgroundLocation = async () => {
-      try {
-        // Önce kullanıcının offline özelliğine sahip olup olmadığını kontrol et
-        const token = await getToken();
-        if (!token) {
-          console.log('[BackgroundLocation] Token yok, offline mod devre dışı');
-          return;
-        }
-        
-        const userData = await getMe();
-        if (!userData || !userData.offline_enabled) {
-          console.log('[BackgroundLocation] Kullanıcı offline özelliğine sahip değil');
-          // Kullanıcıya bilgilendirme göster (opsiyonel)
-          if (userData && userData.role === 'guest') {
-            console.log('[BackgroundLocation] Guest kullanıcılar offline mod kullanamaz');
-          }
-          return;
-        }
-        
-        console.log(`[BackgroundLocation] Offline özelliği aktif (${userData.offline_radius_km || 20} km)`);
-        
-        // Konum izni kontrolü
-        const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
-        if (foregroundStatus !== 'granted') {
-          console.log('[BackgroundLocation] Konum izni reddedildi');
-          return;
-        }
-        
-        // Arka plan konum izni (sadece mevcut durumu kontrol et, otomatik isteme!)
-        const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
-        if (backgroundStatus !== 'granted') {
-          console.log('[BackgroundLocation] Arka plan konum izni yok, kısıtlı modda çalışacak.');
-          // Kullanıcıya bilgilendirme göstermek isterseniz burada Alert bırakabilirsiniz (isteğe bağlı)
-          return; // Arka plan tracking başlatma
-        }
-        
-        // Zaten çalışıyor mu kontrol et
-        const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
-        if (isRegistered && isActive) {
-          console.log('[BackgroundLocation] Zaten çalışıyor');
-          return;
-        }
-        
-        // Arka plan konum izlemeyi başlat (her 30 dakikada bir veya 5 km hareket olduğunda)
-        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 30 * 60 * 1000, // 30 dakika (pil dostu)
-          distanceInterval: 5000, // 5 km (anlamlı hareket)
-          deferredUpdatesInterval: 30 * 60 * 1000, // Güncellemeleri 30 dakika biriktir
-          foregroundService: {
-            notificationTitle: 'Kamp Defterim',
-            notificationBody: 'Offline harita senkronizasyonu için konum izleniyor',
-            notificationColor: '#059669',
-          },
-          pausesUpdatesAutomatically: true, // Hareket etmediğinde otomatik duraklat
-          showsBackgroundLocationIndicator: false,
-        });
-        
-        console.log('[BackgroundLocation] Başlatıldı - her 30 dakikada bir veya 5 km hareket olduğunda konum alınacak');
-      } catch (error) {
-        console.error('[BackgroundLocation] Başlatma hatası:', error);
-      }
-    };
+    // Konum izni durumu belirsizken başlatma
+    if (hasLocationPermission !== true) {
+      if (__DEV__) console.log('[SmartCache] Konum izni yok/belirsiz, cache başlatılmıyor');
+      return;
+    }
     
-    startBackgroundLocation();
+    // İlk kez izin verildi, işlemleri başlat
+    hasStartedOperationsRef.current = true;
+    
+    let unsubscribe: (() => void) | null = null;
+    
+    // Permission onaylandıktan sonra kademeli başlat (modal conflict önleme)
+    const timer = setTimeout(() => {
+      console.log('[SmartCache] Otomatik cache sistemi başlatılıyor...');
+      
+      // Smart cache'i başlat (WiFi'da favori yerler otomatik cache'lenir)
+      unsubscribe = initSmartCache({
+        maxRegions: 5,
+        radiusPerRegion: 10,
+        onlyWiFi: true,
+        silent: true,
+      });
+    }, 1000); // Modal kapandıktan 1 saniye sonra başlat
     
     return () => {
-      isActive = false;
-      // Component unmount olduğunda arka plan izlemeyi durdur
-      Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => {});
+      clearTimeout(timer);
+      if (unsubscribe) {
+        unsubscribe();
+        console.log('[SmartCache] Otomatik cache sistemi durduruldu');
+      }
     };
-  }, []);
+  }, [hasLocationPermission]); // Permission true olduğunda tetiklenir, sonra ref sayesinde tekrar çalışmaz
   
   // ...existing code...
 
@@ -1313,12 +1233,28 @@ export default function MapScreen() {
     longitude: mapMoveQuery ? mapMoveQuery.longitude : undefined,
     currentUserId: user?.id ?? undefined,
     isSuperAdmin,
+    hasLocationPermission, // Konum izni durumu (modal conflict önleme)
   });
 
   // refreshData'yı ref'te sakla (stale closure önleme)
   useEffect(() => {
     refreshDataRef.current = refreshData;
   }, [refreshData]);
+
+  // Harita senkronizasyonundan sonra da yeni duyuru bildirimi tetiklensin
+  // Konum veya harita merkezi değiştiğinde de duyuruları güncelle
+  useEffect(() => {
+    // Konum izni durumu belirsiz/yok iken announcement fetch'i başlatma
+    if (hasLocationPermission !== true) {
+      if (__DEV__) console.log('[ANNOUNCEMENT] Konum izni yok/belirsiz, fetch başlatılmıyor');
+      return;
+    }
+    // isConnected veya harita sync sonrası tetiklenebilir (full sync sırasında bildirim gösterme)
+    // Konum değiştiğinde duyuruları da güncelle
+    fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, mapMoveQuery?.latitude, mapMoveQuery?.longitude, location?.coords.latitude, location?.coords.longitude]);
+  // hasLocationPermission dependency'de yok çünkü sadece guard olarak kullanılıyor
 
   // AppState listener: Uygulama arka plandan ön plana geldiğinde veri yenile
   useEffect(() => {
@@ -1344,8 +1280,37 @@ export default function MapScreen() {
         }
         
         // WebView'in mount olmasını bekle, sonra refresh yap
-        appStateTimeoutRef.current = setTimeout(() => {
+        appStateTimeoutRef.current = setTimeout(async () => {
           if (!isMounted.current) return;
+          
+          // Konum kontrolü yap - değişmişse (1km'den fazla) veriyi yenile
+          try {
+            const { status } = await Location.getForegroundPermissionsAsync();
+            if (status === 'granted' && location?.coords) {
+              const newLocation = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+              });
+              
+              if (newLocation?.coords && location?.coords) {
+                const dist = getDistanceMeters(
+                  location.coords.latitude,
+                  location.coords.longitude,
+                  newLocation.coords.latitude,
+                  newLocation.coords.longitude
+                );
+                
+                if (dist > 1000) {
+                  if (__DEV__) console.log('[AppState] Konum değişti:', dist.toFixed(0), 'metre, veri yenileniyor');
+                  // getCurrentLocation hook'unu çağır
+                  await getCurrentLocation();
+                } else if (__DEV__) {
+                  console.log('[AppState] Konum değişmedi:', dist.toFixed(0), 'metre');
+                }
+              }
+            }
+          } catch (err) {
+            if (__DEV__) console.warn('[AppState] Konum kontrol hatası:', err);
+          }
           
           // Veri yenileme fonksiyonlarını tetikle (ref'ten al - stale closure önleme)
           if (refreshDataRef.current && typeof refreshDataRef.current === 'function') {
@@ -1388,6 +1353,74 @@ export default function MapScreen() {
       offEvent('announcements:new', handler);
     };
   }, []);
+
+  // Versiyon güncellendiğinde full sync tetikle
+  useEffect(() => {
+    const handler = async () => {
+      if (__DEV__) console.log('[VERSION_UPDATED] Event alındı, full sync başlatılıyor...');
+      
+      // Sync flag'lerini sıfırla
+      hasInitialSyncRef.current = false;
+      
+      // Konum izni yoksa sync yapma
+      if (hasLocationPermission !== true) {
+        if (__DEV__) console.log('[VERSION_UPDATED] Konum izni yok, sync atlanıyor');
+        return;
+      }
+      
+      // Zaten sync devam ediyorsa bekle
+      if (isSyncingRef.current) {
+        if (__DEV__) console.log('[VERSION_UPDATED] Zaten sync devam ediyor, atlanıyor');
+        return;
+      }
+      
+      isSyncingRef.current = true;
+      hasInitialSyncRef.current = true;
+      
+      try {
+        const token = await getToken();
+        if (!token) {
+          if (__DEV__) console.log('[VERSION_UPDATED] Token yok, sync atlanıyor');
+          isSyncingRef.current = false;
+          return;
+        }
+        
+        // Full sync başlat
+        if (__DEV__) console.log('[VERSION_UPDATED] Full sync başlıyor...');
+        isFullSyncInProgressRef.current = true;
+        await SecureStore.setItemAsync('isInitialSyncComplete', 'false');
+        setSyncProgress({ current: 0, total: 0, isLoading: true });
+        
+        const count = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { 
+          forceFull: true,
+          onProgress: (current, total) => {
+            if (__DEV__) console.log('[VERSION_UPDATED][PROGRESS]:', current, '/', total);
+            setSyncProgress({ current, total, isLoading: true });
+          }
+        });
+        
+        if (__DEV__) console.log('[VERSION_UPDATED] Full sync tamamlandı:', count, 'kayıt');
+        await SecureStore.setItemAsync('hasInitialSync', 'true');
+        await SecureStore.setItemAsync('isInitialSyncComplete', 'true');
+        isFullSyncInProgressRef.current = false;
+        setSyncProgress({ current: 0, total: 0, isLoading: false });
+        
+        await refreshData();
+        fetchAnnouncementsSilently(router, false);
+      } catch (err) {
+        console.error('[VERSION_UPDATED] Sync hatası:', err);
+        isFullSyncInProgressRef.current = false;
+        setSyncProgress({ current: 0, total: 0, isLoading: false });
+      } finally {
+        isSyncingRef.current = false;
+      }
+    };
+    
+    onEvent('version_updated', handler);
+    return () => {
+      offEvent('version_updated', handler);
+    };
+  }, [hasLocationPermission]);
 
   // Konum izni durumunu kontrol et
   // Konum izni durumu sadece requestLocationPermission ile güncellenir
@@ -1464,13 +1497,21 @@ export default function MapScreen() {
   
   // İlk açılışta API'dan senkronizasyon
   useEffect(() => {
+    // Konum izni durumu belirsiz/yok iken senkronizasyon başlatma
+    if (hasLocationPermission !== true) {
+      if (__DEV__) console.log('[SYNC] Konum izni yok/belirsiz, ilk senkronizasyon başlatılmıyor');
+      return;
+    }
+    
     if (hasInitialSyncRef.current) return;
     hasInitialSyncRef.current = true;
     
-    (async () => {
-      await refreshData();
-      // Duyurular arka planda fetch (full sync sırasında bildirim gösterme)
-      fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
+    // Permission onaylandıktan sonra kademeli başlat (500ms gecikme)
+    const timer = setTimeout(() => {
+      (async () => {
+        await refreshData();
+        // Duyurular arka planda fetch (full sync sırasında bildirim gösterme)
+        fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
       // API senkronizasyonu
       if (isConnected) {
         if (isSyncingRef.current) {
@@ -1535,8 +1576,11 @@ export default function MapScreen() {
       } else {
         if (__DEV__) console.log('Offline modda, API çağrısı yapılmayacak.');
       }
-    })();
-  }, []);
+      })();
+    }, 500); // Modal kapandıktan 500ms sonra başlat
+    
+    return () => clearTimeout(timer);
+  }, [hasLocationPermission]); // Permission true olduğunda sync başlar, hasInitialSyncRef ile tekrar başlamaz
 
   // Konum değiştiğinde kontrol et ve gerekirse refreshData çağır
   useEffect(() => {
@@ -1585,10 +1629,8 @@ export default function MapScreen() {
       try {
         const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
         if (provinceName) {
-          const normalized = provinceName.toLocaleLowerCase('tr').replace(/ç/g, 'c').replace(/ğ/g, 'g').replace(/ı/g, 'i').replace(/ö/g, 'o').replace(/ş/g, 's').replace(/ü/g, 'u').replace(/Ç/g, 'c').replace(/Ğ/g, 'g').replace(/İ/g, 'i').replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u').replace(/\s+/g, '');
-          const { districtToProvinceMap, provinceNameToValilikId } = require('@/lib/provinceMap');
-          const matchedProvince = districtToProvinceMap[normalized] || null;
-          const newValilikId = matchedProvince ? provinceNameToValilikId[matchedProvince] || null : null;
+          const { getValilikIdFromProvinceName } = require('@/lib/provinceMap');
+          const newValilikId = getValilikIdFromProvinceName(provinceName);
           
           // Mevcut valilik_id'yi oku
           const storedValilikId = await SecureStore.getItemAsync('matchedValilikId');
@@ -1597,7 +1639,7 @@ export default function MapScreen() {
           // Değiştiyse güncelle ve event bus ile bildir
           if (newValilikId && newValilikId !== storedValilikIdNum) {
             await SecureStore.setItemAsync('matchedValilikId', String(newValilikId));
-            console.log('[VALILIK UPDATE] Valilik ID güncellendi:', storedValilikIdNum, '->', newValilikId);
+            console.log('[VALILIK UPDATE] Konum:', provinceName, '→ Valilik ID:', storedValilikIdNum, '->', newValilikId);
             
             // Event bus ile duyuruları güncelleme sinyali gönder
             const { eventBus } = require('@/lib/eventBus');
@@ -3154,26 +3196,69 @@ export default function MapScreen() {
         currentUserId={user?.id}
       />
       
-      {/* Location Permission Modal - En üstte render et */}
-      <LocationPermissionModal
-        visible={locationPermissionModalVisible}
-        onClose={() => {
-          // Modal kapalıysa tekrar state güncelleme yapma
-          if (!locationPermissionModalVisible) return;
-          if (isMounted.current) {
-            setLocationPermissionModalVisible(false);
-            setUserDismissedPermissionModal(true);
-          }
-        }}
-        onPermissionGranted={() => {
-          if (!locationPermissionModalVisible) return;
-          console.log('[PERMISSION] Modal izin granted callback çağrıldı');
-          if (isMounted.current) {
-            setHasLocationPermission(true);
-            setLocationPermissionModalVisible(false);
-          }
-        }}
-      />
+      {/* Location Permission Modal - HelpModal kapalıyken render et (view tag çakışmasını önlemek için) */}
+      {!helpVisible && (
+        <LocationPermissionModal
+          visible={locationPermissionModalVisible}
+          onClose={async () => {
+            // Modal kapalıysa tekrar state güncelleme yapma
+            if (!locationPermissionModalVisible) return;
+            if (isMounted.current) {
+              setLocationPermissionModalVisible(false);
+              setUserDismissedPermissionModal(true);
+              
+              // LocationPermissionModal kapandığında, guest kullanıcıysa guest modalı beklet
+              if (user?.role === 'guest') {
+                // "Bir daha gösterme" kontrolü
+                try {
+                  const doNotShowGuest = await SecureStore.getItemAsync('doNotShowGuestInfoModal');
+                  if (doNotShowGuest !== 'true') {
+                    setPendingShowGuestModal(true);
+                  }
+                } catch (e) {
+                  console.error('[GUEST MODAL] SecureStore hatası:', e);
+                }
+              }
+            }
+          }}
+          onPermissionGranted={async () => {
+            if (!locationPermissionModalVisible) return;
+            console.log('[PERMISSION] Modal izin granted callback çağrıldı');
+            if (isMounted.current) {
+              setHasLocationPermission(true);
+              setLocationPermissionModalVisible(false);
+              
+              // İzin verildikten sonra da guest kontrolü yap
+              if (user?.role === 'guest') {
+                try {
+                  const doNotShowGuest = await SecureStore.getItemAsync('doNotShowGuestInfoModal');
+                  if (doNotShowGuest !== 'true') {
+                    setPendingShowGuestModal(true);
+                  }
+                } catch (e) {
+                  console.error('[GUEST MODAL] SecureStore hatası:', e);
+                }
+              }
+            }
+          }}
+        />
+      )}
+      
+      {/* Guest Info Modal - Diğer modaller kapalıyken render et (view tag çakışmasını önlemek için) */}
+      {!helpVisible && !locationPermissionModalVisible && (
+        <GuestInfoModal
+          visible={guestInfoModalVisible}
+          onClose={() => {
+            if (isMounted.current) {
+              setGuestInfoModalVisible(false);
+              // "Bir daha gösterme" flag'ını kaydet
+              SecureStore.setItemAsync('doNotShowGuestInfoModal', 'true').catch(e => 
+                console.error('[GUEST MODAL] SecureStore hatası:', e)
+              );
+            }
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }

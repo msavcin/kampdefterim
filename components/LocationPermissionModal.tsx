@@ -39,10 +39,14 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
         const user = await getMe();
         const premium = !!user?.offline_enabled;
         console.log('[PERMISSION MODAL] Premium durumu:', premium, 'User:', user);
-        setIsPremium(premium);
+        if (isMounted.current && visible) {
+          setIsPremium(premium);
+        }
       } catch (e) {
         console.log('[PERMISSION MODAL] Premium kontrol hatası:', e);
-        setIsPremium(false);
+        if (isMounted.current && visible) {
+          setIsPremium(false);
+        }
       }
     })();
   }, [visible]);
@@ -64,22 +68,10 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
         if (!isMounted.current || !visible) return;
         console.log('[PERMISSION MODAL] AppState check - Foreground izin:', foreground.status);
         if (foreground.status === 'granted') {
-          if (isPremium && Platform.OS !== 'web') {
-            const background = await Location.getBackgroundPermissionsAsync();
-            if (!isMounted.current || !visible) return;
-            console.log('[PERMISSION MODAL] AppState check - Background izin:', background.status);
-            if (background.status === 'granted') {
-              try { eventBus.emit('locationPermissionGranted', { fromModal: true }); } catch (e) {}
-              if (!isMounted.current || !visible) return;
-              onPermissionGranted?.();
-              onClose();
-            }
-          } else {
-            try { eventBus.emit('locationPermissionGranted', { fromModal: true }); } catch (e) {}
-            if (!isMounted.current || !visible) return;
-            onPermissionGranted?.();
-            onClose();
-          }
+          try { eventBus.emit('locationPermissionGranted', { fromModal: true }); } catch (e) {}
+          if (!isMounted.current || !visible) return;
+          onPermissionGranted?.();
+          onClose();
         }
       } catch (error) {
         console.error('[PERMISSION MODAL] İzin kontrolü hatası:', error);
@@ -118,43 +110,17 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
       if (!isMounted.current || !visible) return;
       console.log('[PERMISSION MODAL] Foreground izin sonucu:', status);
       if (status === 'granted') {
-        // Foreground izin verildi - her durumda event emit et
+        // Foreground izin verildi - event emit et ve modalı kapat
         console.log('[PERMISSION MODAL] Foreground izin verildi');
         try {
           eventBus.emit('locationPermissionGranted', { fromModal: true });
         } catch (e) {
           console.error('[PERMISSION MODAL] EventBus hatası:', e);
         }
-        if (isPremium && Platform.OS !== 'web') {
-          const bgStatus = await Location.getBackgroundPermissionsAsync();
-          if (!isMounted.current || !visible) return;
-          if (bgStatus.status !== 'granted') {
-            const { status: bgRequestStatus } = await Location.requestBackgroundPermissionsAsync();
-            if (!isMounted.current || !visible) return;
-            if (bgRequestStatus !== 'granted') {
-              alert('Offline Mode için konum iznini "Her zaman izin ver" olarak ayarlamanız gerekmektedir. Profil sayfasından veya sistem ayarlarından izin verebilirsiniz.');
-              if (!isMounted.current || !visible) return;
-              onPermissionGranted?.();
-              onClose();
-              return;
-            } else {
-              if (!isMounted.current || !visible) return;
-              onPermissionGranted?.();
-              onClose();
-              return;
-            }
-          } else {
-            if (!isMounted.current || !visible) return;
-            onPermissionGranted?.();
-            onClose();
-            return;
-          }
-        } else {
-          if (!isMounted.current || !visible) return;
-          onPermissionGranted?.();
-          onClose();
-          return;
-        }
+        if (!isMounted.current || !visible) return;
+        onPermissionGranted?.();
+        onClose();
+        return;
       } else {
         Linking.openSettings();
         return;
@@ -163,16 +129,6 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
       console.error('[PERMISSION MODAL] Konum izni hatası:', error);
     }
   };
-
-  // Eğer modal görünür değilse, hiçbir şey render etme
-
-  // pointerEvents'i visible'a göre ayarla
-  const overlayPointerEvents = visible ? 'box-none' : 'none';
-  const containerPointerEvents = visible ? 'auto' : 'none';
-
-  if (!visible) {
-    return null;
-  }
 
   return (
     <Modal 
@@ -183,29 +139,19 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
       hardwareAccelerated
       statusBarTranslucent
     >
-      <View style={styles.overlay} pointerEvents={overlayPointerEvents}>
-        <View style={styles.container} pointerEvents={containerPointerEvents}>
+      <View style={styles.overlay}>
+        <View style={styles.container}>
           <View style={styles.iconContainer}>
             <Navigation size={48} color="#059669" />
           </View>
           <Text style={styles.title}>Konum İzni Neden Gerekli?</Text>
           <Text style={styles.description}>
-            {isPremium ? (
-              <>
-                Kamp alanlarını haritada gösterebilmek ve size en yakın noktaları sunabilmek için konum iznine ihtiyacımız var.{"\n"}
-                <Text style={{ fontWeight: 'bold', color: '#059669' }}>
-                  {"\n"}Premium (Offline Mode) özelliğini tam kullanabilmek için konum izninizin <Text style={{ textDecorationLine: 'underline' }}>'Her zaman İzin Ver'</Text> olarak ayarlanması gerekmektedir. Böylece haritalar internetiniz olmasa bile otomatik olarak konumunuza göre saklanacaktır. Konum izinleri ile ilgili detaylı bilgiye <Text style={{ textDecorationLine: 'underline', color: '#059669' }} onPress={() => Linking.openURL('https://kampdefterim.com/konum-izinleri.html')}>buradan</Text> ulaşabilirsiniz.
-                </Text>
-              </>
-            ) : (
-              'Kamp alanlarını haritada gösterebilmek ve size en yakın noktaları sunabilmek için konum iznine ihtiyacımız var.'
-            )}
+            Kamp alanlarını haritada gösterebilmek ve size en yakın noktaları sunabilmek için konum iznine ihtiyacımız var.
           </Text>
           <View style={styles.features}>
             <Text style={styles.featureItem}>📍 Yakınımdaki kamp alanlarını göster</Text>
             <Text style={styles.featureItem}>🗺️ Haritada konumumu göster</Text>
             <Text style={styles.featureItem}>📏 Mesafe hesaplamalarını yap</Text>
-            {isPremium ? <Text style={styles.featureItem}>🔋 Offline Mode için arka planda harita yükle</Text> : null}
           </View>
           <TouchableOpacity style={styles.button} onPress={handleRequestPermission}>
             <Text style={styles.buttonText}>Konum İzni Ver</Text>
@@ -229,7 +175,9 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.checkboxContainer} 
-            onPress={() => setDoNotRemind(!doNotRemind)}
+            onPress={() => {
+              if (isMounted.current) setDoNotRemind(!doNotRemind);
+            }}
             activeOpacity={0.7}
           >
             <View style={[styles.checkbox, doNotRemind && styles.checkboxChecked]}>

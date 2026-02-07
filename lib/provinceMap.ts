@@ -105,7 +105,17 @@ export const provinceNameToValilikId: Record<string, number> = {
 
 // İl adından valilik_id (plaka kodu) bulur, ilçe adı gelirse ilçe→il→valilik_id fallback uygular
 export function getValilikIdFromProvinceName(name: string): number | null {
-  const normalized = normalizeProvinceName(name);
+  let cleanedName = name;
+  
+  // OSM'den gelen adlardan yaygın suffixleri kaldır
+  // Örn: "Sinop Merkez" → "Sinop", "Diyarbakır İlçesi" → "Diyarbakır"
+  cleanedName = cleanedName
+    .replace(/\s+Merkez\s*$/i, '') // "İstanbul Merkez" → "İstanbul"
+    .replace(/\s+İlçesi\s*$/i, '') // "Ankara İlçesi" → "Ankara"
+    .replace(/\s+Şehri\s*$/i, '') // "Ankara Şehri" → "Ankara"
+    .replace(/\s+Kenti\s*$/i, ''); // "İzmir Kenti" → "İzmir"
+  
+  const normalized = normalizeProvinceName(cleanedName);
   let valilikId = provinceNameToValilikId[normalized] || null;
   if (!valilikId) {
     // Eğer il adı bulunamazsa, ilçe→il mapping ile tekrar dene
@@ -113,6 +123,9 @@ export function getValilikIdFromProvinceName(name: string): number | null {
     if (province) {
       valilikId = provinceNameToValilikId[province] || null;
     }
+  }
+  if (__DEV__) {
+    console.log('[getValilikIdFromProvinceName] Input:', name, 'Cleaned:', cleanedName, 'Normalized:', normalized, 'ValilikId:', valilikId);
   }
   return valilikId;
 }

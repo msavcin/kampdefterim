@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { setLargeItemAsync, getLargeItemAsync } from '@/lib/largeStorage';
 import Constants from 'expo-constants';
 import { clearTileCache, getTileCacheStats } from '@/lib/mapTileCache';
+import OfflineRegionSelector from '@/components/OfflineRegionSelector';
 // Sunucu eşleştirme fonksiyonu: source_id:1 olan tüm kamp alanlarını lokal veritabanına kaydet
 async function syncServerCampgroundsToLocal() {
   try {
@@ -404,7 +405,6 @@ export default function ProfileScreen(props: any) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [locationPermissionStatus, setLocationPermissionStatus] = useState<string>('unknown');
-  const [backgroundPermissionStatus, setBackgroundPermissionStatus] = useState<string>('unknown');
   // Manuel Overpass Sync kaldırıldı
   const [backupInfo, setBackupInfo] = useState<{
     userAreasCount: number;
@@ -549,45 +549,44 @@ export default function ProfileScreen(props: any) {
   const refreshLocationPermissions = async () => {
     try {
       const foreground = await Location.getForegroundPermissionsAsync();
-      const background = await Location.getBackgroundPermissionsAsync();
       setLocationPermissionStatus(foreground.status);
-      setBackgroundPermissionStatus(background.status);
       setLocationEnabled(foreground.status === 'granted');
-      return { foreground: foreground.status, background: background.status };
+      return { foreground: foreground.status };
     } catch (e) {
       console.error('[refreshLocationPermissions] Hata:', e);
       setLocationPermissionStatus('unknown');
-      setBackgroundPermissionStatus('unknown');
       setLocationEnabled(false);
-      return { foreground: 'unknown', background: 'unknown' };
+      return { foreground: 'unknown' };
     }
   };
 
   // Konum izni isteme
-  const requestLocationPermissions = async (requestBackground: boolean = false) => {
+  const requestLocationPermissions = async () => {
     try {
       // Önce mevcut izin durumunu kontrol et
       const currentPermission = await Location.getForegroundPermissionsAsync();
       
       // Eğer izin daha önce reddedilmişse ve tekrar sorulamıyorsa, direkt ayarları aç
       if (currentPermission.status === 'denied' && !currentPermission.canAskAgain) {
-        Alert.alert(
-          'Konum İzni Gerekli',
-          'Konum izni daha önce reddedilmiş. Lütfen uygulama ayarlarından konum iznini aktif edin.',
-          [
-            { text: 'İptal', style: 'cancel' },
-            {
-              text: 'Ayarları Aç',
-              onPress: () => {
-                if (Platform.OS === 'ios') {
-                  Linking.openURL('app-settings:');
-                } else {
-                  Linking.openSettings();
+        setTimeout(() => {
+          Alert.alert(
+            'Konum İzni Gerekli',
+            'Konum izni daha önce reddedilmiş. Lütfen uygulama ayarlarından konum iznini aktif edin.',
+            [
+              { text: 'İptal', style: 'cancel' },
+              {
+                text: 'Ayarları Aç',
+                onPress: () => {
+                  if (Platform.OS === 'ios') {
+                    Linking.openURL('app-settings:');
+                  } else {
+                    Linking.openSettings();
+                  }
                 }
               }
-            }
-          ]
-        );
+            ]
+          );
+        }, 100);
         return false;
       }
       
@@ -595,66 +594,34 @@ export default function ProfileScreen(props: any) {
       const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
       
       if (foregroundStatus !== 'granted') {
-        Alert.alert(
-          'Konum İzni Gerekli',
-          'Konum izni verilmedi. Lütfen uygulama ayarlarından konum iznini aktif edin.',
-          [
-            { text: 'İptal', style: 'cancel' },
-            {
-              text: 'Ayarları Aç',
-              onPress: () => {
-                if (Platform.OS === 'ios') {
-                  Linking.openURL('app-settings:');
-                } else {
-                  Linking.openSettings();
+        setTimeout(() => {
+          Alert.alert(
+            'Konum İzni Gerekli',
+            'Konum izni verilmedi. Lütfen uygulama ayarlarından konum iznini aktif edin.',
+            [
+              { text: 'İptal', style: 'cancel' },
+              {
+                text: 'Ayarları Aç',
+                onPress: () => {
+                  if (Platform.OS === 'ios') {
+                    Linking.openURL('app-settings:');
+                  } else {
+                    Linking.openSettings();
+                  }
                 }
               }
-            }
-          ]
-        );
+            ]
+          );
+        }, 100);
         await refreshLocationPermissions();
         return false;
       }
 
-      // Eğer background izni isteniyorsa
-      if (requestBackground && Platform.OS !== 'web') {
-        // Önce mevcut background izin durumunu kontrol et
-        const currentBackgroundPermission = await Location.getBackgroundPermissionsAsync();
-        
-        if (currentBackgroundPermission.status === 'granted') {
-          // Zaten background izni var
-          Alert.alert('Başarılı', 'Konum izinleri zaten verilmiş!');
-        } else {
-          // Background izni yok, kullanıcıdan iste
-          const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-          
-          if (backgroundStatus !== 'granted') {
-            // İzin verilmedi, kullanıcıyı uyar
-            Alert.alert(
-              'Arka Plan İzni Gerekli',
-              'Offline mod için konum izninin "Her zaman izin ver" olarak ayarlanması gerekmektedir.\n\nLütfen sistem ayarlarından "Konum" iznini "Her zaman izin ver" olarak değiştirin.',
-              [
-                { text: 'Tamam', style: 'cancel' },
-                {
-                  text: 'Ayarları Aç',
-                  onPress: () => {
-                    if (Platform.OS === 'ios') {
-                      Linking.openURL('app-settings:');
-                    } else {
-                      Linking.openSettings();
-                    }
-                  }
-                }
-              ]
-            );
-          } else {
-            // İzin verildi
-            Alert.alert('Başarılı', 'Konum izinleri verildi!');
-          }
-        }
-      } else {
+      // Background izni istemi kaldırıldı
+      // Sadece foreground izni yeterli
+      setTimeout(() => {
         Alert.alert('Başarılı', 'Konum izni verildi!');
-      }
+      }, 100);
 
       await refreshLocationPermissions();
       
@@ -722,14 +689,11 @@ export default function ProfileScreen(props: any) {
     (async () => {
       try {
         const foreground = await Location.getForegroundPermissionsAsync();
-        const background = await Location.getBackgroundPermissionsAsync();
         setLocationPermissionStatus(foreground.status);
-        setBackgroundPermissionStatus(background.status);
         setLocationEnabled(foreground.status === 'granted');
       } catch (e) {
         console.error('[Profile useEffect] Permission okuma hatası:', e);
         setLocationPermissionStatus('unknown');
-        setBackgroundPermissionStatus('unknown');
         setLocationEnabled(false);
       }
     })();
@@ -1386,21 +1350,7 @@ export default function ProfileScreen(props: any) {
                        locationPermissionStatus === 'denied' ? '❌ İzin Reddedildi' : '⚠️ İzin Bekleniyor'}
                     </Text>
                   </View>
-                  {/* Background durumu için ek satır - sadece premium kullanıcılarda */}
-                  {user?.offline_enabled && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Text style={{ fontWeight: 'bold', color: '#0ea5e9', fontSize: 14 }}>Background:</Text>
-                      <View style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: 4,
-                        backgroundColor: backgroundPermissionStatus === 'granted' ? '#10b981' : '#ef4444'
-                      }} />
-                      <Text style={{ fontSize: 15, fontWeight: '600', color: '#1e293b' }}>
-                        {backgroundPermissionStatus === 'granted' ? '✅ İzin Verildi' : '❌ İzin Verilmedi'}
-                      </Text>
-                    </View>
-                  )}
+                  {/* Background durumu kaldırıldı - foreground izni yeterli */}
                 </View>
 
                 {/* Açıklama */}
@@ -1421,30 +1371,13 @@ export default function ProfileScreen(props: any) {
                         borderRadius: 8,
                         alignItems: 'center'
                       }}
-                      onPress={() => requestLocationPermissions(user?.offline_enabled)}
+                      onPress={() => requestLocationPermissions()}
                     >
                       <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
-                        {user?.offline_enabled ? 'Konum İzinlerini Ver (Foreground + Background)' : 'Konum İzni Ver'}
+                        Konum İzni Ver
                       </Text>
                     </TouchableOpacity>
                   )}
-
-                {user?.offline_enabled && locationPermissionStatus === 'granted' && (
-                  <TouchableOpacity
-                    style={{
-                      backgroundColor: '#10b981',
-                      paddingVertical: 12,
-                      paddingHorizontal: 16,
-                      borderRadius: 8,
-                      alignItems: 'center'
-                    }}
-                    onPress={() => requestLocationPermissions(true)}
-                  >
-                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
-                      Arka Plan İzni Kontrol Et / İste
-                    </Text>
-                  </TouchableOpacity>
-                )}
 
                 <TouchableOpacity
                   style={{
@@ -1479,7 +1412,7 @@ export default function ProfileScreen(props: any) {
                     const statuses = await refreshLocationPermissions();
                     Alert.alert(
                       'Konum İzni Durumu',
-                      `Foreground: ${statuses.foreground}\nBackground: ${statuses.background}`,
+                      `Foreground: ${statuses.foreground}`,
                       [{ text: 'Tamam' }]
                     );
                   }}
@@ -1515,6 +1448,13 @@ export default function ProfileScreen(props: any) {
         </View>
 
           
+
+          {/* Offline Bölge İndirme (Sadece offline_enabled kullanıcılar için) */}
+          {user && user.offline_enabled && (
+            <View style={{ marginTop: 24, marginBottom: 16 }}>
+              <OfflineRegionSelector />
+            </View>
+          )}
 
           {/* Cache Temizleme Butonu sadece offline_enabled kullanıcılar için */}
           {user && user.offline_enabled && (

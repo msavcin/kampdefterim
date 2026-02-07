@@ -370,7 +370,7 @@ export async function precacheRegionWithRadius(
   centerLat: number,
   centerLon: number,
   radiusKm: number = 20
-): Promise<{ totalTiles: number; alreadyCached: boolean }> {
+): Promise<{ totalTiles: number; alreadyCached: boolean; cachedTiles?: number; totalSizeMB?: number }> {
   try {
     // Daha önce cache'lenmiş mi kontrol et
     const alreadyCached = await isRegionCached(centerLat, centerLon, radiusKm);
@@ -416,9 +416,17 @@ export async function precacheRegionWithRadius(
     // Bu bölgeyi cache'lenmiş olarak işaretle
     await markRegionAsCached(centerLat, centerLon, radiusKm);
     
-    console.log(`[MapTileCache] Toplam ${totalCached} tile cache'lendi (${radiusKm} km çap)`);
+    // Tahmini boyut hesapla (tile başına ortalama 20 KB)
+    const estimatedSizeMB = Math.round((totalCached * 20) / 1024);
     
-    return { totalTiles: totalCached, alreadyCached: false };
+    console.log(`[MapTileCache] Toplam ${totalCached} tile cache'lendi (${radiusKm} km çap, ~${estimatedSizeMB} MB)`);
+    
+    return { 
+      totalTiles: totalCached, 
+      alreadyCached: false,
+      cachedTiles: totalCached,
+      totalSizeMB: estimatedSizeMB,
+    };
   } catch (error) {
     console.error('[MapTileCache] Bölge cache hatası:', error);
     return { totalTiles: 0, alreadyCached: false };

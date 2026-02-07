@@ -43,12 +43,12 @@ export function prepareCampingAreaPayload(area: any) {
 }
 
 // Local cache ile görsel gösteren yardımcı bileşen
-const GalleryImageWithCache = ({ img, source_id, setImageError, onPress }: { img: string, source_id?: any, setImageError: (v: boolean) => void, onPress?: () => void }) => {
+const GalleryImageWithCache = ({ img, source_id, setImageError, onPress, refreshKey }: { img: string, source_id?: any, setImageError: (v: boolean) => void, onPress?: () => void, refreshKey?: number }) => {
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const isConnected = useNetworkStatus();
-  const [lastOnlineState, setLastOnlineState] = useState(isConnected);
+  const prevConnectedRef = React.useRef<boolean>(isConnected);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -63,34 +63,47 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress }: { img
           image_id = img.split('/').pop()?.split('.')[0] || '';
         }
         
-        // Offline'dan online'a geçiş yapıldıysa cache'i yenile
-        const forceRefresh = !lastOnlineState && isConnected;
+        // Offline'dan online'a geçiş yapıldıysa cache'i yenile (mevcut cache'i sil ve yeniden indir)
+        const wasOffline = !prevConnectedRef.current;
+        const isNowOnline = isConnected;
+        const justWentOnline = wasOffline && isNowOnline;
         
-        const localPath = await getCachedImagePath(image_id, img, forceRefresh);
+        // Modal açıldığında (refreshKey değiştiğinde) ve online'sa cache'i kontrol et ve gerekirse indir
+        const modalJustOpened = refreshKey !== undefined && refreshKey > 0;
+        const shouldTryDownload = justWentOnline || (isConnected && modalJustOpened);
+        
+        if (justWentOnline) {
+          console.log('[image-cache] 🟢 ONLINE olundu, cache yenileniyor:', img);
+        }
+        if (modalJustOpened && isConnected) {
+          console.log('[image-cache] 🔄 Modal açıldı (online), cache kontrol ediliyor:', image_id);
+        }
+        
+        // refreshKey değiştiğinde (modal açıldığında) sadece yükleme tetiklenir
+        // forceRefresh ile cache varsa sil ve yeniden indir, yoksa direkt indir
+        const localPath = await getCachedImagePath(image_id, img, shouldTryDownload, isConnected);
         if (localPath.startsWith('file://')) {
-          console.log(`[image-cache] LOCAL gösteriliyor: ${localPath}`);
+          console.log(`[image-cache] ✅ LOCAL gösteriliyor: ${image_id}`);
         } else {
-          console.log(`[image-cache] REMOTE gösteriliyor: ${localPath}`);
+          console.log(`[image-cache] 🌐 REMOTE gösteriliyor: ${image_id}`);
         }
         if (isMounted) setUri(localPath);
       } catch (e) {
-        console.log('[image-cache] HATA:', e);
+        console.log('[image-cache] ❌ HATA:', e);
         if (isMounted) setError(true);
         setImageError(true);
       } finally {
         if (isMounted) setLoading(false);
       }
     };
-    console.log('[image-cache] Yükleme başlıyor:', img, 'isConnected:', isConnected);
+    
     load();
     
-    // Online durumu güncelle
-    if (lastOnlineState !== isConnected) {
-      setLastOnlineState(isConnected);
-    }
+    // Önceki bağlantı durumunu güncelle
+    prevConnectedRef.current = isConnected;
     
     return () => { isMounted = false; };
-  }, [img, isConnected]);
+  }, [img, isConnected, refreshKey]);
 
   if (loading) {
     return (
@@ -138,12 +151,12 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { deleteCampingAreaSmart } from '@/lib/syncManager';
 
 // Lightbox için büyük fotoğraf bileşeni
-const LightboxImage = ({ img }: { img: string }) => {
+const LightboxImage = ({ img, refreshKey }: { img: string, refreshKey?: number }) => {
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const isConnected = useNetworkStatus();
-  const [lastOnlineState, setLastOnlineState] = useState(isConnected);
+  const prevConnectedRef = React.useRef<boolean>(isConnected);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -158,10 +171,24 @@ const LightboxImage = ({ img }: { img: string }) => {
           image_id = img.split('/').pop()?.split('.')[0] || '';
         }
         
-        // Offline'dan online'a geçiş yapıldıysa cache'i yenile
-        const forceRefresh = !lastOnlineState && isConnected;
+        // Offline'dan online'a geçiş yapıldıysa cache'i yenile (mevcut cache'i sil ve yeniden indir)
+        const wasOffline = !prevConnectedRef.current;
+        const isNowOnline = isConnected;
+        const justWentOnline = wasOffline && isNowOnline;
         
-        const localPath = await getCachedImagePath(image_id, img, forceRefresh);
+        // Lightbox açıldığında (refreshKey değiştiğinde) ve online'sa cache'i kontrol et ve gerekirse indir
+        const lightboxJustOpened = refreshKey !== undefined && refreshKey > 0;
+        const shouldTryDownload = justWentOnline || (isConnected && lightboxJustOpened);
+        
+        if (justWentOnline) {
+          console.log('[lightbox-cache] 🟢 ONLINE olundu, cache yenileniyor:', img);
+        }
+        if (lightboxJustOpened && isConnected) {
+          console.log('[lightbox-cache] 🔄 Lightbox açıldı (online), cache kontrol ediliyor:', image_id);
+        }
+        
+        // refreshKey değiştiğinde (lightbox açıldığında) sadece yükleme tetiklenir
+        const localPath = await getCachedImagePath(image_id, img, shouldTryDownload, isConnected);
         if (isMounted) setUri(localPath);
       } catch (e) {
         if (isMounted) setError(true);
@@ -169,15 +196,14 @@ const LightboxImage = ({ img }: { img: string }) => {
         if (isMounted) setLoading(false);
       }
     };
+    
     load();
     
-    // Online durumu güncelle
-    if (lastOnlineState !== isConnected) {
-      setLastOnlineState(isConnected);
-    }
+    // Önceki bağlantı durumunu güncelle
+    prevConnectedRef.current = isConnected;
     
     return () => { isMounted = false; };
-  }, [img, isConnected]);
+  }, [img, isConnected, refreshKey]);
 
   if (loading) {
     return (
@@ -447,6 +473,15 @@ export default function CampingAreaDetailModal({
   currentUserId
 }: CampingAreaDetailModalProps & { isSuperAdmin?: boolean; currentUserId?: string | number }) {
   const [imageError, setImageError] = useState(false);
+  const [imageRefreshKey, setImageRefreshKey] = useState(0);
+
+  // Modal açıldığında görselleri yeniden kontrol et
+  useEffect(() => {
+    if (visible && campingArea) {
+      console.log('[CampingAreaDetailModal] 🔄 Modal açıldı, görseller yenilenecek');
+      setImageRefreshKey(prev => prev + 1);
+    }
+  }, [visible, campingArea?.id]);
 
   // API'den gelen veriyi logla
   useEffect(() => {
@@ -774,6 +809,7 @@ export default function CampingAreaDetailModal({
                     img={img}
                     source_id={campingArea.source_id}
                     setImageError={setImageError}
+                    refreshKey={imageRefreshKey}
                     onPress={() => {
                       setLightboxIndex(idx);
                       setLightboxVisible(true);
@@ -1154,7 +1190,7 @@ export default function CampingAreaDetailModal({
                   if (typeof img !== 'string' || img.trim() === '') return null;
                   return (
                     <View key={idx} style={{ width: Dimensions.get('window').width, height: Dimensions.get('window').height, justifyContent: 'center', alignItems: 'center' }}>
-                      <LightboxImage img={img} />
+                      <LightboxImage img={img} refreshKey={imageRefreshKey} />
                     </View>
                   );
                 })}

@@ -1,4 +1,3 @@
-
 import { Tabs, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { getMe } from '../../lib/userCommunityApi';
@@ -8,6 +7,7 @@ import { Map, Heart, User, SquareCheck as CheckSquare, Bell } from 'lucide-react
 import { View, TouchableOpacity, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
+import { emit } from '../../lib/eventBus';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -17,10 +17,19 @@ export default function TabLayout() {
 
   useEffect(() => {
     (async () => {
-      // Uygulama ilk açılış veya güncelleme ise veritabanını temizle
-      await checkAndHandleAppVersion(async () => {
-        // Artık veritabanı silme veya drop işlemi yapılmıyor.
+      // Uygulama ilk açılış veya güncelleme ise hasInitialSync flag'ini sıfırla (full sync tetiklenir)
+      const wasUpdated = await checkAndHandleAppVersion(async () => {
+        console.log('[APP_VERSION] Versiyon güncellendi, hasInitialSync flag\'i sıfırlanıyor...');
+        await SecureStore.deleteItemAsync('hasInitialSync');
+        await SecureStore.deleteItemAsync('isInitialSyncComplete');
+        console.log('[APP_VERSION] Full sync tetiklenecek');
       });
+      
+      // Version gücellendiyse hemen full sync tetikle (EventBus ile)
+      if (wasUpdated) {
+        console.log('[APP_VERSION] EventBus ile version_updated event\'i gönderiliyor...');
+        emit('version_updated');
+      }
       try {
         await getDatabase().init();
       } catch (e) {

@@ -15,6 +15,7 @@ interface UseCampingAreasOptions {
   autoFetch?: boolean;
   currentUserId?: number | string;
   isSuperAdmin?: boolean;
+  hasLocationPermission?: boolean | null; // Konum izni durumu (modal conflict önleme)
 }
 
 export function useCampingAreas(options: UseCampingAreasOptions = {}) {
@@ -30,6 +31,7 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
   tags = ['campground', 'caravan_site', 'bungalow', 'recreation', 'restaurant', 'camp_store', 'national_park', 'hiking_road', 'touristic_place', 'accommodation', 'parking'],
     autoFetch = true,
     currentUserId,
+    hasLocationPermission = null, // Varsayılan null (izin durumu bilinmiyor)
   } = options;
 
   // Initialize database
@@ -42,46 +44,57 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
 
   // Get user location and start watching position
   useEffect(() => {
-    let locationSubscription: Location.LocationSubscription | null = null;
-
-    if (autoFetch && !latitude && !longitude) {
-      (async () => {
-        await getCurrentLocation();
-        
-        // Konum izni varsa arka planda konum takibi başlat
-        const { status } = await Location.getForegroundPermissionsAsync();
-        if (status === 'granted') {
-          try {
-            locationSubscription = await Location.watchPositionAsync(
-              {
-                accuracy: Location.Accuracy.Balanced,
-                distanceInterval: 100, // 100 metre hareket edince güncelle
-                timeInterval: 30000, // veya en az 30 saniyede bir kontrol et
-              },
-              (newLocation) => {
-                if (__DEV__) {
-                  console.log('[LOCATION] Konum güncellendi:', {
-                    lat: newLocation.coords.latitude.toFixed(6),
-                    lng: newLocation.coords.longitude.toFixed(6),
-                  });
-                }
-                setLocation(newLocation);
-              }
-            );
-          } catch (err) {
-            console.error('Konum takibi başlatılamadı:', err);
-          }
-        }
-      })();
+    // Konum izni yok iken konum işlemlerini başlatma (modal conflict önleme)
+    if (hasLocationPermission !== true) {
+      if (__DEV__) console.log('[useCampingAreas] Konum izni yok/belirsiz, konum takibi başlatmıyor');
+      return;
     }
+    
+    let locationSubscription: Location.LocationSubscription | null = null;
+    
+    // Kademeli başlatma (modal kapanışıyla çakışmayı önle)
+    const timer = setTimeout(() => {
+      if (autoFetch && !latitude && !longitude) {
+        (async () => {
+          await getCurrentLocation();
+          
+          // Konum izni varsa arka planda konum takibi başlat
+          const { status } = await Location.getForegroundPermissionsAsync();
+          if (status === 'granted') {
+            try {
+              locationSubscription = await Location.watchPositionAsync(
+                {
+                  accuracy: Location.Accuracy.Balanced,
+                  distanceInterval: 100, // 100 metre hareket edince güncelle
+                  timeInterval: 30000, // veya en az 30 saniyede bir kontrol et
+                },
+                (newLocation) => {
+                  if (__DEV__) {
+                    console.log('[LOCATION] Konum güncellendi:', {
+                      lat: newLocation.coords.latitude.toFixed(6),
+                      lng: newLocation.coords.longitude.toFixed(6),
+                    });
+                  }
+                  setLocation(newLocation);
+                }
+              );
+            } catch (err) {
+              console.error('Konum takibi başlatılamadı:', err);
+            }
+          }
+        })();
+      }
+    }, 300); // Modal kapandıktan 300ms sonra başlat
 
     // Cleanup: konum takibini durdur
     return () => {
+      clearTimeout(timer);
       if (locationSubscription) {
         locationSubscription.remove();
       }
     };
-  }, [autoFetch, latitude, longitude]);
+  }, [autoFetch, latitude, longitude, hasLocationPermission]);
+  // hasLocationPermission dependency'de, permission true olduğunda konum takibi başlar
 
   // Fetch camping areas when location or parameters change
   useEffect(() => {

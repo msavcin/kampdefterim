@@ -11,6 +11,7 @@ export interface CampingArea {
   id?: number;
   type: CampingTypeId;
   name: string;
+  latitude: number;
   longitude: number;
   description?: string;
   website?: string;
@@ -930,18 +931,39 @@ export class DatabaseManager {
         let updateCount = 0;
         if (!this.db) await this.init();
 
-        // Pending silme işlemlerini al
-        const pendingDeletes = await this.db!.getAllAsync(
-          "SELECT campground_id, data FROM pending_changes WHERE type = 'delete' AND status = 'pending'"
-        ) as { campground_id?: string, data?: string }[];
-        // Silinmeyi bekleyen id'leri ve external_id'leri topla
+        // Pending işlemleri al (delete, insert, update)
+        const pendingChanges = await this.db!.getAllAsync(
+          "SELECT type, campground_id, data FROM pending_changes WHERE status = 'pending'"
+        ) as { type: string; campground_id?: string; data?: string }[];
+        
+        // Pending delete: Silinmeyi bekleyen id'leri topla
         const deletedIds = new Set<string>();
-        for (const del of pendingDeletes) {
-          if (del.campground_id) deletedIds.add(String(del.campground_id));
-          try {
-            const data = del.data ? JSON.parse(del.data) : {};
-            if (data.external_id) deletedIds.add(String(data.external_id));
-          } catch {}
+        // Pending insert/update: Üstüne yazılmaması gereken id'leri topla
+        const protectedIds = new Set<string>();
+        
+        for (const change of pendingChanges) {
+          if (change.type === 'delete') {
+            // Delete pending: Bu kayıtları API'den gelse bile ekleme
+            if (change.campground_id) deletedIds.add(String(change.campground_id));
+            try {
+              const data = change.data ? JSON.parse(change.data) : {};
+              if (data.external_id) deletedIds.add(String(data.external_id));
+              if (data.id) deletedIds.add(String(data.id));
+            } catch {}
+          } else if (change.type === 'insert' || change.type === 'update') {
+            // Insert/Update pending: Bu kayıtların lokal versiyonunu koru (sunucudan gelen ile üstüne yazma)
+            if (change.campground_id) protectedIds.add(String(change.campground_id));
+            try {
+              const data = change.data ? JSON.parse(change.data) : {};
+              if (data.external_id) protectedIds.add(String(data.external_id));
+              if (data.id) protectedIds.add(String(data.id));
+            } catch {}
+          }
+        }
+        
+        if (__DEV__) {
+          console.log('[PENDING_PROTECTION] Protected IDs (pending insert/update):', Array.from(protectedIds));
+          console.log('[PENDING_PROTECTION] Deleted IDs (pending delete):', Array.from(deletedIds));
         }
 
         // Önce local veritabanındaki tüm kayıtları bir Map'e al (external_id veya koordinat bazlı karşılaştırma için)
@@ -983,9 +1005,19 @@ export class DatabaseManager {
             continue; // Bu kaydı ekleme/güncelleme
           }
           
-          // Silinmeyi bekleyenler listesinde ise atla
+          // Silinmeyi bekleyenler listesinde ise atla (pending delete)
           if (item.id && deletedIds.has(String(item.id))) continue;
           if (item.external_id && deletedIds.has(String(item.external_id))) continue;
+          
+          // Pending insert/update varsa atla (lokal versiyonu koru)
+          if (item.id && protectedIds.has(String(item.id))) {
+            if (__DEV__) console.log(`[PENDING_PROTECTION] Kayıt atlandı (pending insert/update var): id=${item.id}`);
+            continue;
+          }
+          if (item.external_id && protectedIds.has(String(item.external_id))) {
+            if (__DEV__) console.log(`[PENDING_PROTECTION] Kayıt atlandı (pending insert/update var): external_id=${item.external_id}`);
+            continue;
+          }
           // Her kaydı tek tek ve sırayla işle
           try {
             const typeValue = (item.type ?? '').toString();
@@ -1225,6 +1257,7 @@ export class DatabaseManager {
       
       // Sunucuda olmayan lokal kamp alanlarını sil (çoklu cihaz senkronizasyonu için)
       // Sadece Full Sync'te yapılır, Delta Sync'te yapılmaz
+      // ANCAK: Pending insert/update olanları SILME (kullanıcının değişiklikleri kaybolmasın)
       if (!isDeltaSync) {
         // API'den gelen external_id listesi
         const serverExternalIds = new Set<string>();
@@ -1236,11 +1269,23 @@ export class DatabaseManager {
         
         // Lokal veritabanındaki tüm external_id'li kayıtları al
         const localAreasWithExtId = await this.db!.getAllAsync(
-          'SELECT id, external_id FROM camping_areas WHERE external_id IS NOT NULL AND external_id != ""'
-        ) as { id: number; external_id: string }[];
+          'SELECT id, external_id, tags FROM camping_areas WHERE external_id IS NOT NULL AND external_id != ""'
+        ) as { id: number; external_id: string; tags?: string }[];
         
         let deletedCount = 0;
         for (const localArea of localAreasWithExtId) {
+          // User submitted alanları SILME (kullanıcıya özel yerler)
+          if (localArea.tags && localArea.tags.includes('user_submitted')) {
+            if (__DEV__) console.log(`[USER_SUBMITTED_PROTECTION] Full sync silme atlandı (user_submitted): external_id=${localArea.external_id}`);
+            continue;
+          }
+          
+          // Pending insert/update varsa SILME (kullanıcının değişikliği kaybolmasın)
+          if (protectedIds.has(String(localArea.external_id)) || protectedIds.has(String(localArea.id))) {
+            if (__DEV__) console.log(`[PENDING_PROTECTION] Full sync silme atlandı (pending var): external_id=${localArea.external_id}`);
+            continue;
+          }
+          
           // Eğer sunucuda yoksa lokal veritabanından sil
           if (!serverExternalIds.has(String(localArea.external_id))) {
             await this.db!.runAsync('DELETE FROM camping_areas WHERE id = ?', [localArea.id]);

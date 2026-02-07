@@ -7,45 +7,65 @@ import * as Network from 'expo-network';
  * @param image_id string - Benzersiz görsel id'si
  * @param image_url string - S3 public url
  * @param forceRefresh boolean - Online modda cache'i yeniden indir (varsayılan: false)
+ * @param isOnlineHint boolean - Parent component'ten gelen network durumu (opsiyonel)
  * @returns local dosya yolu (expo-file-system uyumlu)
  */
 export async function getCachedImagePath(
   image_id: string, 
   image_url: string,
-  forceRefresh: boolean = false
+  forceRefresh: boolean = false,
+  isOnlineHint?: boolean
 ): Promise<string> {
   const dir = FileSystem.documentDirectory + 'camp_images/';
   const localPath = dir + image_id + '.jpg';
   
   try {
-    // Network durumunu kontrol et
-    const netInfo = await Network.getNetworkStateAsync();
-    const isOnline = !!netInfo.isConnected && !!netInfo.isInternetReachable;
+    // Network durumunu kontrol et (isOnlineHint varsa onu kullan)
+    let isOnline: boolean;
+    if (isOnlineHint !== undefined) {
+      isOnline = isOnlineHint;
+      console.log(`[imageCache] 📌 isOnlineHint kullanılıyor: ${isOnline}`);
+    } else {
+      const netInfo = await Network.getNetworkStateAsync();
+      isOnline = !!netInfo.isConnected && !!netInfo.isInternetReachable;
+    }
     
     const fileInfo = await FileSystem.getInfoAsync(localPath);
     
+    // Debug log
+    if (forceRefresh) {
+      console.log(`[imageCache] 🔄 forceRefresh aktif - ${image_id}, online:${isOnline}, mevcut:${fileInfo.exists}`);
+    }
+    
     // Online ve forceRefresh true ise cache'i sil ve yeniden indir
     if (isOnline && forceRefresh && fileInfo.exists) {
+      console.log(`[imageCache] 🗑️ Cache siliniyor: ${image_id}`);
       await FileSystem.deleteAsync(localPath, { idempotent: true });
+      // fileInfo'yu güncelle
+      fileInfo.exists = false;
     }
     
     // Dosya yoksa veya yenilenmesi talep edildiyse indir
     const shouldDownload = !fileInfo.exists || (isOnline && forceRefresh);
     
     if (shouldDownload && isOnline) {
+      console.log(`[imageCache] 📥 İndiriliyor: ${image_id}`);
       await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
       await FileSystem.downloadAsync(image_url, localPath);
+      console.log(`[imageCache] ✅ İndirildi: ${image_id}`);
       return localPath;
     } else if (fileInfo.exists) {
       // Offline modda veya cache mevcut
+      console.log(`[imageCache] 💾 Cache'den yüklendi: ${image_id}`);
       return localPath;
     } else {
       // Offline ve cache yok, remote URL döndür
+      console.log(`[imageCache] ⚠️ Offline & cache yok, remote URL: ${image_id}`);
       return image_url;
     }
   } catch (e) {
     // Hata durumunda image_url döndür
-    console.warn('[imageCache] Hata:', e);
+    console.warn('[imageCache] ❌ Hata:', e);
     return image_url;
   }
 }
