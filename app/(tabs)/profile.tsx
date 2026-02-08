@@ -56,7 +56,7 @@ import FriendAvatar from '../../components/FriendAvatar';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MapPin, ChevronRight, Download as DownloadIcon, Upload, RefreshCw, User, Shield, Mail, UserCheck, Building, Eye, CheckCircle, Clock, XCircle } from 'lucide-react-native';
+import { MapPin, ChevronRight, Download as DownloadIcon, Upload, RefreshCw, User, Shield, Mail, UserCheck, Building, Eye, CheckCircle, Clock, XCircle, Edit2, X } from 'lucide-react-native';
 import { Search, Trash } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { getMe, listCommunityMembers, getCommunity as getCommunityById, listCommunities } from '../../lib/userCommunityApi';
@@ -216,7 +216,7 @@ export default function ProfileScreen(props: any) {
   // Arkadaşlık yönetimi için state
   const [friends, setFriends] = useState<Friend[]>([]);
   const [friendSearch, setFriendSearch] = useState('');
-  const [searchResults, setSearchResults] = useState<{ id: number; username: string; tag: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ id: number; username: string; name?: string; tag?: string; avatar_url?: string }[]>([]);
   const [friendRequestLoading, setFriendRequestLoading] = useState(false);
   const [friendSearchLoading, setFriendSearchLoading] = useState(false);
   const [friendError, setFriendError] = useState<string | null>(null);
@@ -264,14 +264,32 @@ export default function ProfileScreen(props: any) {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      // Giriş yapan kullanıcıyı listeden çıkar
-      const filtered = Array.isArray(data)
-        ? data.filter((u: any) => {
-            if (!user) return true;
-            // id veya username ile eşleşen kendi kaydını çıkar
-            return u.id !== user.id && u.username !== user.username;
-          })
+      console.log('[FRIEND SEARCH] Backend response:', JSON.stringify(data, null, 2));
+      // Backend'den gelen veriyi frontend formatına map et ve giriş yapan kullanıcıyı çıkar
+      const mapped = Array.isArray(data)
+        ? data
+            .filter((u: any) => {
+              if (!user) return true;
+              // isSelf flag'i veya id/username kontrolü ile filtrele
+              if (u.isSelf === true || u.isSelf === 'true') return false;
+              const userId = u.userId || u.id;
+              return userId !== user.id && u.username !== user.username;
+            })
+            .map((u: any) => {
+              console.log('[FRIEND SEARCH] Mapping user:', JSON.stringify(u, null, 2));
+              return {
+                id: u.userId || u.id,
+                username: u.username || '',
+                name: u.name || u.fullName || '',
+                tag: u.tag || '',
+                avatar_url: u.avatarUrl || u.image || u.avatar_url || ''
+              };
+            })
         : [];
+      console.log('[FRIEND SEARCH] Mapped results:', JSON.stringify(mapped, null, 2));
+      // Arkadaş listesinde olmayan kullanıcıları filtrele
+      const filtered = mapped.filter(u => !friends.some(f => f.id === u.id));
+      console.log('[FRIEND SEARCH] Filtered results (excluding friends):', JSON.stringify(filtered, null, 2));
       setSearchResults(filtered);
     } catch (e) {
       setFriendError('Arama başarısız');
@@ -313,6 +331,12 @@ export default function ProfileScreen(props: any) {
   const [user, setUser] = useState<any>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [localAvatar, setLocalAvatar] = useState<string | null>(null);
+  // Profil düzenleme state'leri
+  const [editNameModal, setEditNameModal] = useState(false);
+  const [editUsernameModal, setEditUsernameModal] = useState(false);
+  const [editNameValue, setEditNameValue] = useState('');
+  const [editUsernameValue, setEditUsernameValue] = useState('');
+  const [profileUpdateLoading, setProfileUpdateLoading] = useState(false);
   // Profil fotoğrafı yükleme fonksiyonu
   // S3'e fotoğraf yükleme fonksiyonu (presigned URL ile)
   async function uploadImageToS3(fileUri: string): Promise<string | null> {
@@ -401,6 +425,93 @@ export default function ProfileScreen(props: any) {
       setAvatarUploading(false);
     }
   };
+
+  // Profil fotoğrafı kaldırma fonksiyonu
+  const handleRemoveAvatar = async () => {
+    Alert.alert(
+      'Fotoğrafı Kaldır',
+      'Profil fotoğrafınızı kaldırmak istediğinize emin misiniz?',
+      [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Kaldır',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setAvatarUploading(true);
+              const updateRes = await updateUserAvatar('');
+              if (updateRes?.error) throw new Error(updateRes.error);
+              setLocalAvatar(null);
+              setUser((prev: any) => prev ? { ...prev, avatar_url: '' } : prev);
+              Alert.alert('Başarılı', 'Profil fotoğrafınız kaldırıldı!');
+            } catch (e: any) {
+              Alert.alert('Hata', e?.message || 'Fotoğraf kaldırılamadı.');
+            } finally {
+              setAvatarUploading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // İsim güncelleme fonksiyonu
+  const handleUpdateName = async () => {
+    if (!editNameValue.trim()) {
+      Alert.alert('Hata', 'İsim boş olamaz');
+      return;
+    }
+    try {
+      setProfileUpdateLoading(true);
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/users/me`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: editNameValue.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Güncelleme başarısız');
+      setUser((prev: any) => prev ? { ...prev, name: editNameValue.trim() } : prev);
+      setEditNameModal(false);
+      Alert.alert('Başarılı', 'İsminiz güncellendi!');
+    } catch (e: any) {
+      Alert.alert('Hata', e?.message || 'İsim güncellenemedi');
+    } finally {
+      setProfileUpdateLoading(false);
+    }
+  };
+
+  // Kullanıcı adı güncelleme fonksiyonu
+  const handleUpdateUsername = async () => {
+    if (!editUsernameValue.trim()) {
+      Alert.alert('Hata', 'Kullanıcı adı boş olamaz');
+      return;
+    }
+    // Kullanıcı adı formatı kontrolü (sadece harf, rakam, alt çizgi)
+    if (!/^[a-zA-Z0-9_]+$/.test(editUsernameValue.trim())) {
+      Alert.alert('Hata', 'Kullanıcı adı sadece harf, rakam ve alt çizgi içerebilir');
+      return;
+    }
+    try {
+      setProfileUpdateLoading(true);
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/users/me`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ username: editUsernameValue.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Güncelleme başarısız');
+      setUser((prev: any) => prev ? { ...prev, username: editUsernameValue.trim() } : prev);
+      setEditUsernameModal(false);
+      Alert.alert('Başarılı', 'Kullanıcı adınız güncellendi!');
+    } catch (e: any) {
+      Alert.alert('Hata', e?.message || 'Kullanıcı adı güncellenemedi');
+    } finally {
+      setProfileUpdateLoading(false);
+    }
+  };
+
   const [loading, setLoading] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
@@ -736,14 +847,25 @@ export default function ProfileScreen(props: any) {
                 resizeMode="cover"
                 defaultSource={require('../../assets/images/avatar-placeholder.png')}
               />
-            {/* Edit button as floating icon */}
-            <TouchableOpacity
-              onPress={handlePickProfilePhoto}
-              style={styles.avatarEditFab}
-              activeOpacity={0.8}
-            >
-              <Upload size={20} color="#fff" />
-            </TouchableOpacity>
+            {/* Edit and Remove buttons */}
+            <View style={{ position: 'absolute', bottom: 0, right: 0, flexDirection: 'row', gap: 4 }}>
+              <TouchableOpacity
+                onPress={handlePickProfilePhoto}
+                style={styles.avatarEditFab}
+                activeOpacity={0.8}
+              >
+                <Upload size={18} color="#fff" />
+              </TouchableOpacity>
+              {(user?.avatar_url || localAvatar) && (
+                <TouchableOpacity
+                  onPress={handleRemoveAvatar}
+                  style={[styles.avatarEditFab, { backgroundColor: '#ef4444' }]}
+                  activeOpacity={0.8}
+                >
+                  <X size={18} color="#fff" />
+                </TouchableOpacity>
+              )}
+            </View>
             {/* Loading overlay */}
             {avatarUploading && (
               <View style={styles.avatarOverlay}>
@@ -756,8 +878,32 @@ export default function ProfileScreen(props: any) {
             <ActivityIndicator />
           ) : user ? (
             <View style={{ alignItems: 'center', width: '100%' }}>
-              <Text style={profileCardStyles.profileName}>{user.name || 'Kullanıcı'}</Text>
-              <Text style={profileCardStyles.profileEmail}>{user.username ? `@${user.username}` : ''}</Text>
+              {/* İsim - düzenlenebilir */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <Text style={profileCardStyles.profileName}>{user.name || 'Kullanıcı'}</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setEditNameValue(user.name || '');
+                    setEditNameModal(true);
+                  }}
+                  style={{ marginLeft: 8, padding: 4 }}
+                >
+                  <Edit2 size={16} color="#64748b" />
+                </TouchableOpacity>
+              </View>
+              {/* Kullanıcı adı - düzenlenebilir */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                <Text style={profileCardStyles.profileEmail}>{user.username ? `@${user.username}` : '@kullaniciadi'}</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setEditUsernameValue(user.username || '');
+                    setEditUsernameModal(true);
+                  }}
+                  style={{ marginLeft: 6, padding: 4 }}
+                >
+                  <Edit2 size={14} color="#64748b" />
+                </TouchableOpacity>
+              </View>
               <Text style={profileCardStyles.profileEmail}>{user.email || ''}</Text>
               <View style={profileCardStyles.profileRoleRow}>
                 <Shield size={16} color="#2563eb" style={{ marginRight: 6 }} />
@@ -986,7 +1132,28 @@ export default function ProfileScreen(props: any) {
                           headers: { Authorization: `Bearer ${token}` }
                         });
                         const data = await res.json();
-                        setSearchResults(Array.isArray(data) ? data : []);
+                        // Backend'den gelen veriyi frontend formatına map et ve kendini filtrele
+                        const mapped = Array.isArray(data) ? data
+                          .filter((u: any) => {
+                            // isSelf flag'i varsa filtrele
+                            if (u.isSelf === true || u.isSelf === 'true') return false;
+                            return true;
+                          })
+                          .map((user: any) => {
+                            console.log('[FRIEND SEARCH] Mapping user:', JSON.stringify(user, null, 2));
+                            return {
+                              id: user.userId || user.id,
+                              username: user.username || '',
+                              name: user.name || user.fullName || '',
+                              tag: user.tag || '',
+                              avatar_url: user.avatarUrl || user.image || user.avatar_url || ''
+                            };
+                          }) : [];
+                        console.log('[FRIEND SEARCH] Mapped results:', JSON.stringify(mapped, null, 2));
+                        // Arkadaş listesinde olmayan kullanıcıları filtrele
+                        const filtered = mapped.filter(u => !friends.some(f => f.id === u.id));
+                        console.log('[FRIEND SEARCH] Filtered results (excluding friends):', JSON.stringify(filtered, null, 2));
+                        setSearchResults(filtered);
                       } catch (e) {
                         setFriendError('Arama başarısız');
                         setSearchResults([]);
@@ -1005,23 +1172,32 @@ export default function ProfileScreen(props: any) {
             {friendSearchLoading && <ActivityIndicator style={{ marginTop: 8 }} />}
             {/* Autocomplete dropdown */}
             {searchResults.length > 0 && friendSearch.trim().length >= 3 && (
-              <View style={{ marginTop: 8, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', maxHeight: 180 }}>
+              <View style={{ marginTop: 8, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', maxHeight: 240 }}>
                 {searchResults.map((u) => {
                   const isRequested = requestedUserIds.includes(u.id);
+                  const displayName = u.name || u.username || 'Kullanıcı';
                   return (
                     <TouchableOpacity
                       key={u.id}
                       onPress={() => !isRequested && sendFriendRequest(u.id)}
                       disabled={isRequested}
-                      style={{ flexDirection: 'row', alignItems: 'center', padding: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', opacity: isRequested ? 0.6 : 1 }}
+                      style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', opacity: isRequested ? 0.6 : 1 }}
                     >
-                      <User size={20} color="#0ea5e9" style={{ marginRight: 10 }} />
-                      <Text style={{ fontWeight: '600', fontSize: 16, color: '#0e7490', marginRight: 8 }}>{u.username}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: '#64748b', fontSize: 13 }}>{u.tag}</Text>
+                      <View style={{ marginRight: 12 }}>
+                        <FriendAvatar
+                          avatar_url={u.avatar_url && u.avatar_url.trim() !== '' ? u.avatar_url : undefined}
+                          name={displayName}
+                          size={48}
+                        />
+                      </View>
+                      <View style={{ flex: 1, justifyContent: 'center' }}>
+                        <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0e7490', marginBottom: 2 }}>{displayName}</Text>
+                        {u.username && (
+                          <Text style={{ color: '#64748b', fontSize: 14 }}>{`@${u.username}`}</Text>
+                        )}
                       </View>
                       <View style={{ marginLeft: 12, backgroundColor: isRequested ? '#a3e635' : '#22c55e', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
-                        <Text style={{ color: '#fff', fontWeight: '600' }}>{isRequested ? 'İstek Gönderildi' : 'İstek Gönder'}</Text>
+                        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>{isRequested ? 'Gönderildi' : 'Ekle'}</Text>
                       </View>
                     </TouchableOpacity>
                   );
@@ -1218,6 +1394,8 @@ export default function ProfileScreen(props: any) {
                           (member.user?.dataValues?.username && member.user.dataValues.username.trim()) ? member.user.dataValues.username : null;
                         const memberEmail = (member.user?.email && member.user.email.trim()) ? member.user.email :
                           (member.user?.dataValues?.email && member.user.dataValues.email.trim()) ? member.user.dataValues.email : null;
+                        const memberAvatar = (member.user?.avatar_url && member.user.avatar_url.trim()) ? member.user.avatar_url :
+                          (member.user?.dataValues?.avatar_url && member.user.dataValues.avatar_url.trim()) ? member.user.dataValues.avatar_url : undefined;
                         return (
                           <View key={member.user_id} style={{ 
                             flexDirection: 'row', 
@@ -1227,16 +1405,12 @@ export default function ProfileScreen(props: any) {
                             borderRadius: 10, 
                             padding: 10 
                           }}>
-                            <View style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 14,
-                              backgroundColor: '#e2e8f0',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              marginRight: 10
-                            }}>
-                              <User size={14} color="#64748b" />
+                            <View style={{ marginRight: 12 }}>
+                              <FriendAvatar
+                                avatar_url={memberAvatar}
+                                name={memberName || memberUsername || 'Üye'}
+                                size={36}
+                              />
                             </View>
                             <View style={{ flex: 1 }}>
                               {memberName && (
@@ -1544,6 +1718,90 @@ export default function ProfileScreen(props: any) {
               <TouchableOpacity onPress={() => setStatusModal({ open: false, member: null })} style={{ marginTop: 10, padding: 8 }}>
                 <Text style={{ color: '#64748b', fontWeight: 'bold' }}>Vazgeç</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* İsim Düzenleme Modalı */}
+        <Modal
+          visible={editNameModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setEditNameModal(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 16, color: '#0e7490' }}>İsminizi Düzenleyin</Text>
+              <TextInput
+                value={editNameValue}
+                onChangeText={setEditNameValue}
+                placeholder="İsim Soyisim"
+                style={{ backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 16, borderWidth: 1, borderColor: '#e2e8f0' }}
+                autoFocus
+              />
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity
+                  onPress={() => setEditNameModal(false)}
+                  style={{ flex: 1, backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                  disabled={profileUpdateLoading}
+                >
+                  <Text style={{ color: '#64748b', fontWeight: '600', fontSize: 16 }}>İptal</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleUpdateName}
+                  style={{ flex: 1, backgroundColor: '#0ea5e9', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                  disabled={profileUpdateLoading}
+                >
+                  {profileUpdateLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Kaydet</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Kullanıcı Adı Düzenleme Modalı */}
+        <Modal
+          visible={editUsernameModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setEditUsernameModal(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 8, color: '#0e7490' }}>Kullanıcı Adınızı Düzenleyin</Text>
+              <Text style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>Sadece harf, rakam ve alt çizgi kullanabilirsiniz</Text>
+              <TextInput
+                value={editUsernameValue}
+                onChangeText={setEditUsernameValue}
+                placeholder="kullaniciadi"
+                autoCapitalize="none"
+                style={{ backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 16, borderWidth: 1, borderColor: '#e2e8f0' }}
+                autoFocus
+              />
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity
+                  onPress={() => setEditUsernameModal(false)}
+                  style={{ flex: 1, backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                  disabled={profileUpdateLoading}
+                >
+                  <Text style={{ color: '#64748b', fontWeight: '600', fontSize: 16 }}>İptal</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleUpdateUsername}
+                  style={{ flex: 1, backgroundColor: '#0ea5e9', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                  disabled={profileUpdateLoading}
+                >
+                  {profileUpdateLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Kaydet</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>

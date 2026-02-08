@@ -482,9 +482,20 @@ export default function MapScreen() {
         if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış için konum alınamadı (timeout veya hata):', err?.message);
       }
 
-      // İlk açılış: local DB'deki duyuruları hemen göster ve çık (hızlı yol)
+      // İlk açılış mantığı
       if (isFirstLaunch) {
-        if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Lokal veritabanından hızlı gösterim başlatılıyor');
+        // Hiç senkronizasyon yapılmış mı kontrol et
+        const hasInitialSync = await SecureStore.getItemAsync('hasInitialSync');
+        const isInitialSyncComplete = await SecureStore.getItemAsync('isInitialSyncComplete');
+        
+        // Hiç senkronizasyon yapılmamışsa veya devam ediyorsa bildirim gösterme
+        if (!hasInitialSync || isInitialSyncComplete !== 'true' || isFullSyncInProgressRef.current) {
+          if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Senkronizasyon henüz tamamlanmadı, bildirim atlanıyor');
+          return;
+        }
+
+        // Senkronizasyon tamamlanmış, konum bazlı filtrelenmiş duyuruları göster
+        if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Senkronizasyon tamamlanmış, konum bazlı bildirim hazırlanıyor');
         const allAnnouncementsLocal = await db.listAnnouncementsLocal({ onlyActive: true });
 
         // Konum/valilik filtresi uygula (sadece genel/valilik duyurularına)
@@ -499,23 +510,23 @@ export default function MapScreen() {
         }
 
         if (Array.isArray(visibleAnnouncementsLocal) && visibleAnnouncementsLocal.length > 0) {
-          if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Lokal veritabanındaki (görünür) duyuru sayısı gösteriliyor (hızlı yol):', visibleAnnouncementsLocal.length);
+          if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Konum bazlı filtrelenmiş duyuru sayısı:', visibleAnnouncementsLocal.length);
           const visibleIds = visibleAnnouncementsLocal.map(a => a.id);
           await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(visibleIds));
 
-          if (!skipNotification && !isFullSyncInProgressRef.current) {
-            setNotifications([{
+          // Senkronizasyon tamamlandığında bildirim göster
+          if (!skipNotification) {
+            addToNotificationQueue([{
               id: visibleAnnouncementsLocal[0].id,
               type: 'announcement',
               message: `${visibleAnnouncementsLocal.length} duyurunuz var!`,
               goto: () => router.push('/announcements'),
-            }]);
-            setNotificationIndex(0);
-            setShowNotificationBar(true);
-            setTimeout(() => setShowNotificationBar(false), 5000);
+            }], 'announcement');
           }
-          return;
+        } else {
+          if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Konum bazlı filtre sonucu hiç duyuru yok');
         }
+        return;
       }
 
       // Lokal duyuruları kontrol et (yeni local duyuru varsa hemen göster)
@@ -546,18 +557,12 @@ export default function MapScreen() {
         if (__DEV__) console.log('[ANNOUNCEMENT] Lokal yeni duyuru bulundu, gösteriliyor (hızlı yol):', newAnnouncementsLocal.length);
         const updatedIds = [...shownAnnouncementIds, ...newAnnouncementsLocal.map(a => a.id)];
         await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
-        setNotifications([{
+        addToNotificationQueue([{
           id: newAnnouncementsLocal[0].id,
           type: 'announcement',
           message: `Okunmamış ${newAnnouncementsLocal.length} yeni duyurunuz var!`,
           goto: () => router.push('/announcements'),
-        }]);
-        setNotificationIndex(0);
-        setShowNotificationBar(true);
-        // Bildirim 30 saniye sonra kapanacak
-        setTimeout(() => {
-          if (isMounted.current) setShowNotificationBar(false);
-        }, 30000);
+        }], 'announcement');
         return;
       }
 
@@ -610,17 +615,12 @@ export default function MapScreen() {
         if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
           const updatedIds = [...shownAnnouncementIds, ...newAnnouncements.map(a => a.id)];
           await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
-          setNotifications([{
+          addToNotificationQueue([{
             id: newAnnouncements[0].id,
             type: 'announcement',
             message: `Okunmamış ${Array.isArray(newAnnouncements) ? newAnnouncements.length : 0} yeni duyurunuz var!`,
             goto: () => router.push('/announcements'),
-          }]);
-          setNotificationIndex(0);
-          setShowNotificationBar(true);
-          setTimeout(() => {
-            if (isMounted.current) setShowNotificationBar(false);
-          }, 30000);
+          }], 'announcement');
         }
         return;
       }
@@ -682,18 +682,12 @@ export default function MapScreen() {
         await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
         
         // Bildirim göster (full sync sırasında değil)
-        setNotifications([{
+        addToNotificationQueue([{
           id: newAnnouncements[0].id,
           type: 'announcement',
           message: `Okunmamış ${Array.isArray(newAnnouncements) ? newAnnouncements.length : 0} yeni duyurunuz var!`,
           goto: () => router.push('/announcements'),
-        }]);
-        setNotificationIndex(0);
-        setShowNotificationBar(true);
-        // Bildirim 30 saniye sonra kapanacak
-        setTimeout(() => {
-          if (isMounted.current) setShowNotificationBar(false);
-        }, 30000);
+        }], 'announcement');
         return;
       }
     } catch (e) {
@@ -715,6 +709,43 @@ export default function MapScreen() {
   // React Native'de setTimeout/setInterval number döndürür
   const notificationTimeoutRef = useRef<number | null>(null);
   const notificationIntervalRef = useRef<number | null>(null);
+  // Bildirim kuyruğu (üst üste binmeyi önlemek için)
+  const notificationQueueRef = useRef<{notifications: any[], type: string}[]>([]);
+  const isShowingNotificationRef = useRef(false);
+  
+  // Kuyruğa bildirim ekle
+  const addToNotificationQueue = (notifs: any[], type: string) => {
+    if (!Array.isArray(notifs) || notifs.length === 0) return;
+    
+    if (__DEV__) console.log(`[NOTIFICATION QUEUE] ${type} bildirimi kuyruğa eklendi (${notifs.length} adet)`);
+    notificationQueueRef.current.push({ notifications: notifs, type });
+    
+    // Eğer şu anda gösterim yapılmıyorsa, hemen göster
+    if (!isShowingNotificationRef.current && !showNotificationBar) {
+      showNextNotification();
+    }
+  };
+  
+  // Kuyruktan sonraki bildirimi göster
+  const showNextNotification = () => {
+    if (notificationQueueRef.current.length === 0) {
+      isShowingNotificationRef.current = false;
+      if (__DEV__) console.log('[NOTIFICATION QUEUE] Kuyruk boş');
+      return;
+    }
+    
+    const next = notificationQueueRef.current.shift();
+    if (!next) {
+      isShowingNotificationRef.current = false;
+      return;
+    }
+    
+    if (__DEV__) console.log(`[NOTIFICATION QUEUE] Sonraki bildirim gösteriliyor: ${next.type} (${next.notifications.length} adet)`);
+    isShowingNotificationRef.current = true;
+    setNotifications(next.notifications);
+    setNotificationIndex(0);
+    setShowNotificationBar(true);
+  };
   // Bildirim geçiş animasyonu için
   useEffect(() => {
     if (Array.isArray(notifications) && notifications.length > 1) {
@@ -776,6 +807,16 @@ export default function MapScreen() {
       }).start();
     } else {
       notificationBarAnim.setValue(0);
+      // Bildirim barı kapandığında kuyruktan sonraki bildirimi göster
+      if (isShowingNotificationRef.current) {
+        // Kısa bir gecikme ile sonraki bildirimi göster (animasyon için)
+        const timeoutId = setTimeout(() => {
+          if (isMounted.current) {
+            showNextNotification();
+          }
+        }, 500);
+        return () => clearTimeout(timeoutId);
+      }
     }
   }, [showNotificationBar]);
 
@@ -1167,19 +1208,15 @@ export default function MapScreen() {
           }
         }
 
-        // Öncelik: kamp alanı paylaşımı > checklist paylaşımı > arkadaşlık isteği
+        // Bildirimleri öncelik sırasıyla kuyruğa ekle (kamp alanı > checklist > arkadaşlık)
         if (Array.isArray(campingAreaNotifs) && campingAreaNotifs.length > 0) {
-          setNotifications(campingAreaNotifs);
-          setNotificationIndex(0);
-          setShowNotificationBar(true);
-        } else if (Array.isArray(checklistNotifs) && checklistNotifs.length > 0) {
-          setNotifications(checklistNotifs);
-          setNotificationIndex(0);
-          setShowNotificationBar(true);
-        } else if (Array.isArray(friendNotifs) && friendNotifs.length > 0) {
-          setNotifications(friendNotifs);
-          setNotificationIndex(0);
-          setShowNotificationBar(true);
+          addToNotificationQueue(campingAreaNotifs, 'camping_area_share');
+        }
+        if (Array.isArray(checklistNotifs) && checklistNotifs.length > 0) {
+          addToNotificationQueue(checklistNotifs, 'checklist_share');
+        }
+        if (Array.isArray(friendNotifs) && friendNotifs.length > 0) {
+          addToNotificationQueue(friendNotifs, 'friend_request');
         }
       } catch (e) {}
     })();
@@ -1510,8 +1547,7 @@ export default function MapScreen() {
     const timer = setTimeout(() => {
       (async () => {
         await refreshData();
-        // Duyurular arka planda fetch (full sync sırasında bildirim gösterme)
-        fetchAnnouncementsSilently(router, isFullSyncInProgressRef.current);
+        // Duyurular full sync sonrasında fetch edilecek (ilk açılışta bildirim gösterme)
       // API senkronizasyonu
       if (isConnected) {
         if (isSyncingRef.current) {
@@ -1561,8 +1597,8 @@ export default function MapScreen() {
             
             if (__DEV__) console.log('API ile senkronize edilen kamp alanı sayısı:', count);
             await refreshData();
-            // Harita sync sonrası tekrar fetch (full sync sırasında bildirim gösterme)
-            fetchAnnouncementsSilently(router, shouldForceFullSync);
+            // Harita sync sonrası duyuruları fetch et (valilik filtresi uygulanacak)
+            fetchAnnouncementsSilently(router, false);
           } catch (err) {
             console.error('API veri çekme hatası:', err);
           } finally {
