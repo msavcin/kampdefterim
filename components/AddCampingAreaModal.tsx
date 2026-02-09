@@ -4,7 +4,7 @@ import { updateCampingAreaOnServer } from '@/lib/campingAreaApi';
 import { campingTypes, getCampingTypeLabel, getCampingTypeIcon } from '@/lib/categories';
 import { TYPE_COLORS } from '../app/icons/svgIcons';
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { X, MapPin, Camera, Star, DollarSign, Wifi, Car, Utensils, ShowerHead as Shower, Zap, TreePine, Image as ImageIcon, Trash2, ChevronUp, ChevronDown } from 'lucide-react-native';
 import { Image } from 'react-native';
@@ -21,6 +21,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { createCampingAreaOnServer, sanitizeCampingAreaData } from '@/lib/campingAreaApi';
 import { getMe } from '@/lib/userCommunityApi';
 import * as SecureStore from 'expo-secure-store';
+import { getLargeItemAsync, setLargeItemAsync } from '@/lib/largeStorage';
 
 interface AddCampingAreaModalProps {
   visible: boolean;
@@ -1165,14 +1166,15 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, color: '#374151', marginBottom: 2 }}>Hafta İçi</Text>
-                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: 'hidden', backgroundColor: 'white' }}>
+                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: Platform.OS === 'ios' ? 'visible' : 'hidden', backgroundColor: 'white' }}>
                     <Picker
                       selectedValue={JSON.stringify(formData.opening_hours.weekday)}
                       onValueChange={val => {
                         const obj = val ? JSON.parse(val) : { open: '', close: '' };
                         setFormData(prev => ({ ...prev, opening_hours: { ...prev.opening_hours, weekday: obj } }));
                       }}
-                      style={{ height: 55 }}
+                      style={Platform.OS === 'ios' ? {} : { height: 55 }}
+                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15 } : undefined}
                     >
                       {timeOptions.map(opt => (
                         <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
@@ -1183,14 +1185,15 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                 <View style={{ width: 12 }} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, color: '#374151', marginBottom: 2 }}>Hafta Sonu</Text>
-                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: 'hidden', backgroundColor: 'white' }}>
+                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: Platform.OS === 'ios' ? 'visible' : 'hidden', backgroundColor: 'white' }}>
                     <Picker
                       selectedValue={JSON.stringify(formData.opening_hours.weekend)}
                       onValueChange={val => {
                         const obj = val ? JSON.parse(val) : { open: '', close: '' };
                         setFormData(prev => ({ ...prev, opening_hours: { ...prev.opening_hours, weekend: obj } }));
                       }}
-                      style={{ height: 55 }}
+                      style={Platform.OS === 'ios' ? {} : { height: 55 }}
+                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15 } : undefined}
                     >
                       {timeOptions.map(opt => (
                         <Picker.Item key={opt.value} label={opt.label} value={opt.value} />

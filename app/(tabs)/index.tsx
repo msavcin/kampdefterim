@@ -1967,10 +1967,19 @@ export default function MapScreen() {
       <body>
         <div id="map"></div>
         <script>
-          var map = L.map('map').setView([${mapMoveQuery ? mapMoveQuery.latitude : currentLocation.coords.latitude}, ${mapMoveQuery ? mapMoveQuery.longitude : currentLocation.coords.longitude}], 14);
+          var isOffline = ${!isConnected};
+          
+          // Offline modda cache'lenmiş zoom seviyeleri: 9, 10, 11, 12, 13
+          var mapOptions = {
+            minZoom: isOffline ? 9 : 1,
+            maxZoom: isOffline ? 13 : 18,
+            zoomSnap: isOffline ? 1 : 0.5,
+            zoomDelta: isOffline ? 1 : 1
+          };
+          
+          var map = L.map('map', mapOptions).setView([${mapMoveQuery ? mapMoveQuery.latitude : currentLocation.coords.latitude}, ${mapMoveQuery ? mapMoveQuery.longitude : currentLocation.coords.longitude}], isOffline ? 12 : 14);
           var isLocationPickerMode = ${isLocationPickerMode};
           var selectedLocationMarker = null;
-          var isOffline = ${!isConnected};
           
           // Offline-aware tile layer
           var tileLayer;
@@ -2063,8 +2072,8 @@ export default function MapScreen() {
             
             tileLayer = new OfflineTileLayer('', {
               attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors (Offline)',
-              maxZoom: 19,
-              minZoom: 1,
+              maxZoom: 13,
+              minZoom: 9,
               bounds: null,
               keepBuffer: 0
             });
@@ -2074,7 +2083,7 @@ export default function MapScreen() {
             tileLayer = L.tileLayer(window.API_URL + '/tiles/{z}/{x}/{y}.png?v=cartodb', {
               attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
               errorTileUrl: '',
-              maxZoom: 19,
+              maxZoom: 18,
               minZoom: 1
             });
             
@@ -2117,6 +2126,21 @@ export default function MapScreen() {
               }
             }
           });
+          
+          // Offline modda zoom seviyesi kontrolü
+          if (isOffline) {
+            var allowedZoomLevels = [9, 10, 11, 12, 13];
+            map.on('zoomend', function() {
+              var currentZoom = map.getZoom();
+              // Eğer zoom seviyesi cache'lenmiş seviyelerde değilse, en yakın seviyeye dön
+              if (!allowedZoomLevels.includes(currentZoom)) {
+                var closestZoom = allowedZoomLevels.reduce(function(prev, curr) {
+                  return Math.abs(curr - currentZoom) < Math.abs(prev - currentZoom) ? curr : prev;
+                });
+                map.setZoom(closestZoom, { animate: false });
+              }
+            });
+          }
 
           // Location picker mode
           if (isLocationPickerMode) {
@@ -2258,10 +2282,10 @@ export default function MapScreen() {
               return Math.abs(m.lat - lat) < 0.0001 && Math.abs(m.lng - lng) < 0.0001;
             });
             if (found) {
-              map.setView([lat, lng], 15);
+              map.setView([lat, lng], 16);
               setTimeout(function() {
                 found.marker.openPopup();
-              }, 300);
+              }, 500);
             }
           };
           
@@ -2934,7 +2958,7 @@ export default function MapScreen() {
                       }
                       true;
                     `, 'ListViewPopup');
-                  }, 500);
+                  }, 1000);
                   timeoutRefs.current.push(timeoutId2);
                 }, 100);
                 timeoutRefs.current.push(timeoutId1);

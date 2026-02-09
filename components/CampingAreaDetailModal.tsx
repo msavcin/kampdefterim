@@ -68,20 +68,16 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress, refresh
         const isNowOnline = isConnected;
         const justWentOnline = wasOffline && isNowOnline;
         
-        // Modal açıldığında (refreshKey değiştiğinde) ve online'sa cache'i kontrol et ve gerekirse indir
-        const modalJustOpened = refreshKey !== undefined && refreshKey > 0;
-        const shouldTryDownload = justWentOnline || (isConnected && modalJustOpened);
+        // Sadece offline->online geçişte forceRefresh yapılır
+        // Modal açıldığında normal cache kontrolü yapılır (cache varsa kullan, yoksa indir)
+        const shouldForceRefresh = justWentOnline;
         
         if (justWentOnline) {
           console.log('[image-cache] 🟢 ONLINE olundu, cache yenileniyor:', img);
         }
-        if (modalJustOpened && isConnected) {
-          console.log('[image-cache] 🔄 Modal açıldı (online), cache kontrol ediliyor:', image_id);
-        }
         
-        // refreshKey değiştiğinde (modal açıldığında) sadece yükleme tetiklenir
-        // forceRefresh ile cache varsa sil ve yeniden indir, yoksa direkt indir
-        const localPath = await getCachedImagePath(image_id, img, shouldTryDownload, isConnected);
+        // refreshKey değiştiğinde (modal açıldığında) sadece yükleme tetiklenir, cache varsa kullanılır
+        const localPath = await getCachedImagePath(image_id, img, shouldForceRefresh, isConnected);
         if (localPath.startsWith('file://')) {
           console.log(`[image-cache] ✅ LOCAL gösteriliyor: ${image_id}`);
         } else {
@@ -176,19 +172,16 @@ const LightboxImage = ({ img, refreshKey }: { img: string, refreshKey?: number }
         const isNowOnline = isConnected;
         const justWentOnline = wasOffline && isNowOnline;
         
-        // Lightbox açıldığında (refreshKey değiştiğinde) ve online'sa cache'i kontrol et ve gerekirse indir
-        const lightboxJustOpened = refreshKey !== undefined && refreshKey > 0;
-        const shouldTryDownload = justWentOnline || (isConnected && lightboxJustOpened);
+        // Sadece offline->online geçişte forceRefresh yapılır
+        // Lightbox açıldığında normal cache kontrolü yapılır (cache varsa kullan, yoksa indir)
+        const shouldForceRefresh = justWentOnline;
         
         if (justWentOnline) {
           console.log('[lightbox-cache] 🟢 ONLINE olundu, cache yenileniyor:', img);
         }
-        if (lightboxJustOpened && isConnected) {
-          console.log('[lightbox-cache] 🔄 Lightbox açıldı (online), cache kontrol ediliyor:', image_id);
-        }
         
-        // refreshKey değiştiğinde (lightbox açıldığında) sadece yükleme tetiklenir
-        const localPath = await getCachedImagePath(image_id, img, shouldTryDownload, isConnected);
+        // refreshKey değiştiğinde (lightbox açıldığında) sadece yükleme tetiklenir, cache varsa kullanılır
+        const localPath = await getCachedImagePath(image_id, img, shouldForceRefresh, isConnected);
         if (isMounted) setUri(localPath);
       } catch (e) {
         if (isMounted) setError(true);

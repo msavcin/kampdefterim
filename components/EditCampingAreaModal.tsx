@@ -66,7 +66,7 @@ async function fetchFriendsList(userId: string | number | undefined): Promise<Fr
     throw err;
   }
 }
-import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
 import { X, Save, Camera, Trash2, ChevronUp, ChevronDown } from 'lucide-react-native';
 import { Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -1017,7 +1017,7 @@ useEffect(() => {
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, color: '#374151', marginBottom: 2 }}>Hafta İçi</Text>
-                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: 'hidden', backgroundColor: 'white' }}>
+                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: Platform.OS === 'ios' ? 'visible' : 'hidden', backgroundColor: 'white' }}>
                     <Picker
                       selectedValue={(() => {
                         const current = formData.opening_hours?.weekday || { open: '', close: '' };
@@ -1041,7 +1041,8 @@ useEffect(() => {
                         console.log('[Picker][Weekday] Value changed to:', obj);
                         setFormData(prev => ({ ...prev, opening_hours: { ...prev.opening_hours, weekday: obj } }));
                       }}
-                      style={{ height: 52 }}
+                      style={Platform.OS === 'ios' ? {} : { height: 52 }}
+                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15 } : undefined}
                     >
                       {timeOptions.map(opt => (
                         <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
@@ -1052,7 +1053,7 @@ useEffect(() => {
                 <View style={{ width: 12 }} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, color: '#374151', marginBottom: 2 }}>Hafta Sonu</Text>
-                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: 'hidden', backgroundColor: 'white' }}>
+                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: Platform.OS === 'ios' ? 'visible' : 'hidden', backgroundColor: 'white' }}>
                     <Picker
                       selectedValue={(() => {
                         const current = formData.opening_hours?.weekend || { open: '', close: '' };
@@ -1076,7 +1077,8 @@ useEffect(() => {
                         console.log('[Picker][Weekend] Value changed to:', obj);
                         setFormData(prev => ({ ...prev, opening_hours: { ...prev.opening_hours, weekend: obj } }));
                       }}
-                      style={{ height: 52 }}
+                      style={Platform.OS === 'ios' ? {} : { height: 52 }}
+                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15 } : undefined}
                     >
                       {timeOptions.map(opt => (
                         <Picker.Item key={opt.value} label={opt.label} value={opt.value} />

@@ -886,7 +886,9 @@ export default function ProfileScreen(props: any) {
                     setEditNameValue(user.name || '');
                     setEditNameModal(true);
                   }}
-                  style={{ marginLeft: 8, padding: 4 }}
+                  style={{ marginLeft: 8, padding: 6, backgroundColor: '#f1f5f9', borderRadius: 8 }}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
                   <Edit2 size={16} color="#64748b" />
                 </TouchableOpacity>
@@ -899,7 +901,9 @@ export default function ProfileScreen(props: any) {
                     setEditUsernameValue(user.username || '');
                     setEditUsernameModal(true);
                   }}
-                  style={{ marginLeft: 6, padding: 4 }}
+                  style={{ marginLeft: 6, padding: 6, backgroundColor: '#f1f5f9', borderRadius: 8 }}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
                   <Edit2 size={14} color="#64748b" />
                 </TouchableOpacity>
