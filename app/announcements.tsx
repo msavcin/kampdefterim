@@ -152,6 +152,21 @@ export default function AnnouncementsScreen() {
     };
   }, []);
 
+  // Delta sync sonrası announcements güncelleme event'ini dinle
+  useEffect(() => {
+    const { eventBus } = require('@/lib/eventBus');
+    const handleAnnouncementsUpdated = () => {
+      if (__DEV__) console.log('[ANNOUNCEMENTS] Delta sync tamamlandı, duyurular güncelleniyor');
+      refreshAnnouncements(true); // Throttle'ı bypass et
+    };
+    
+    eventBus.on('announcements:updated', handleAnnouncementsUpdated);
+    
+    return () => {
+      eventBus.off('announcements:updated', handleAnnouncementsUpdated);
+    };
+  }, []);
+
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [announcementsLoading, setAnnouncementsLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -284,6 +299,27 @@ export default function AnnouncementsScreen() {
     }
     
     console.log('[ANNOUNCEMENTS_REFRESH] Filtrelenmiş duyuru sayısı:', filtered.length);
+    
+    // İlk açılış kontrolü: Daha önce gösterilen duyuru ID'leri yoksa ilk açılış
+    try {
+      const { getLargeItemAsync, setLargeItemAsync } = require('@/lib/largeStorage');
+      const shownAnnouncementIdsStr = await getLargeItemAsync('shownAnnouncementIds');
+      const isFirstAnnouncementLoad = !shownAnnouncementIdsStr || shownAnnouncementIdsStr === '[]';
+      
+      if (isFirstAnnouncementLoad && filtered.length > 0) {
+        // İlk açılış ve duyuru var - bildirim göster
+        const visibleIds = filtered.map(a => a.id);
+        await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(visibleIds));
+        
+        // Event fırlat (index.tsx dinleyecek)
+        const { emit } = require('@/lib/eventBus');
+        emit('announcements:firstLoad', { count: filtered.length });
+        
+        if (__DEV__) console.log('[ANNOUNCEMENTS_REFRESH] İlk açılış tespit edildi, bildirim event\'i gönderildi:', filtered.length);
+      }
+    } catch (err) {
+      if (__DEV__) console.warn('[ANNOUNCEMENTS_REFRESH] İlk açılış kontrolü hatası:', err);
+    }
     
     // Sıralama: Topluluk duyuruları önce, sonra valilik duyuruları (tarih sıralı)
     const sortLeaderFirst = (arr: any[]) => {

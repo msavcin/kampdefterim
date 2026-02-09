@@ -452,35 +452,14 @@ export default function MapScreen() {
     isFetchingAnnouncementsRef.current = true;
     if (__DEV__) console.log('[ANNOUNCEMENT] fetchAnnouncementsSilently BAŞLADI, skipNotification:', skipNotification, 'isFullSyncInProgressRef:', isFullSyncInProgressRef.current);
     try {
-      // Önce localde gösterilen duyuru id'lerini al
+      // Önce kullanıcı bilgisini al (topluluk filtrelemesi için gerekli)
+      const user = await getMe();
+      
+      // Localde gösterilen duyuru id'lerini al
       const shownAnnouncementIdsStr = await getLargeItemAsync('shownAnnouncementIds');
       const shownAnnouncementIds = shownAnnouncementIdsStr ? JSON.parse(shownAnnouncementIdsStr) : [];
       const isFirstLaunch = shownAnnouncementIds.length === 0;
       const db = getDatabase();
-
-      // İlk açılış: konum bazlı görünürlük kontrolü için önce kısa bir konum denemesi yap
-      let matchedValilikIdLocal: any = null;
-      try {
-        const locationPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 500));
-        const location = await Promise.race([locationPromise, timeoutPromise]) as any;
-        if (location && location.coords) {
-          const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
-          if (provinceName) {
-            const { getValilikIdFromProvinceName } = require('@/lib/provinceMap');
-            // getValilikIdFromProvinceName fonksiyonu: il adı → valilik_id, ilçe → il → valilik_id fallback'i yapar
-            matchedValilikIdLocal = getValilikIdFromProvinceName(provinceName);
-            if (matchedValilikIdLocal) {
-              await SecureStore.setItemAsync('matchedValilikId', String(matchedValilikIdLocal));
-              console.log('[ANNOUNCEMENT] Konum:', provinceName, ' → Valilik ID kaydedildi:', matchedValilikIdLocal);
-            } else {
-              console.log('[ANNOUNCEMENT] Konum alındı ama valilik ID bulunamadı:', provinceName);
-            }
-          }
-        }
-      } catch (err) {
-        if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış için konum alınamadı (timeout veya hata):', err?.message);
-      }
 
       // İlk açılış mantığı
       if (isFirstLaunch) {
@@ -494,39 +473,24 @@ export default function MapScreen() {
           return;
         }
 
-        // Senkronizasyon tamamlanmış, konum bazlı filtrelenmiş duyuruları göster
-        if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Senkronizasyon tamamlanmış, konum bazlı bildirim hazırlanıyor');
-        const allAnnouncementsLocal = await db.listAnnouncementsLocal({ onlyActive: true });
-
-        // Konum/valilik filtresi uygula (sadece genel/valilik duyurularına)
-        let visibleAnnouncementsLocal = allAnnouncementsLocal;
-        if (matchedValilikIdLocal && Array.isArray(allAnnouncementsLocal)) {
-          visibleAnnouncementsLocal = allAnnouncementsLocal.filter(a => {
-            if (a.community_id === 0) {
-              return String(a.valilik_id) === String(matchedValilikIdLocal);
-            }
-            return true;
-          });
-        }
-
-        if (Array.isArray(visibleAnnouncementsLocal) && visibleAnnouncementsLocal.length > 0) {
-          if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Konum bazlı filtrelenmiş duyuru sayısı:', visibleAnnouncementsLocal.length);
-          const visibleIds = visibleAnnouncementsLocal.map(a => a.id);
-          await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(visibleIds));
-
-          // Senkronizasyon tamamlandığında bildirim göster
-          if (!skipNotification) {
-            addToNotificationQueue([{
-              id: visibleAnnouncementsLocal[0].id,
-              type: 'announcement',
-              message: `${visibleAnnouncementsLocal.length} duyurunuz var!`,
-              goto: () => router.push('/announcements'),
-            }], 'announcement');
-          }
-        } else {
-          if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Konum bazlı filtre sonucu hiç duyuru yok');
-        }
+        // İlk açılışta bildirim gösterme
+        // Duyurular announcements ekranına gidildiğinde gösterilecek
+        if (__DEV__) console.log('[ANNOUNCEMENT] İlk açılış - Bildirim announcements ekranından gösterilecek');
         return;
+      }
+
+      // Valilik ID değişkenini tanımla (ilk açılış sonrası kullanılacak)
+      let matchedValilikIdLocal: any = null;
+      
+      // Cache'den valilik_id'yi oku
+      try {
+        const cachedValilikId = await SecureStore.getItemAsync('matchedValilikId');
+        if (cachedValilikId) {
+          matchedValilikIdLocal = cachedValilikId;
+          if (__DEV__) console.log('[ANNOUNCEMENT] Cache\'den valilik ID alındı:', matchedValilikIdLocal);
+        }
+      } catch (err) {
+        if (__DEV__) console.log('[ANNOUNCEMENT] Cache okuma hatası:', err?.message);
       }
 
       // Lokal duyuruları kontrol et (yeni local duyuru varsa hemen göster)
@@ -538,15 +502,18 @@ export default function MapScreen() {
 
       // Eğer daha önce ilk açılışta alınan matchedValilikIdLocal varsa kullan, yoksa null kalacak ve filtre uygulanmayacak
       let filteredLocalAnnouncements = allAnnouncementsLocal;
-      if (typeof matchedValilikIdLocal !== 'undefined' && matchedValilikIdLocal) {
-        filteredLocalAnnouncements = Array.isArray(allAnnouncementsLocal)
-          ? allAnnouncementsLocal.filter(a => {
-              if (a.community_id === 0) {
-                return String(a.valilik_id) === String(matchedValilikIdLocal);
-              }
-              return true;
-            })
-          : [];
+      if (Array.isArray(allAnnouncementsLocal)) {
+        filteredLocalAnnouncements = allAnnouncementsLocal.filter(a => {
+          // Topluluk duyuruları: sadece kullanıcının topluluğuna ait olanlar (konum olmadan da göster)
+          if (a.community_id !== 0) {
+            return user?.community_id && String(a.community_id) === String(user.community_id);
+          }
+          // Valilik duyuruları: sadece konum varsa ve mevcut valilik_id'ye ait olanlar
+          if (a.community_id === 0 && matchedValilikIdLocal) {
+            return String(a.valilik_id) === String(matchedValilikIdLocal);
+          }
+          return false;
+        });
       }
 
       const newAnnouncementsLocal = Array.isArray(filteredLocalAnnouncements)
@@ -566,17 +533,14 @@ export default function MapScreen() {
         return;
       }
 
-      // Localde yeni yoksa, daha detaylı kontrol: kullanıcı, konum ve API
-      const userStartTime = Date.now();
-      const user = await getMe();
-      const userDuration = Date.now() - userStartTime;
-      if (__DEV__) console.log(`[ANNOUNCEMENT] getMe() tamamlandı (${userDuration}ms)`);
+      // Localde yeni yoksa, daha detaylı kontrol: konum ve API
+      if (__DEV__) console.log(`[ANNOUNCEMENT] Kullanıcı bilgisi hazır (community_id: ${user?.community_id})`);
 
-      // Konum bilgisini al ve valilik_id bul (kısa timeout) — yalnızca daha önce belirlenmediyse çalıştır
+      // Konum bilgisini al ve valilik_id bul — sadece cache'de yoksa
       if (!matchedValilikIdLocal) {
         try {
           const locationPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 500));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 2000));
           const location = await Promise.race([locationPromise, timeoutPromise]) as any;
           if (location && location.coords) {
             const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
@@ -584,24 +548,32 @@ export default function MapScreen() {
               const { getValilikIdFromProvinceName } = require('@/lib/provinceMap');
               // getValilikIdFromProvinceName fonksiyonu: il adı → valilik_id, ilçe → il → valilik_id fallback'i yapar
               matchedValilikIdLocal = getValilikIdFromProvinceName(provinceName);
-              if (__DEV__) console.log('[ANNOUNCEMENT] Konum:', provinceName, ' → Valilik ID:', matchedValilikIdLocal);
+              if (matchedValilikIdLocal) {
+                await SecureStore.setItemAsync('matchedValilikId', String(matchedValilikIdLocal));
+                if (__DEV__) console.log('[ANNOUNCEMENT] Konum servisi:', provinceName, ' → Valilik ID kaydedildi:', matchedValilikIdLocal);
+              }
             }
           }
         } catch (err) {
-          if (__DEV__) console.log('[ANNOUNCEMENT] Konum alınamadı (timeout veya hata):', err?.message);
+          if (__DEV__) console.log('[ANNOUNCEMENT] Konum servisi timeout/hata (devam ediliyor):', err?.message);
         }
       }
 
-      // Aktif duyuruları local DB'den tekrar al (valilik filtresi uygulanacak)
+      // Aktif duyuruları local DB'den tekrar al (valilik ve topluluk filtresi uygulanacak)
       if (__DEV__) console.log('[ANNOUNCEMENT] Lokal duyurular tekrar çekiliyor (filtre uygulanacak)...');
       let allAnnouncements = await db.listAnnouncementsLocal({ onlyActive: true });
-      if (matchedValilikIdLocal) {
-        // Valilik filtresi uygula
+      if (Array.isArray(allAnnouncements)) {
+        // Valilik ve topluluk filtresi uygula
         allAnnouncements = allAnnouncements.filter(a => {
-          if (a.community_id === 0) {
+          // Topluluk duyuruları: sadece kullanıcının topluluğuna ait olanlar (konum olmadan da göster)
+          if (a.community_id !== 0) {
+            return user?.community_id && String(a.community_id) === String(user.community_id);
+          }
+          // Valilik duyuruları: sadece konum varsa ve mevcut valilik_id'ye ait olanlar
+          if (a.community_id === 0 && matchedValilikIdLocal) {
             return String(a.valilik_id) === String(matchedValilikIdLocal);
           }
-          return true;
+          return false;
         });
       }
       // Yeni duyuruları local'den hesapla (henüz API'ye gerek yoksa bu hızlı yol kullanılır)
@@ -657,15 +629,18 @@ export default function MapScreen() {
           allAnnouncements = [];
         }
         // Yeni gelen duyuruları bul (API'den çekilenler için)
-        // Valilik_id filtresi sadece genel duyurular için uygula
-        if (matchedValilikIdLocal) {
+        // Valilik ve topluluk filtresi uygula
+        if (Array.isArray(allAnnouncements)) {
           allAnnouncements = allAnnouncements.filter(a => {
-            if (a.community_id === 0) {
-              // Genel duyuru: valilik_id kontrolü yap
+            // Topluluk duyuruları: sadece kullanıcının topluluğuna ait olanlar (konum olmadan da göster)
+            if (a.community_id !== 0) {
+              return user?.community_id && String(a.community_id) === String(user.community_id);
+            }
+            // Valilik duyuruları: sadece konum varsa ve mevcut valilik_id'ye ait olanlar
+            if (a.community_id === 0 && matchedValilikIdLocal) {
               return String(a.valilik_id) === String(matchedValilikIdLocal);
             }
-            // Topluluk duyurusu: direkt kabul et
-            return true;
+            return false;
           });
         }
         // API'den gelen duyuruların logu
@@ -1357,11 +1332,30 @@ export default function MapScreen() {
               if (__DEV__) console.warn('[AppState] refreshData error:', err);
             }
           }
-          // Duyuruları da yenile (full sync sırasında bildirim gösterme)
-          try {
-            fetchAnnouncementsSilently(routerRef.current, isFullSyncInProgressRef.current);
-          } catch (err) {
-            if (__DEV__) console.warn('[AppState] fetchAnnouncements error:', err);
+          
+          // Duyurular için delta sync yap (online ise)
+          if (isConnected) {
+            try {
+              if (__DEV__) console.log('[AppState] Duyurular için delta sync başlatılıyor...');
+              const db = getDatabase();
+              await db.fetchAndStoreAnnouncementsFromAPI();
+              if (__DEV__) console.log('[AppState] Duyurular delta sync tamamlandı');
+              
+              // announcements.tsx'i güncelleme event'i gönder
+              eventBus.emit('announcements:updated');
+              
+              // Yeni duyuruları kontrol et ve bildirim göster
+              fetchAnnouncementsSilently(routerRef.current, isFullSyncInProgressRef.current);
+            } catch (err) {
+              if (__DEV__) console.warn('[AppState] Duyuru delta sync hatası:', err);
+            }
+          } else {
+            // Offline ise sadece local kontrol
+            try {
+              fetchAnnouncementsSilently(routerRef.current, isFullSyncInProgressRef.current);
+            } catch (err) {
+              if (__DEV__) console.warn('[AppState] fetchAnnouncements error:', err);
+            }
           }
         }, 300); // 300ms gecikme ile WebView'in mount olmasını bekle
       }
@@ -1374,6 +1368,30 @@ export default function MapScreen() {
       }
     };
   }, []); // Dependency array boş - router yerine ref kullan
+
+  // İlk açılış duyuru bildirimi event'ini dinle (announcements ekranından gelir)
+  useEffect(() => {
+    const handler = (payload: any) => {
+      if (__DEV__) console.log('[ANNOUNCEMENT][FIRST_LOAD] İlk açılış bildirimi alındı:', payload);
+      try {
+        const { count } = payload;
+        if (count > 0) {
+          addToNotificationQueue([{
+            id: Date.now(), // Geçici ID
+            type: 'announcement',
+            message: `${count} yeni duyurunuz var!`,
+            goto: () => router.push('/announcements'),
+          }], 'announcement');
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[ANNOUNCEMENT][FIRST_LOAD] Event işleme hatası:', e);
+      }
+    };
+    onEvent('announcements:firstLoad', handler);
+    return () => {
+      offEvent('announcements:firstLoad', handler);
+    };
+  }, []);
 
   // Arka plandan/periodik sync sonrası yeni duyuru event'lerini dinle
   useEffect(() => {
@@ -1593,6 +1611,69 @@ export default function MapScreen() {
               await SecureStore.setItemAsync('isInitialSyncComplete', 'true'); // Duyurular tab'ını aç
               isFullSyncInProgressRef.current = false; // Bildirimleri aç
               setSyncProgress({ current: 0, total: 0, isLoading: false });
+              
+              // İlk açılışta duyuru bildirimi göster
+              try {
+                const { getLargeItemAsync, setLargeItemAsync } = require('@/lib/largeStorage');
+                const shownAnnouncementIdsStr = await getLargeItemAsync('shownAnnouncementIds');
+                const isFirstAnnouncementLoad = !shownAnnouncementIdsStr || shownAnnouncementIdsStr === '[]';
+                
+                if (isFirstAnnouncementLoad) {
+                  const db = getDatabase();
+                  const localAnnouncements = (await db.listAnnouncementsLocal({ onlyActive: true })).filter((a: any) => a.deleted !== 1 && a.aktif !== 0);
+                  
+                  // Kullanıcı bilgisi al
+                  const currentUser = await getMe();
+                  
+                  // matchedValilikId'yi al
+                  let matchedValilikIdLocal: number | null = null;
+                  try {
+                    const storedValilikId = await SecureStore.getItemAsync('matchedValilikId');
+                    if (storedValilikId) {
+                      matchedValilikIdLocal = parseInt(storedValilikId);
+                    }
+                  } catch {}
+                  
+                  // Filtreleme (announcements.tsx ile aynı mantık)
+                  let filtered = localAnnouncements;
+                  if (currentUser?.role !== 'superadmin' && currentUser) {
+                    filtered = localAnnouncements.filter((a: any) => {
+                      // Genel duyurular (community_id === 0)
+                      if (a.community_id === 0) {
+                        // Eğer valilik_id eşleştirmesi varsa filtrele
+                        if (matchedValilikIdLocal && a.valilik_id) {
+                          return String(a.valilik_id) === String(matchedValilikIdLocal);
+                        }
+                        return true;
+                      }
+                      // Topluluk duyuruları
+                      if (currentUser?.community_id && String(a.community_id) === String(currentUser.community_id)) return true;
+                      return false;
+                    });
+                  }
+                  
+                  if (filtered.length > 0) {
+                    // Tüm duyuru ID'lerini kaydet
+                    const visibleIds = filtered.map(a => a.id);
+                    await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(visibleIds));
+                    
+                    // Bildirim göster
+                    addToNotificationQueue([{
+                      id: Date.now(),
+                      type: 'announcement',
+                      message: `${filtered.length} yeni duyurunuz var!`,
+                      goto: () => router.push('/announcements'),
+                    }], 'announcement');
+                    
+                    // announcements.tsx'i güncelleme event'i gönder
+                    eventBus.emit('announcements:updated');
+                    
+                    if (__DEV__) console.log('[INITIAL_SYNC] İlk açılış bildirimi gösterildi:', filtered.length);
+                  }
+                }
+              } catch (err) {
+                if (__DEV__) console.warn('[INITIAL_SYNC] Duyuru bildirimi hatası:', err);
+              }
             }
             
             if (__DEV__) console.log('API ile senkronize edilen kamp alanı sayısı:', count);
@@ -1768,8 +1849,27 @@ export default function MapScreen() {
         const count = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
         if (__DEV__) console.log('[AUTO_SYNC] Senkronize edildi:', count, 'kamp alanı');
         
+        // Duyurular için de delta sync
+        try {
+          const db = getDatabase();
+          await db.fetchAndStoreAnnouncementsFromAPI();
+          if (__DEV__) console.log('[AUTO_SYNC] Duyurular delta sync tamamlandı');
+          
+          // announcements.tsx'i güncelleme event'i gönder
+          eventBus.emit('announcements:updated');
+        } catch (err) {
+          if (__DEV__) console.warn('[AUTO_SYNC] Duyuru delta sync hatası:', err);
+        }
+        
         // Sessizce veriyi güncelle (loading göstermeden)
         await refreshData();
+        
+        // Duyuruları kontrol et ve bildirim göster
+        try {
+          fetchAnnouncementsSilently(routerRef.current, false);
+        } catch (err) {
+          if (__DEV__) console.warn('[AUTO_SYNC] Duyuru fetch hatası:', err);
+        }
       } catch (err) {
         if (__DEV__) console.error('[AUTO_SYNC] Hata:', err);
       } finally {
