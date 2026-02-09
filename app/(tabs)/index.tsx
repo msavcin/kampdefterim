@@ -84,6 +84,8 @@ const { width, height } = Dimensions.get('window');
 export default function MapScreen() {
     // Son sorgulanan konumu saklamak için ref
     const lastQueriedLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+    // AppState'te alınan en son konum bilgisi (lokasyon butonu için hızlı erişim)
+    const lastKnownLocationRef = useRef<{ latitude: number; longitude: number; timestamp: number } | null>(null);
   const navigation = useNavigation();
 
   // Swipe-back gesture ve geri tuşunu devre dışı bırak
@@ -807,8 +809,84 @@ export default function MapScreen() {
         return;
       }
       
+      // Önce cache'lenmiş konumu kullan (varsa ve güncel ise - son 10 dakika içinde)
+      const cachedLocation = lastKnownLocationRef.current;
+      const now = Date.now();
+      const CACHE_VALIDITY_MS = 600000; // 10 dakika
+      
+      if (cachedLocation && (now - cachedLocation.timestamp) < CACHE_VALIDITY_MS) {
+        // Cache'lenmiş konum güncel, hemen kullan
+        const { latitude, longitude } = cachedLocation;
+        console.log('[DEBUG] Cache\'ten konum kullanılıyor:', latitude, longitude);
+        
+        if (!isMounted.current) return;
+        
+        // Haritayı kullanıcının konumuna döndür
+        setMapMoveQuery(null);
+        setMapCenter({ latitude, longitude });
+        
+        // WebView'a haritayı ortala komutu hemen gönder
+        if (isMounted.current) {
+          safeInjectJavaScript(`
+            if (typeof map !== 'undefined') {
+              map.setView([${latitude}, ${longitude}], 13);
+            }
+            true;
+          `, 'DEBUG');
+        }
+        
+        // Arka planda fresh location al ve güncelle
+        setTimeout(async () => {
+          try {
+            const freshLocation = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            
+            if (!isMounted.current) return;
+            
+            const freshLat = freshLocation.coords.latitude;
+            const freshLng = freshLocation.coords.longitude;
+            
+            // Cache'i güncelle
+            lastKnownLocationRef.current = {
+              latitude: freshLat,
+              longitude: freshLng,
+              timestamp: Date.now(),
+            };
+            
+            // Eğer konum önemli ölçüde değiştiyse (>50m) haritayı güncelle
+            const distance = getDistanceMeters(latitude, longitude, freshLat, freshLng);
+            if (distance > 50) {
+              console.log('[DEBUG] Konum değişti (', distance.toFixed(0), 'm), harita güncelleniyor');
+              setMapCenter({ latitude: freshLat, longitude: freshLng });
+              if (isMounted.current) {
+                safeInjectJavaScript(`
+                  if (typeof map !== 'undefined') {
+                    map.setView([${freshLat}, ${freshLng}], 13);
+                  }
+                  true;
+                `, 'DEBUG');
+              }
+            }
+            
+            // getCurrentLocation hook'ını çağırarak location state'i güncelle
+            await getCurrentLocation();
+            
+            // Kamp alanlarını yenile
+            if (refreshDataRef.current && typeof refreshDataRef.current === 'function') {
+              await refreshDataRef.current();
+            }
+          } catch (error) {
+            console.error('[DEBUG] Arka plan konum güncelleme hatası:', error);
+          }
+        }, 100); // Kısa gecikme ile arka planda güncelle
+        
+        return; // Cache'lenmiş konum kullanıldı, fonksiyondan çık
+      }
+      
+      // Cache yok veya eski, fresh location al
       try {
-        // Güncel konumu al
+        console.log('[DEBUG] Fresh konum alınıyor...');
         const currentLocation = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
@@ -817,6 +895,13 @@ export default function MapScreen() {
         
         const { latitude, longitude } = currentLocation.coords;
         console.log('[DEBUG] Güncel konum:', latitude, longitude);
+        
+        // Cache'i güncelle
+        lastKnownLocationRef.current = {
+          latitude,
+          longitude,
+          timestamp: Date.now(),
+        };
         
         // Haritayı kullanıcının konumuna döndür
         setMapMoveQuery(null);
@@ -1268,6 +1353,18 @@ export default function MapScreen() {
   }, [isConnected, mapMoveQuery?.latitude, mapMoveQuery?.longitude, location?.coords.latitude, location?.coords.longitude]);
   // hasLocationPermission dependency'de yok çünkü sadece guard olarak kullanılıyor
 
+  // İlk açılışta veya konum değiştiğinde cache'i güncelle
+  useEffect(() => {
+    if (location?.coords && hasLocationPermission) {
+      lastKnownLocationRef.current = {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        timestamp: Date.now(),
+      };
+      if (__DEV__) console.log('[Location] Konum cache\'lendi:', location.coords.latitude, location.coords.longitude);
+    }
+  }, [location?.coords.latitude, location?.coords.longitude, hasLocationPermission]);
+
   // AppState listener: Uygulama arka plandan ön plana geldiğinde veri yenile
   useEffect(() => {
     let lastActiveTime = 0;
@@ -1298,25 +1395,37 @@ export default function MapScreen() {
           // Konum kontrolü yap - değişmişse (1km'den fazla) veriyi yenile
           try {
             const { status } = await Location.getForegroundPermissionsAsync();
-            if (status === 'granted' && location?.coords) {
+            if (status === 'granted') {
+              // Yeni konum al ve cache'le
               const newLocation = await Location.getCurrentPositionAsync({
                 accuracy: Location.Accuracy.Balanced,
               });
               
-              if (newLocation?.coords && location?.coords) {
-                const dist = getDistanceMeters(
-                  location.coords.latitude,
-                  location.coords.longitude,
-                  newLocation.coords.latitude,
-                  newLocation.coords.longitude
-                );
+              if (newLocation && newLocation.coords) {
+                // Cache'i güncelle (lokasyon butonu için)
+                lastKnownLocationRef.current = {
+                  latitude: newLocation.coords.latitude,
+                  longitude: newLocation.coords.longitude,
+                  timestamp: Date.now(),
+                };
+                console.log('[AppState] Konum cache\'lendi:', newLocation.coords.latitude, newLocation.coords.longitude);
                 
-                if (dist > 1000) {
-                  if (__DEV__) console.log('[AppState] Konum değişti:', dist.toFixed(0), 'metre, veri yenileniyor');
-                  // getCurrentLocation hook'unu çağır
-                  await getCurrentLocation();
-                } else if (__DEV__) {
-                  console.log('[AppState] Konum değişmedi:', dist.toFixed(0), 'metre');
+                // Mevcut konum ile karşılaştır
+                if (location?.coords) {
+                  const dist = getDistanceMeters(
+                    location.coords.latitude,
+                    location.coords.longitude,
+                    newLocation.coords.latitude,
+                    newLocation.coords.longitude
+                  );
+                  
+                  if (dist > 1000) {
+                    if (__DEV__) console.log('[AppState] Konum değişti:', dist.toFixed(0), 'metre, veri yenileniyor');
+                    // getCurrentLocation hook'unu çağır
+                    await getCurrentLocation();
+                  } else if (__DEV__) {
+                    console.log('[AppState] Konum değişmedi:', dist.toFixed(0), 'metre');
+                  }
                 }
               }
             }
