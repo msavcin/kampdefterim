@@ -115,8 +115,9 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
   const searchTimeoutRef = useRef<number | null>(null);
   const [showCampingAreaSearch, setShowCampingAreaSearch] = useState(false);
   const [selectedCampingAreaId, setSelectedCampingAreaId] = useState<number | null>(null);
-  const [baslama_zamani, setBaslamaZamani] = useState('');
-  const [bitis_zamani, setBitisZamani] = useState('');
+  const defaultIso = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const [baslama_zamani, setBaslamaZamani] = useState<string>(defaultIso);
+  const [bitis_zamani, setBitisZamani] = useState<string>(defaultIso);
   const [showBaslamaPicker, setShowBaslamaPicker] = useState(false);
   const [showBitisPicker, setShowBitisPicker] = useState(false);
   const router = require('expo-router').useRouter();
@@ -213,8 +214,8 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
           etkinlik_suresi: data.etkinlik_suresi || '',
           etkinlik_yeri: data.etkinlik_yeri || '',
         });
-        setBaslamaZamani(data.baslama_zamani || '');
-        setBitisZamani(data.bitis_zamani || '');
+        setBaslamaZamani(data.baslama_zamani || defaultIso);
+        setBitisZamani(data.bitis_zamani || defaultIso);
       } catch (e) {
         Alert.alert('Hata', 'Duyuru bilgisi alınamadı.');
       } finally {

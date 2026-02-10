@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native';
 
 const aylar = [
@@ -15,6 +15,8 @@ export function formatDateTR(date) {
   const d = typeof date === 'string' ? new Date(date) : date;
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 }
+
+const ITEM_HEIGHT = 40; // sabit öğe yüksekliği, otomatik kaydırma için kullanılır
 
 export function formatDateBackend(date, format = 'iso') {
   if (!date) return '';
@@ -45,6 +47,27 @@ export default function CustomDatePicker({
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
+  // Scroll refleri: modal açıldığında seçili gün/ay/yıl her zaman görünür olacak şekilde kaydırma yapılır
+  const dayRef = useRef<ScrollView | null>(null);
+  const monthRef = useRef<ScrollView | null>(null);
+  const yearRef = useRef<ScrollView | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    // indexleri hesapla
+    const dayIndex = day - 1;
+    const monthIndex = month;
+    const yearIndex = year - minYear;
+    const clamp = (v: number) => Math.max(0, v);
+    const offsetFor = (index: number) => clamp((index - 2) * ITEM_HEIGHT);
+    // Küçük bir timeout ile layout'un hazır olmasını bekle
+    setTimeout(() => {
+      dayRef.current?.scrollTo({ y: offsetFor(dayIndex), animated: false });
+      monthRef.current?.scrollTo({ y: offsetFor(monthIndex), animated: false });
+      yearRef.current?.scrollTo({ y: offsetFor(yearIndex), animated: false });
+    }, 0);
+  }, [visible]);
+
   const handleSelect = () => {
     const selected = new Date(year, month, day);
     onChange && onChange(selected);
@@ -57,21 +80,21 @@ export default function CustomDatePicker({
         <View style={styles.modalCard}>
           <Text style={styles.title}>{title}</Text>
           <View style={styles.row}>
-            <ScrollView style={styles.col}>
+            <ScrollView ref={dayRef} style={styles.col}>
               {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => (
                 <TouchableOpacity key={d} onPress={() => setDay(d)} style={[styles.item, day === d && styles.selected]}>
                   <Text style={day === d ? styles.selectedText : styles.text}>{pad(d)}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <ScrollView style={styles.col}>
+            <ScrollView ref={monthRef} style={styles.col}>
               {aylar.map((a, i) => (
                 <TouchableOpacity key={a} onPress={() => setMonth(i)} style={[styles.item, month === i && styles.selected]}>
                   <Text style={month === i ? styles.selectedText : styles.text}>{a}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <ScrollView style={styles.col}>
+            <ScrollView ref={yearRef} style={styles.col}>
               {Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i).map(y => (
                 <TouchableOpacity key={y} onPress={() => setYear(y)} style={[styles.item, year === y && styles.selected]}>
                   <Text style={year === y ? styles.selectedText : styles.text}>{y}</Text>
@@ -121,7 +144,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   item: {
-    paddingVertical: 8,
+    height: ITEM_HEIGHT,
+    justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,
   },

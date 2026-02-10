@@ -747,6 +747,28 @@ export default function ChecklistScreen({ navigation }: any) {
     }
   }, [selectedSeason, selectedCampingType, seasonIdMap, campingTypeIdMap]);
 
+  // Online olduğunda checklist'leri yenile
+  useEffect(() => {
+    if (isConnected && userRole !== 'guest') {
+      const token = getToken();
+      if (token) {
+        if (__DEV__) console.log('[CHECKLIST] Online olundu, veriler yenileniyor...');
+        
+        // Custom checklist'leri yenile
+        fetchCustomChecklists().catch(err => {
+          if (__DEV__) console.warn('[CHECKLIST] Custom checklist yenileme hatası:', err);
+        });
+        
+        // Standart checklist'i yenile (map'ler hazırsa)
+        if (Object.keys(seasonIdMap).length > 0 && Object.keys(campingTypeIdMap).length > 0) {
+          fetchStandardChecklist().catch(err => {
+            if (__DEV__) console.warn('[CHECKLIST] Standard checklist yenileme hatası:', err);
+          });
+        }
+      }
+    }
+  }, [isConnected]);
+
   // Kişisel ve paylaşılan checklistleri API'den çeken fonksiyon
   async function fetchCustomChecklists() {
     try {

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kısıtlı Kullanım - Kamp Defterim</title>
+  <link rel="icon" href="./assets/images/icon.png">
+  <style>
+    body { 
+      font-family: 'Segoe UI', Arial, sans-serif; 
+      background: #f8fafc; 
+      color: #222; 
+      margin: 0; 
+      line-height: 1.6;
+    }
+    .container { 
+      max-width: 900px; 
+      margin: 40px auto; 
+      background: #fff; 
+      border-radius: 16px; 
+      box-shadow: 0 2px 12px #0001; 
+      padding: 40px; 
+    }
+    .logo { 
+      width: 120px; 
+      display: block; 
+      margin: 0 auto 24px; 
+      border-radius: 24px; 
+      background: #f8fafc; 
+    }
+    h1 { 
+      text-align: center; 
+      color: #0e7490; 
+      margin-bottom: 8px; 
+      font-size: 2.2em;
+    }
+    h2 { 
+      color: #0e7490; 
+      margin-top: 32px; 
+      margin-bottom: 16px; 
+      font-size: 1.5em;
+      border-bottom: 2px solid #e0f2fe;
+      padding-bottom: 8px;
+    }
+    .motto { 
+      text-align: center; 
+      color: #64748b; 
+      font-size: 1.1em; 
+      margin-bottom: 32px; 
+    }
+    .info { 
+      margin: 24px 0; 
+    }
+    .info strong { 
+      color: #0e7490; 
+    }
+    .kisit-box {
+      background: #fff7ed;
+      border-left: 4px solid #fb923c;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+    }
+    .premium-box {
+      background: #f0fdf4;
+      border-left: 4px solid #059669;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
+    th, td {
+      border: 1px solid #e2e8f0;
+      padding: 12px;
+      text-align: left;
+    }
+    th {
+      background: #f8fafc;
+      color: #0e7490;
+      font-weight: bold;
+    }
+    tr:nth-child(even) { background: #f9fafb; }
+    ul { padding-left: 24px; }
+    li { margin: 6px 0; }
+    .file-reference { background: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; color: #475569; }
+    .footer { text-align: center; color: #94a3b8; font-size: 0.95em; margin-top: 48px; padding-top: 24px; border-top: 1px solid #e2e8f0; }
+    .cta { display:inline-block; background:#2563eb; color:#fff; padding:10px 16px; border-radius:10px; text-decoration:none; margin-top:12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="./assets/images/login_screen.png" alt="Kamp Defterim Logo" class="logo">
+    <h1>🔒 Kısıtlı Erişim Raporu</h1>
+    <div class="motto">Üyeliğini başlattıktan 1 ay sonra uygulamada "Kısıtlı Erişim" durumunda hangi özelliklere erişim kısıtlanır ve Premium ile neler kazanılır</div>
+
+    <div class="info">
+      <p><strong>Rapor Tarihi:</strong> 10 Şubat 2026</p>
+      <p><strong>Uygulama Versiyonu:</strong> 1.3.4</p>
+      <p><strong>Kapsam:</strong> "Kısıtlı Erişim" statüsüne giren kullanıcılar (ücretli üyeliğin yenilenmemesi veya doğrulama gecikmesi sonrası uygulanan kısıtlamalar)</p>
+      <p><strong>Kaynak (md):</strong> <a href="/docs/kisitli-erisim.md">docs/kisitli-erisim.md</a></p>
+    </div>
+
+    <h2>📌 Genel Özet</h2>
+    <p>
+      "Kısıtlı Kullanım" statüsü, bir kullanıcı üyeliğini başlattıktan sonraki 1 aylık süre sonunda, abonelik yenilenmemesi veya gerekli doğrulamaların tamamlanmaması durumunda otomatik olarak uygulanan sınırlamalardır. Amaç; ücretsiz temel kullanımın korunması, sunucu maliyetlerinin yönetilmesi ve premium avantajlarının korunmasıdır.
+    </p>
+
+    <h2>❗ Kısıtlı Kullanımda Erişimi Kısıtlanan Özellikler</h2>
+    <div class="kisit-box">
+      <ul>
+        <li><strong>Offline Bölge İndirme</strong> — Yeni offline bölge indirme (manüel veya otomatik precache) devre dışı bırakılır.</li>
+        <li><strong>Smart WiFi Cache</strong> — WiFi üzerindeyken favori bölgelerin otomatik cache'lenmesi durdurulur.</li>
+        <li><strong>Arka Plan Senkronizasyonu</strong> — Arka planda (zamanlanmış) otomatik senkronizasyon görevleri sınırlanır veya en düşük önceliğe alınır.</li>
+        <li><strong>İndirilebilir Tile/Kota Artışı</strong> — Geniş çaplı harita indirme ve yüksek kota gerektiren işlemler kısıtlanır.</li>
+        <li><strong>Öncelikli Destek</strong> — Premium destek erişimi kaldırılır (sıraya göre standart destek devam eder).</li>
+        <li><strong>Premium Filtreler / Araçlar</strong> — Gelişmiş arama, ileri filtreleme ve özel görünüm ayarları erişilemez olur.</li>
+      </ul>
+    </div>
+
+    <h2>📊 Etki & Örnek Senaryolar</h2>
+    <ul>
+      <li><strong>Offline kamp planlayan kullanıcı:</strong> Offline bölge indirme kapatıldığı için önceden indirilmemiş haritalarda veri bağlantısı gerekecektir.</li>
+      <li><strong>Sık seyahat eden kullanıcı:</strong> Smart WiFi Cache devre dışı kalsa da manuel indirdiği bölgeler sınırlı kalabilir.</li>
+      <li><strong>Topluluk duyuruları ve medya yükleme:</strong> Bu özellikler genellikle topluluk üyeliğine bağlıdır; kısıtlı kullanıcılar, topluluk ile ilişkili bazı medya yüklemelerinde kısıntı görebilir.</li>
+    </ul>
+
+    <h2>✅ Premium Üyelik ile Elde Edilen Avantajlar</h2>
+    <div class="premium-box">
+      <table>
+        <thead>
+          <tr>
+            <th>Kısıtlama</th>
+            <th>Premium ile Çözüm / Avantaj</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Offline Bölge İndirme</td>
+            <td>Limitsiz veya daha yüksek kota; geniş yarıçap seçenekleri (10/20/50/100 km) ve öncelikli indirme kuyruğu.</td>
+          </tr>
+          <tr>
+            <td>Smart WiFi Cache</td>
+            <td>WiFi ile otomatik cache; favoriler için öncelikli önbellekleme (gizli arka plan işlemleri artık foreground ile güvenle çalışır).</td>
+          </tr>
+          <tr>
+            <td>Arka Plan Senkronizasyonu</td>
+            <td>Premium kullanıcılar için sık senkronizasyon (delta sync) hakları — veri gecikmeleri azalır.</td>
+          </tr>
+          <tr>
+            <td>Destek</td>
+            <td>Öncelikli destek ve hata bildirimlerinde hızlı geri dönüş.</td>
+          </tr>
+          <tr>
+            <td>Premium Filtreler</td>
+            <td>Gelişmiş arama, özel harita katmanları ve premium filtrelere erişim sağlanır.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p style="margin-top:12px;">Not: Premium avantajları uygulama içi abonelik sistemiyle etkinleştirilir; ödeme onayı ve sunucu yanıtı sonrasında özellikler kullanıcı hesabına anında yansır.</p>
+    </div>
+
+    <h2>🛠️ Uygulama İçindeki Teknik Noktalar</h2>
+    <ul>
+      <li><strong>Yetkilendirme & Kontroller:</strong> Kısıtlamalar sunucu tarafında ve istemci tarafında (örn. <span class="file-reference">lib/userMembership.ts</span>, <span class="file-reference">lib/pendingChanges.ts</span>) uygulanır.</li>
+      <li><strong>Offline indirme bileşeni:</strong> <span class="file-reference">components/OfflineRegionSelector.tsx</span> ve <span class="file-reference">lib/smartOfflineCache.ts</span> premium kontrollerine göre davranır.</li>
+      <li><strong>Konum izin kontrolleri:</strong> <span class="file-reference">lib/checkLocationPermissionsForPremium.ts</span> yalnızca foreground izinlerini dikkate alır; arka plan izinleri kaldırılmıştır.</li>
+      <li><strong>Senkronizasyon:</strong> <span class="file-reference">lib/syncManager.ts</span> premium kullanıcılar için daha agresif sync politikasına sahiptir, kısıtlı kullanıcılar için sync aralıkları artırılır.</li>
+    </ul>
+
+    <h2>🚀 Nasıl Geçiş Yapılır (Kullanıcı Rehberi)</h2>
+    <ol>
+      <li>Profil > Üyelikler (veya <span class="file-reference">/profile</span>) bölümüne gidin.</li>
+      <li>Premium paketlerden birini seçin ve ödeme adımlarını tamamlayın.</li>
+      <li>Ödeme onayı alındıktan sonra özelliker hesabınıza otomatik tanımlanır; uygulamayı yeniden başlatmanız gerekmez.</li>
+    </ol>
+
+    <h2>❓ Sık Sorulan Sorular (Kısa)</h2>
+    <ul>
+      <li><strong>Kısıtlı Kullanım ne zaman uygulanır?</strong> — Üyelik başladıktan 1 ay sonra, abonelik yenilenmemişse veya gerekli doğrulama tamamlanmamışsa otomatik uygulanır.</li>
+      <li><strong>Mevcut indirdiğim bölgeler silinecek mi?</strong> — Hayır; mevcut offline bölgeler korunur, fakat yeni indirme veya genişletme kısıtlanabilir.</li>
+      <li><strong>Hemen Premium olmadan önce geçici bir çözüm var mı?</strong> — Manuel olarak indirdiğiniz bölgelerin boyutunu küçülterek ve favorileri yöneterek sınırlı kullanım süresince deneyimi iyileştirebilirsiniz.</li>
+    </ul>
+
+    <div style="text-align:center; margin-top:20px;">
+      <a href="/profile" class="cta">Hemen Premium'a Geç 🟢</a>
+    </div>
+
+    <div class="footer">
+      <p>Kamp Defterim • Versiyon 1.3.4 • Rapor: Kısıtlı Kullanım</p>
+      <p>Herhangi bir sorun veya soru için <a href="mailto:destek@kampdefterim.example">destek@kampdefterim.example</a> adresine yazabilirsiniz.</p>
+    </div>
+  </div>
+</body>
+</html>

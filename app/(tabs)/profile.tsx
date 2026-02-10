@@ -780,14 +780,24 @@ export default function ProfileScreen(props: any) {
           ]);
           return;
         }
-        // Eğer me.user varsa onu, yoksa me'yi set et
-        setUser(me.user ? me.user : me || null);
-        if (me?.community_id && me?.id) {
-          const membershipData = await getUserMembershipRemote(me.community_id, me.id);
+        // Normalize user object and ensure `role` comes from users table (me.member.user or me.user or me.role) if available
+        const resolvedUser = (function() {
+          if (!me) return null;
+          // Account-level user may be at me.member.user (membership include) or me.user or top-level me
+          const accountUser = me?.member?.user ?? me?.user ?? null;
+          // Merge so accountUser fields override top-level me when present, but keep other top-level flags (offline_enabled etc.)
+          if (accountUser) {
+            return { ...me, ...accountUser, role: accountUser.role ?? me.role };
+          }
+          return { ...me, role: me.role };
+        })();
+        setUser(resolvedUser);
+        if (resolvedUser?.community_id && resolvedUser?.id) {
+          const membershipData = await getUserMembershipRemote(resolvedUser.community_id, resolvedUser.id);
           if (membershipData) {
             setMembership({ role: membershipData.role, status: membershipData.status });
           }
-          const cDetail = await getCommunityById(me.community_id);
+          const cDetail = await getCommunityById(resolvedUser.community_id);
           setCommunityDetail(cDetail || null);
         }
       } catch (e) {
@@ -956,8 +966,8 @@ export default function ProfileScreen(props: any) {
                 <View style={profileCardStyles.profileRoleRow}>
                   <UserCheck size={16} color="#059669" style={{ marginRight: 6 }} />
                   <Text style={[profileCardStyles.profileRoleText, { color: '#059669' }] }>
-                    {membership.role === 'leader' ? 'Lider'
-                      : membership.role === 'member' ? 'Üye'
+                    {membership.role === 'leader' ? 'Topluluk Lideri'
+                      : membership.role === 'member' ? 'Topluluk Üyesi'
                       : 'Bilinmiyor'}
                   </Text>
                   <View style={{
@@ -1239,8 +1249,8 @@ export default function ProfileScreen(props: any) {
                         <UserCheck size={16} color="#059669" />
                       </View>
                       <Text style={{ fontSize: 14, color: '#059669', fontWeight: '600' }}>
-                        {membership.role === 'leader' ? 'Lider'
-                          : membership.role === 'member' ? 'Üye'
+                        {membership.role === 'leader' ? 'Topluluk Lideri'
+                          : membership.role === 'member' ? 'Topluluk Üyesi'
                           : 'Bilinmiyor'}
                       </Text>
                       <View style={{

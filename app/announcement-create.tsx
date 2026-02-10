@@ -190,8 +190,9 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
   const [zorlukSeviyesi, setZorlukSeviyesi] = useState('');
   const [etkinlikSuresi, setEtkinlikSuresi] = useState('');
   const [etkinlikYeri, setEtkinlikYeri] = useState('');
-  const [baslama_zamani, setBaslamaZamani] = useState('');
-  const [bitis_zamani, setBitisZamani] = useState('');
+  const defaultIso = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const [baslama_zamani, setBaslamaZamani] = useState<string>(defaultIso);
+  const [bitis_zamani, setBitisZamani] = useState<string>(defaultIso);
   // Sadece birer tane tanımlı olmalı
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -349,6 +350,18 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
       
       Alert.alert('Başarılı', 'Duyuru başarıyla eklendi!', [
         { text: 'Tamam', onPress: () => {
+            // Formu resetle (modal kapanmasa bile default tarihler güncel olsun)
+            setBaslamaZamani(defaultIso);
+            setBitisZamani(defaultIso);
+            setTitle('');
+            setContent('');
+            setEventPhoto(null);
+            setEtkinlikTuru('');
+            setZorlukSeviyesi('');
+            setEtkinlikSuresi('');
+            setEtkinlikYeri('');
+            setSelectedCampingAreaId(null);
+            setAnnouncementType('duyuru');
             onSuccess();
             onClose();
           }

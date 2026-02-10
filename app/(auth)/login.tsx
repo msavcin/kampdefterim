@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity, Image, Modal } from 'react-native';
+import { Eye, EyeOff } from 'lucide-react-native';
 import GuestInfoModal from '../../components/GuestInfoModal';
 import { loginUser, getMe, listCommunityMembers } from '../../lib/userCommunityApi';
 import { saveToken } from '../../lib/auth';
@@ -10,6 +11,7 @@ import * as SecureStore from 'expo-secure-store';
 export default function LoginScreen() {
   const [identifier, setIdentifier] = useState(''); // email veya username
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [forgotModalVisible, setForgotModalVisible] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -29,8 +31,9 @@ export default function LoginScreen() {
       if (result && result.token) {
         await saveToken(result.token);
         const me = await getMe();
+        const userToStore = me && me.user ? { ...me.user, role: me.user.role ?? me.role } : me;
         try {
-          await SecureStore.setItemAsync('localUser', JSON.stringify(me));
+          await SecureStore.setItemAsync('localUser', JSON.stringify(userToStore));
         } catch {}
         guestLoginPendingRedirect.current = true;
         setGuestModalVisible(true);
@@ -92,10 +95,12 @@ export default function LoginScreen() {
         // Kullanıcı ve topluluk üyeliği durumunu kontrol et
         const me = await getMe();
         console.log('[LOGIN] getMe sonucu:', me);
-        // Kullanıcıyı local storage'a kaydet
+        // Normalize and store only the user object to local storage, ensuring `role` comes from users table (look in member.user, user, then me.role)
+        const accountUser = me?.member?.user ?? me?.user ?? null;
+        const userToStore = accountUser ? { ...me, ...accountUser, role: accountUser.role ?? me.role } : { ...me, role: me.role };
         try {
-          await SecureStore.setItemAsync('localUser', JSON.stringify(me));
-          console.log('[LOGIN] localUser kaydedildi:', me);
+          await SecureStore.setItemAsync('localUser', JSON.stringify(userToStore));
+          console.log('[LOGIN] localUser kaydedildi:', userToStore);
         } catch (e) {
           console.log('[LOGIN] localUser kaydedilemedi:', e);
         }
@@ -169,14 +174,25 @@ export default function LoginScreen() {
         onChangeText={setIdentifier}
         placeholderTextColor="#64748b"
       />
-      <TextInput
-        style={[styles.input, { color: '#222' }]}
-        placeholder="Şifre"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-        placeholderTextColor="#64748b"
-      />
+      <View style={styles.passwordRow}>
+        <TextInput
+          style={[styles.passwordInput, { color: '#222' }]}
+          placeholder="Şifre"
+          secureTextEntry={!showPassword}
+          value={password}
+          onChangeText={setPassword}
+          placeholderTextColor="#64748b"
+          autoCapitalize="none"
+        />
+        <TouchableOpacity
+          onPress={() => setShowPassword((s) => !s)}
+          accessible
+          accessibilityLabel={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+          style={styles.passwordToggle}
+        >
+          {showPassword ? <EyeOff size={20} color="#64748b" /> : <Eye size={20} color="#64748b" />}
+        </TouchableOpacity>
+      </View>
       <Button title={loading ? 'Giriş Yapılıyor...' : 'Giriş Yap'} onPress={() => handleLogin()} disabled={loading} />
       <TouchableOpacity onPress={() => setForgotModalVisible(true)} style={styles.forgotContainer}>
         <Text style={styles.forgotText}>Şifremi Unuttum</Text>
@@ -263,6 +279,9 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 28, fontWeight: 'bold', marginBottom: 24, textAlign: 'center' },
   input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 16 },
+  passwordRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 8, marginBottom: 16 },
+  passwordInput: { flex: 1, paddingVertical: 12 },
+  passwordToggle: { padding: 8 },
   linkContainer: { marginTop: 16, alignItems: 'center' },
   link: { color: '#007AFF', fontWeight: '500' },
   forgotContainer: { marginTop: 8, alignItems: 'center' },
