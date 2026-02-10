@@ -1098,6 +1098,23 @@ export default function MapScreen() {
           friends = [];
         }
         setUser({ ...userData, friends });
+        
+        // Kullanıcı bilgilerini cache'le (offline kullanım için)
+        if (userData) {
+          try {
+            await SecureStore.setItemAsync('cachedUserData', JSON.stringify({
+              community_id: userData.community_id,
+              role: userData.role,
+              offline_enabled: userData.offline_enabled,
+              offline_radius_km: userData.offline_radius_km,
+              id: userData.id
+            }));
+            console.log('[User] Kullanıcı bilgileri cache\'lendi (offline için)');
+          } catch (cacheErr) {
+            console.warn('[User] Cache yazma hatası:', cacheErr);
+          }
+        }
+        
         if (userData?.id) {
           console.log('[DEBUG] Aktif kullanıcı ID (owner_id):', userData.id);
         }
@@ -1115,7 +1132,23 @@ export default function MapScreen() {
           setCommunityMember(null);
         }
       } catch (e) {
-        setUser(null);
+        console.warn('[User] getMe() hatası, offline modda cache\'den okuyalım:', e?.message);
+        
+        // Offline modda cache'den oku
+        try {
+          const cachedData = await SecureStore.getItemAsync('cachedUserData');
+          if (cachedData) {
+            const userData = JSON.parse(cachedData);
+            setUser(userData);
+            console.log('[User] Cache\'den kullanıcı bilgileri alındı (offline):', userData);
+          } else {
+            setUser(null);
+          }
+        } catch (cacheErr) {
+          console.warn('[User] Cache okuma hatası:', cacheErr);
+          setUser(null);
+        }
+        
         setCommunityMember(null);
       }
     })();
@@ -1526,6 +1559,12 @@ export default function MapScreen() {
       // Sync flag'lerini sıfırla
       hasInitialSyncRef.current = false;
       
+      // Offline kontrolü
+      if (!isConnected) {
+        if (__DEV__) console.log('[VERSION_UPDATED] Offline, sync atlanıyor');
+        return;
+      }
+      
       // Konum izni yoksa sync yapma
       if (hasLocationPermission !== true) {
         if (__DEV__) console.log('[VERSION_UPDATED] Konum izni yok, sync atlanıyor');
@@ -1629,6 +1668,16 @@ export default function MapScreen() {
 
   // Guest kullanıcılar sadece kendi oluşturduğu kamp alanlarını görebilsin
   const isGuest = user?.role === 'guest';
+  
+  // Guest kullanıcının oluşturduğu kamp alanı sayısını hesapla
+  const userCreatedAreasCount = useMemo(() => {
+    if (!user?.id) return 0;
+    return campingAreas.filter(area => String(area.owner_id) === String(user.id)).length;
+  }, [campingAreas, user?.id]);
+  
+  const GUEST_LIMIT = 10;
+  const remainingAreas = isGuest ? Math.max(0, GUEST_LIMIT - userCreatedAreasCount) : Infinity;
+  const canAddMoreAreas = isGuest ? userCreatedAreasCount < GUEST_LIMIT : true;
   
   // filteredCampingAreas'ı memoize et - gereksiz re-render'ları önle
   const filteredCampingAreas = useMemo(() => {
@@ -2245,7 +2294,7 @@ export default function MapScreen() {
                     delete window['tileCacheCallback_' + requestId];
                   };
                   
-                  // Timeout - 500ms sonra hala yanıt gelmezse placeholder
+                  // Timeout - 1500ms sonra hala yanıt gelmezse placeholder
                   setTimeout(function() {
                     if (window['tileCacheCallback_' + requestId]) {
                       delete window['tileCacheCallback_' + requestId];
@@ -2262,7 +2311,7 @@ export default function MapScreen() {
                       tile.src = canvas.toDataURL();
                       if (done) done(null, tile);
                     }
-                  }, 500);
+                  }, 1500);
                 } else {
                   // ReactNativeWebView yok, placeholder
                   var canvas = document.createElement('canvas');
@@ -2284,7 +2333,9 @@ export default function MapScreen() {
               maxZoom: 13,
               minZoom: 9,
               bounds: null,
-              keepBuffer: 0
+              keepBuffer: 2,
+              updateWhenIdle: false,
+              updateWhenZooming: false
             });
           } else {
             // Online modda: Backend proxy üzerinden yükle
@@ -2310,6 +2361,19 @@ export default function MapScreen() {
           }
           
           tileLayer.addTo(map);
+
+          // Offline modda harita yüklendikten sonra tile'ları yenile
+          if (isOffline) {
+            map.whenReady(function() {
+              setTimeout(function() {
+                map.invalidateSize();
+                // Tile layer'ı yeniden render et
+                if (tileLayer && tileLayer.redraw) {
+                  tileLayer.redraw();
+                }
+              }, 300);
+            });
+          }
 
           // Eğer harita üzerinde bir konum seçildiyse ve kamp alanı listeleniyorsa, harita zoomu tüm kamp alanlarını kapsayacak şekilde ayarlanır
           if (${mapMoveQuery ? 'true' : 'false'} && ${Array.isArray(markers) ? markers.length : 0} > 0) {
@@ -2579,6 +2643,24 @@ export default function MapScreen() {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'locationSelected') {
+        // Guest kullanıcı için limit kontrolü
+        if (isGuest && !canAddMoreAreas) {
+          Alert.alert(
+            'Kamp Alanı Limiti',
+            `Guest kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+            [
+              { text: 'Tamam', style: 'cancel' },
+              { 
+                text: 'Premium Ol!', 
+                onPress: () => router.push('/premium' as any),
+                style: 'default'
+              }
+            ]
+          );
+          setIsLocationPickerMode(false);
+          return;
+        }
+        
         setSelectedLocation({
           latitude: data.latitude,
           longitude: data.longitude
@@ -2586,6 +2668,23 @@ export default function MapScreen() {
         setIsLocationPickerMode(false);
         if (isMounted.current) setShowAddModal(true);
       } else if (data.type === 'addCampingAreaAtCurrentLocation') {
+        // Guest kullanıcı için limit kontrolü
+        if (isGuest && !canAddMoreAreas) {
+          Alert.alert(
+            'Kamp Alanı Limiti',
+            `Guest kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+            [
+              { text: 'Tamam', style: 'cancel' },
+              { 
+                text: 'Premium Ol!', 
+                onPress: () => router.push('/premium' as any),
+                style: 'default'
+              }
+            ]
+          );
+          return;
+        }
+        
         setSelectedLocation({
           latitude: data.latitude,
           longitude: data.longitude
@@ -2628,18 +2727,28 @@ export default function MapScreen() {
         (async () => {
           try {
             const cachedTile = await getCachedTile(data.z, data.x, data.y);
-            // WebView'a yanıt gönder
-            if (isMounted.current) {
-              safeInjectJavaScript(`
+            // WebView'a yanıt gönder - hızlıca callback tetikle
+            if (isMounted.current && webViewRef.current) {
+              const script = `
                 if (window.tileCacheCallback_${data.requestId}) {
                   window.tileCacheCallback_${data.requestId}(${cachedTile ? `"${cachedTile}"` : 'null'});
-                  delete window.tileCacheCallback_${data.requestId};
                 }
                 true;
-              `, 'MapTileCache');
+              `;
+              webViewRef.current.injectJavaScript(script);
             }
           } catch (error) {
+            // Hata durumunda da callback'i tetikle (null ile)
             if (__DEV__) console.error('[MapTileCache] Cache okuma hatası:', error);
+            if (isMounted.current && webViewRef.current) {
+              const script = `
+                if (window.tileCacheCallback_${data.requestId}) {
+                  window.tileCacheCallback_${data.requestId}(null);
+                }
+                true;
+              `;
+              webViewRef.current.injectJavaScript(script);
+            }
           }
         })();
       } else if (data.type === 'cacheTile') {
@@ -2661,6 +2770,24 @@ export default function MapScreen() {
 
   const startLocationPicker = () => {
     if (!isMounted.current) return;
+    
+    // Guest kullanıcı için limit kontrolü
+    if (isGuest && !canAddMoreAreas) {
+      Alert.alert(
+        'Kamp Alanı Limiti',
+        `Guest kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+        [
+          { text: 'Tamam', style: 'cancel' },
+          { 
+            text: 'Premium Ol!', 
+            onPress: () => router.push('/premium' as any),
+            style: 'default'
+          }
+        ]
+      );
+      return;
+    }
+    
     setSelectedLocation(null);
     setIsLocationPickerMode(true);
   };
@@ -2672,7 +2799,26 @@ export default function MapScreen() {
   };
 
   const addCampingAreaAtCurrentLocation = () => {
-    if (location && isMounted.current) {
+    if (!isMounted.current) return;
+    
+    // Guest kullanıcı için limit kontrolü
+    if (isGuest && !canAddMoreAreas) {
+      Alert.alert(
+        'Kamp Alanı Limiti',
+        `Guest kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+        [
+          { text: 'Tamam', style: 'cancel' },
+          { 
+            text: 'Premium Ol!', 
+            onPress: () => router.push('/premium' as any),
+            style: 'default'
+          }
+        ]
+      );
+      return;
+    }
+    
+    if (location) {
       setSelectedLocation({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude
@@ -2943,7 +3089,14 @@ export default function MapScreen() {
                 Alert.alert(
                   'Offline Özellik Gerekli',
                   'Liste görünümü için Premium aboneliğe ihtiyacınız var.',
-                  [{ text: 'Tamam' }]
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    { 
+                      text: 'Premium Ol', 
+                      onPress: () => router.push('/premium' as any),
+                      style: 'default'
+                    }
+                  ]
                 );
                 return;
               }
@@ -2969,7 +3122,14 @@ export default function MapScreen() {
                 Alert.alert(
                   'Offline Özellik Gerekli',
                   'Arama özelliği için Premium aboneliğe ihtiyacınız var.',
-                  [{ text: 'Tamam' }]
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    { 
+                      text: 'Premium Ol', 
+                      onPress: () => router.push('/premium' as any),
+                      style: 'default'
+                    }
+                  ]
                 );
                 return;
               }
@@ -3000,7 +3160,14 @@ export default function MapScreen() {
                 Alert.alert(
                   'Offline Özellik Gerekli',
                   'Filtre özelliği için Premium aboneliğe ihtiyacınız var.',
-                  [{ text: 'Tamam' }]
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    { 
+                      text: 'Premium Ol', 
+                      onPress: () => router.push('/premium' as any),
+                      style: 'default'
+                    }
+                  ]
                 );
                 return;
               }
@@ -3116,18 +3283,50 @@ export default function MapScreen() {
       )}
       {/* Offline Mode Banner */}
       {!isConnected && (
-        <View style={styles.offlineBanner}>
+        <View style={[styles.offlineBanner, !user?.offline_enabled && { paddingVertical: 12 }]}>
           <Text style={styles.offlineBannerText}>
             {user?.offline_enabled 
               ? '📵 Offline Mod - Cache\'lenmiş harita gösteriliyor' 
               : <>📵 Offline mod için <Text style={{fontWeight: 'bold', fontStyle: 'italic'}}>Premium</Text> aboneliği gerekmektedir.</>}
           </Text>
+          {!user?.offline_enabled && (
+            <TouchableOpacity
+              style={styles.premiumButton}
+              onPress={() => router.push('/premium' as any)}
+            >
+              <Text style={styles.premiumButtonText}>Premium Ol!</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
       {/* Location Picker Mode Banner */}
       {isLocationPickerMode && (
         <View style={styles.locationPickerBanner} pointerEvents={isBusy ? 'none' : 'auto'}>
-          <Text style={styles.locationPickerText}>📍 Haritada konum seçmek için tıklayın</Text>
+          <View style={{ flex: 1, flexDirection: 'column' }}>
+            <Text style={styles.locationPickerText}>📍 Haritada konum seçmek için tıklayın</Text>
+            {isGuest && (
+              <Text style={{ fontSize: 12, color: remainingAreas <= 3 ? '#dc2626' : '#6b7280', marginTop: 6 }}>
+                Kalan kamp alanı hakkı: {remainingAreas}/{GUEST_LIMIT}
+              </Text>
+            )}
+          </View>
+          {isGuest && (
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#059669',
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 6,
+                marginRight: 8,
+              }}
+              onPress={() => {
+                cancelLocationPicker();
+                router.push('/premium' as any);
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Premium Ol!</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity 
             style={styles.cancelLocationPicker}
             onPress={cancelLocationPicker}
@@ -3232,7 +3431,7 @@ export default function MapScreen() {
             />
             {/* BLUR OVERLAY: Premium değilse ve offline ise harita üstüne blur ve dokunmatik engel */}
             {(!user?.offline_enabled && !isConnected) && (
-              <BlurOverlay visible />
+              <BlurOverlay visible onPremiumPress={() => router.push('/premium' as any)} />
             )}
             {/* Harita kaydırıldığında çıkan buton */}
             {showMapMoveButton && mapCenter && !isLocationPickerMode && !showMapPopup && (
@@ -3252,7 +3451,14 @@ export default function MapScreen() {
                       Alert.alert(
                         'Offline Özellik Gerekli',
                         'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
-                        [{ text: 'Tamam' }]
+                        [
+                          { text: 'İptal', style: 'cancel' },
+                          { 
+                            text: 'Premium Ol', 
+                            onPress: () => router.push('/premium' as any),
+                            style: 'default'
+                          }
+                        ]
                       );
                       return;
                     }
@@ -3374,6 +3580,10 @@ export default function MapScreen() {
           }
         }}
         initialLocation={selectedLocation ?? undefined}
+        user={user}
+        isGuest={isGuest}
+        remainingAreas={remainingAreas}
+        guestLimit={GUEST_LIMIT}
         onSuccess={async () => {
           // refreshData ile birlikte local olarak da ekle
           await refreshData();
@@ -3846,7 +4056,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#92400e',
     fontWeight: '600',
-    flex: 1,
   },
   cancelLocationPicker: {
     paddingHorizontal: 12,
@@ -3887,12 +4096,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 99,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   offlineBannerText: {
     fontSize: 13,
     color: '#92400e',
     fontWeight: '600',
     textAlign: 'center',
+  },
+  premiumButton: {
+    backgroundColor: '#059669',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginLeft: 8,
+  },
+  premiumButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   debugText: {
     fontSize: 12,

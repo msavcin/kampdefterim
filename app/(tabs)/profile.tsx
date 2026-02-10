@@ -1000,6 +1000,75 @@ export default function ProfileScreen(props: any) {
           ) : null}
   </View>
 
+  {/* Premium Feature Card - Premium olmayan kullanıcılar için */}
+  {!user?.offline_enabled && (
+    <TouchableOpacity 
+      style={{
+        marginHorizontal: 16,
+        marginTop: 16,
+        backgroundColor: '#f0fdf4',
+        borderRadius: 16,
+        padding: 20,
+        borderWidth: 2,
+        borderColor: '#059669',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+      }}
+      onPress={() => router.push('/premium' as any)}
+      activeOpacity={0.8}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+        <View style={{
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          backgroundColor: '#FEF3C7',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginRight: 12,
+        }}>
+          <Text style={{ fontSize: 24 }}>⭐</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#059669', marginBottom: 2 }}>
+            Premium'a Yükseltin
+          </Text>
+          <Text style={{ fontSize: 13, color: '#6b7280' }}>
+            Tüm özelliklerin kilidini açın
+          </Text>
+        </View>
+      </View>
+      <View style={{ gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ fontSize: 14, color: '#059669', marginRight: 6 }}>✓</Text>
+          <Text style={{ fontSize: 13, color: '#374151' }}>Offline harita erişimi</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ fontSize: 14, color: '#059669', marginRight: 6 }}>✓</Text>
+          <Text style={{ fontSize: 13, color: '#374151' }}>Gelişmiş arama ve filtreleme</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ fontSize: 14, color: '#059669', marginRight: 6 }}>✓</Text>
+          <Text style={{ fontSize: 13, color: '#374151' }}>Tüm premium özelliklere erişim</Text>
+        </View>
+      </View>
+      <View style={{
+        marginTop: 16,
+        backgroundColor: '#059669',
+        paddingVertical: 10,
+        borderRadius: 12,
+        alignItems: 'center',
+      }}>
+        <Text style={{ color: '#fff', fontSize: 15, fontWeight: 'bold' }}>
+          Premium Ol - ₺49/ay'dan başlayan fiyatlarla
+        </Text>
+      </View>
+    </TouchableOpacity>
+  )}
+
   {/* Guest ise diğer alanları gösterme */}
   {isGuest ? null : (
   <>
@@ -1640,7 +1709,7 @@ export default function ProfileScreen(props: any) {
           {/* Offline Bölge İndirme (Sadece offline_enabled kullanıcılar için) */}
           {user && user.offline_enabled && (
             <View style={{ marginTop: 24, marginBottom: 16 }}>
-              <OfflineRegionSelector />
+              <OfflineRegionSelector user={user} />
             </View>
           )}
 

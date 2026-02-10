@@ -27,6 +27,7 @@ export async function syncPendingChanges(currentUserId?: string | number, onProg
 
 async function _syncPendingChanges(currentUserId?: string | number, onProgress?: (current: number, total: number) => void) {
   console.log('[syncPendingChanges] başlatıldı');
+  
   // DEBUG: Localde adı 'B7' geçen kamp alanı var mı?
   try {
     const allAreas = await getDatabase().getAllCampingAreas();

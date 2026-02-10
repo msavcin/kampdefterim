@@ -19,12 +19,25 @@ interface CachedRegion {
   cachedAt: number;
 }
 
+interface OfflineRegionSelectorProps {
+  user?: {
+    offline_radius_km?: number;
+  } | null;
+}
+
 const CACHED_REGIONS_KEY = 'offline_cached_regions';
 
-export default function OfflineRegionSelector() {
+export default function OfflineRegionSelector({ user }: OfflineRegionSelectorProps) {
+  // offline_radius_km değerine göre yarıçap seçenekleri ve varsayılan değer
+  const maxRadius = user?.offline_radius_km || 20;
+  const radiusOptions = maxRadius === 50 
+    ? [10, 20, 30, 50] 
+    : [5, 10, 15, 20];
+  const defaultRadius = maxRadius === 50 ? 20 : 10;
+
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [selectedRadius, setSelectedRadius] = useState(20);
+  const [selectedRadius, setSelectedRadius] = useState(defaultRadius);
   const [cachedRegions, setCachedRegions] = useState<CachedRegion[]>([]);
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [currentLocationName, setCurrentLocationName] = useState<string | null>(null);
@@ -306,7 +319,7 @@ export default function OfflineRegionSelector() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Bölge Yarıçapı</Text>
         <View style={styles.radiusGrid}>
-          {[10, 20, 50, 100].map(radius => (
+          {radiusOptions.map(radius => (
             <TouchableOpacity
               key={radius}
               onPress={() => setSelectedRadius(radius)}
@@ -391,7 +404,7 @@ export default function OfflineRegionSelector() {
                 </View>
               </View>
               <TouchableOpacity
-                onPress={() => handleDownloadFavorite(favorite, 10)}
+                onPress={() => handleDownloadFavorite(favorite, defaultRadius)}
                 disabled={downloadingFavoriteId === favorite.id}
                 style={[
                   styles.favoriteDownloadButton,

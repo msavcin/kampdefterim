@@ -53,11 +53,11 @@ import { API_URL } from './config';
 import { apiFetch } from './apiFetch';
 
 // --- Kullanıcı ---
-export async function registerUser({ name, username, email, password, communityId, trial_user, agreement_accepted }: { name: string, username: string, email: string, password: string, communityId?: number, trial_user?: boolean, agreement_accepted?: boolean }) {
+export async function registerUser({ name, username, email, password, communityId, trial_user, offline_enabled, agreement_accepted }: { name: string, username: string, email: string, password: string, communityId?: number, trial_user?: boolean, offline_enabled?: boolean, agreement_accepted?: boolean }) {
   const res = await fetch(`${API_URL}/users/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, username, email, password, community_id: communityId, trial_user, agreement_accepted }),
+    body: JSON.stringify({ name, username, email, password, community_id: communityId, trial_user, offline_enabled, agreement_accepted }),
   });
   const data = await res.json();
   if (data.token) {

@@ -550,6 +550,11 @@ export class DatabaseManager {
         
         return insertCount;
       } catch (error) {
+        // Network hatası durumunda sessizce pas geç
+        if (error instanceof Error && (error.message.includes('Network') || error.message.includes('fetch failed'))) {
+          console.warn('[fetchAndStoreAnnouncementsFromAPI] ⚠️ Network hatası (offline olabilir), API senkronizasyonu atlandı.');
+          return 0; // Offline mod, hata vermeden 0 döndür
+        }
         console.error('API duyuru veri çekme/ekleme hatası:', error);
         throw error;
       }
@@ -1309,6 +1314,11 @@ export class DatabaseManager {
   // ...existing code...
         return insertCount;
       } catch (error) {
+        // Network hatası durumunda sessizce pas geç
+        if (error instanceof Error && (error.message.includes('Network') || error.message.includes('fetch failed'))) {
+          console.warn('[fetchAndStoreCampingAreasFromAPI] ⚠️ Network hatası (offline olabilir), API senkronizasyonu atlandı.');
+          return 0; // Offline mod, hata vermeden 0 döndür
+        }
         console.error('API veri çekme/ekleme hatası:', error);
         throw error;
       }

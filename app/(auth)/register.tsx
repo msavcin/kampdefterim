@@ -146,7 +146,7 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      const result = await registerUser({ name, username, email, password, communityId, trial_user: true, agreement_accepted: agreementChecked });
+      const result = await registerUser({ name, username, email, password, communityId, trial_user: true, offline_enabled: true, agreement_accepted: agreementChecked });
       if (result && result.error) {
         Alert.alert('Hata', result.error);
       } else {

@@ -264,7 +264,30 @@ export default function AnnouncementsScreen() {
     try {
       userData = await getMe();
       setUser(userData);
-    } catch {}
+      // Kullanıcı bilgilerini cache'le (offline kullanım için)
+      if (userData) {
+        await SecureStore.setItemAsync('cachedUserData', JSON.stringify({
+          community_id: userData.community_id,
+          role: userData.role,
+          offline_enabled: userData.offline_enabled,
+          id: userData.id
+        }));
+        console.log('[ANNOUNCEMENTS_REFRESH] Kullanıcı bilgileri cache\'lendi');
+      }
+    } catch (err) {
+      console.warn('[ANNOUNCEMENTS_REFRESH] getMe() hatası, cache\'den okuyalım:', err?.message);
+      // Offline modda cache'den oku
+      try {
+        const cachedData = await SecureStore.getItemAsync('cachedUserData');
+        if (cachedData) {
+          userData = JSON.parse(cachedData);
+          setUser(userData);
+          console.log('[ANNOUNCEMENTS_REFRESH] Cache\'den kullanıcı bilgileri alındı:', userData);
+        }
+      } catch (cacheErr) {
+        console.warn('[ANNOUNCEMENTS_REFRESH] Cache okuma hatası:', cacheErr);
+      }
+    }
     
     // matchedValilikId'yi al
     let matchedValilikIdLocal: number | null = null;
@@ -273,24 +296,72 @@ export default function AnnouncementsScreen() {
       if (storedValilikId) {
         matchedValilikIdLocal = parseInt(storedValilikId);
       }
-    } catch {}
+      console.log('[ANNOUNCEMENTS_REFRESH] matchedValilikId cache:', matchedValilikIdLocal);
+    } catch (e) {
+      console.warn('[ANNOUNCEMENTS_REFRESH] matchedValilikId okuma hatası:', e);
+    }
     
     // Filtreleme: Superadmin dışındaki kullanıcılar için
     let filtered = localAnnouncements;
-    if (userData?.role !== 'superadmin' && userData) {
+    const isSuperadmin = userData?.role === 'superadmin';
+    
+    console.log('[ANNOUNCEMENTS_REFRESH] Filtreleme öncesi:', {
+      totalAnnouncements: localAnnouncements.length,
+      isSuperadmin,
+      isConnected,
+      isPremium: userData?.offline_enabled,
+      matchedValilikId: matchedValilikIdLocal,
+      userRole: userData?.role,
+      communityId: userData?.community_id
+    });
+    
+    if (!isSuperadmin) {
       filtered = localAnnouncements.filter((a: any) => {
         // Genel duyurular (community_id === 0)
         if (a.community_id === 0) {
-          // Eğer valilik_id eşleştirmesi varsa filtrele
-          if (matchedValilikIdLocal && a.valilik_id) {
-            return String(a.valilik_id) === String(matchedValilikIdLocal);
-          }
-          // Eğer offline modda ve premium değilse, valilik_id yoksa genel duyuru gösterme
-          if (!isConnected && !(userData?.offline_enabled)) {
+          // Offline modda ve matchedValilikId yoksa, hiçbir genel duyuru gösterme
+          if (!isConnected && !matchedValilikIdLocal) {
+            if (__DEV__) {
+              console.log('[FILTER] Genel duyuru filtrelendi - offline ve matchedValilikId yok:', a.id);
+            }
             return false;
           }
-          // Valilik_id yoksa ve online ise tüm genel duyuruları göster
-          return true;
+          
+          // Duyurunun valilik_id'si VARSA (bölgesel duyuru)
+          if (a.valilik_id) {
+            // matchedValilikId varsa eşleşmeyi kontrol et
+            if (matchedValilikIdLocal) {
+              const matches = String(a.valilik_id) === String(matchedValilikIdLocal);
+              if (__DEV__ && !matches) {
+                console.log('[FILTER] Duyuru filtrelendi - valilik eşleşmedi:', {
+                  announcementId: a.id,
+                  announcementValilikId: a.valilik_id,
+                  expectedValilikId: matchedValilikIdLocal
+                });
+              }
+              return matches;
+            }
+            // matchedValilikId yoksa bu bölgesel duyuruyu gösterme
+            if (__DEV__) {
+              console.log('[FILTER] Duyuru filtrelendi - matchedValilikId yok:', {
+                announcementId: a.id,
+                announcementValilikId: a.valilik_id
+              });
+            }
+            return false;
+          }
+          
+          // Duyurunun valilik_id'si YOKSA (genel geçer duyuru)
+          // Online modda veya Premium kullanıcı için göster
+          if (isConnected || userData?.offline_enabled) {
+            return true;
+          }
+          
+          // Offline ve Premium değilse genel duyuruları gösterme
+          if (__DEV__) {
+            console.log('[FILTER] Genel duyuru filtrelendi - offline ve premium değil:', a.id);
+          }
+          return false;
         }
         // Topluluk duyuruları
         if (userData?.community_id && String(a.community_id) === String(userData.community_id)) return true;

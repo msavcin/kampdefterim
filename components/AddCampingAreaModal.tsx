@@ -28,6 +28,10 @@ interface AddCampingAreaModalProps {
   onClose: () => void;
   initialLocation?: { latitude: number; longitude: number };
   onSuccess?: () => void;
+  user?: any;
+  isGuest?: boolean;
+  remainingAreas?: number;
+  guestLimit?: number;
 }
 
 
@@ -322,7 +326,7 @@ const styles = StyleSheet.create({
   },
 });
 
-export default function AddCampingAreaModal({ visible, onClose, initialLocation, onSuccess }: AddCampingAreaModalProps) {
+export default function AddCampingAreaModal({ visible, onClose, initialLocation, onSuccess, user, isGuest = false, remainingAreas = Infinity, guestLimit = 10 }: AddCampingAreaModalProps) {
   const isConnected = useNetworkStatus();
   const [userCommunityId, setUserCommunityId] = useState<number | undefined>(undefined);
   useEffect(() => {
@@ -526,6 +530,29 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
 
   const handleSubmit = async () => {
     console.log('[AddCampingArea] handleSubmit başladı');
+    
+    // Guest kullanıcı limit kontrolü
+    if (isGuest && remainingAreas !== Infinity && remainingAreas <= 0) {
+      Alert.alert(
+        'Kamp Alanı Limiti',
+        `Guest kullanıcılar en fazla ${guestLimit} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+        [
+          { text: 'Tamam', style: 'cancel' },
+          { 
+            text: 'Premium Ol!', 
+            onPress: () => {
+              onClose();
+              // Premium sayfasına yönlendir (router import edilmeli)
+              const { router } = require('expo-router');
+              router.push('/premium');
+            },
+            style: 'default'
+          }
+        ]
+      );
+      return;
+    }
+    
     // DEBUG: localUser ve userId logları kaldırıldı
     // Kullanıcı bilgisini çek
     let userId: number | undefined = undefined;
@@ -830,7 +857,14 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Yeni Kamp Alanı Ekle</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle}>Yeni Kamp Alanı Ekle</Text>
+            {isGuest && remainingAreas !== Infinity && (
+              <Text style={{ fontSize: 12, color: remainingAreas <= 3 ? '#dc2626' : '#6b7280', marginTop: 2 }}>
+                Kalan hak: {remainingAreas}/{guestLimit}
+              </Text>
+            )}
+          </View>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
             <X size={24} color="#6b7280" />
           </TouchableOpacity>
@@ -1252,6 +1286,48 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
           </View>
         </ScrollView>
         <View style={styles.footer}>
+          {isGuest && remainingAreas !== Infinity && (
+            <View style={{ 
+              backgroundColor: remainingAreas <= 3 ? '#fef2f2' : '#f0fdf4', 
+              padding: 12, 
+              borderRadius: 8, 
+              marginBottom: 12,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ 
+                  fontSize: 13, 
+                  color: remainingAreas <= 3 ? '#dc2626' : '#059669',
+                  fontWeight: '600' 
+                }}>
+                  {remainingAreas > 0 
+                    ? `${remainingAreas} kamp alanı daha ekleyebilirsiniz` 
+                    : 'Kamp alanı ekleme limitine ulaştınız'}
+                </Text>
+                <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                  Premium ile sınırsız kamp alanı oluşturun
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#059669',
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                  marginLeft: 8,
+                }}
+                onPress={() => {
+                  onClose();
+                  const { router } = require('expo-router');
+                  router.push('/premium');
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Premium</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <TouchableOpacity
             style={[styles.submitButton, loading && styles.submitButtonDisabled]}
             onPress={handleSubmit}

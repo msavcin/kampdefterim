@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { getMe } from '../../lib/userCommunityApi';
 import { checkAndHandleAppVersion } from '../../lib/appVersion';
 import { getDatabase } from '../../lib/database';
-import { Map, Heart, User, SquareCheck as CheckSquare, Bell } from 'lucide-react-native';
+import { Map, Heart, User, SquareCheck as CheckSquare, Bell, Crown } from 'lucide-react-native';
 import { View, TouchableOpacity, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
@@ -14,6 +14,7 @@ export default function TabLayout() {
   const [loading, setLoading] = useState(true);
   const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(true); // Default true, false ise duyurular disabled
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   useEffect(() => {
     (async () => {
@@ -138,13 +139,47 @@ export default function TabLayout() {
               </Text>
             ),
             tabBarIcon: ({ color, size }) => (
-              <tab.icon color={tab.disabled ? '#000000ff' : color} size={size} style={{ opacity: tab.disabled ? 0.5 : 1 }} />
+              <View style={{ position: 'relative' }}>
+                <tab.icon color={tab.disabled ? '#000000ff' : color} size={size} style={{ opacity: tab.disabled ? 0.5 : 1 }} />
+                {/* Guest kullanıcı için disabled tab'larda Premium badge */}
+                {guestDisabled && tab.disabled && tab.name !== 'index' && tab.name !== 'favorites' && tab.name !== 'profile' && (
+                  <TouchableOpacity
+                    onPress={() => router.push('/premium' as any)}
+                    style={{
+                      position: 'absolute',
+                      top: -4,
+                      right: -8,
+                      backgroundColor: '#059669',
+                      borderRadius: 10,
+                      width: 20,
+                      height: 20,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1.5,
+                      borderColor: '#fff',
+                    }}
+                  >
+                    <Crown size={12} color="#fff" fill="#fff" />
+                  </TouchableOpacity>
+                )}
+              </View>
             ),
             tabBarButton: ({ children, onPress, accessibilityState }) => (
               tab.disabled ? (
-                <View style={{ flex: 1, opacity: 0.9, alignItems: 'center', justifyContent: 'center' }}>
-                  {children}
-                </View>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    // Guest kullanıcı için disabled tab'lara tıklandığında premium sayfasına yönlendir
+                    if (guestDisabled && (tab.name === 'announcements' || tab.name === 'checklist')) {
+                      router.push('/premium' as any);
+                    }
+                  }}
+                  style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <View style={{ flex: 1, opacity: 0.9, alignItems: 'center', justifyContent: 'center' }}>
+                    {children}
+                  </View>
+                </TouchableOpacity>
               ) : (
                 <TouchableOpacity
                   activeOpacity={0.8}
