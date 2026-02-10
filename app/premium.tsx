@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,13 @@ import {
   Dimensions,
   Alert,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Check, Star, MapPin, Search, Filter, List, Zap } from 'lucide-react-native';
+import { ArrowLeft, Check, Star, MapPin, Search, Filter, List, Zap, RefreshCw } from 'lucide-react-native';
+import * as IAPManager from '@/lib/iapManager';
+import type { Subscription } from '@/lib/iapManager';
 
 const { width } = Dimensions.get('window');
 
@@ -24,6 +27,31 @@ interface PremiumFeature {
 export default function PremiumScreen() {
   const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly');
+  const [loading, setLoading] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [iapReady, setIapReady] = useState(false);
+
+  useEffect(() => {
+    initializeIAP();
+    return () => {
+      IAPManager.endIAP();
+    };
+  }, []);
+
+  const initializeIAP = async () => {
+    try {
+      const ready = await IAPManager.initIAP();
+      setIapReady(ready);
+      
+      if (ready) {
+        const subs = await IAPManager.getSubscriptions();
+        setSubscriptions(subs);
+      }
+    } catch (error) {
+      console.error('[Premium] IAP init error:', error);
+    }
+  };
 
   const premiumFeatures: PremiumFeature[] = [
     {
@@ -58,22 +86,51 @@ export default function PremiumScreen() {
     },
   ];
 
-  const handleSubscribe = (plan: 'monthly' | 'yearly') => {
-    // TODO: Google Play In-App Purchase entegrasyonu
-    Alert.alert(
-      'Abonelik',
-      `${plan === 'monthly' ? 'Aylık' : 'Yıllık'} abonelik için Google Play Store'a yönlendirileceksiniz.`,
-      [
-        { text: 'İptal', style: 'cancel' },
-        {
-          text: 'Devam Et',
-          onPress: () => {
-            // In-App Purchase işlemi burada yapılacak
-            console.log(`Subscribing to ${plan} plan`);
-          },
-        },
-      ]
-    );
+  const handleSubscribe = async (plan: 'monthly' | 'yearly') => {
+    if (!iapReady) {
+      Alert.alert(
+        'IAP Paketi Gerekli', 
+        'Satın alma özelliği için react-native-iap paketi yüklenmelidir.\n\nKomut: npm install react-native-iap\n\nSonra uygulamayı yeniden başlatın.',
+        [{ text: 'Tamam' }]
+      );
+      return;
+    }
+    setLoading(true);
+    try {
+      await IAPManager.purchaseSubscription(plan);
+    } catch (error: any) {
+      console.error('[Premium] Purchase error:', error);
+      if (error.code !== 'E_USER_CANCELLED') {
+        Alert.alert('Hata', 'Satın alma işlemi başarısız oldu.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!iapReady) {
+      Alert.alert('Hata', 'Satın alma sistemi henüz hazır değil.');
+      return;
+    }
+
+    setRestoring(true);
+    try {
+      await IAPManager.restorePurchases();
+    } catch (error) {
+      console.error('[Premium] Restore error:', error);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const getSubscriptionPrice = (plan: 'monthly' | 'yearly'): string => {
+    const sub = subscriptions.find(s => s.productId.includes(plan));
+    if (sub) {
+      return IAPManager.formatPrice(sub);
+    }
+    // Fallback fiyatlar
+    return plan === 'yearly' ? '₺299' : '₺49';
   };
 
   return (
@@ -136,7 +193,7 @@ export default function PremiumScreen() {
                 <Text style={styles.pricingDescription}>12 ay premium erişim</Text>
               </View>
               <View style={styles.pricingAmount}>
-                <Text style={styles.pricingPrice}>₺299</Text>
+                <Text style={styles.pricingPrice}>{getSubscriptionPrice('yearly')}</Text>
                 <Text style={styles.pricingPeriod}>/yıl</Text>
               </View>
             </View>
@@ -159,7 +216,7 @@ export default function PremiumScreen() {
                 <Text style={styles.pricingDescription}>1 ay premium erişim</Text>
               </View>
               <View style={styles.pricingAmount}>
-                <Text style={styles.pricingPrice}>₺49</Text>
+                <Text style={styles.pricingPrice}>{getSubscriptionPrice('monthly')}</Text>
                 <Text style={styles.pricingPeriod}>/ay</Text>
               </View>
             </View>
@@ -168,17 +225,38 @@ export default function PremiumScreen() {
 
         {/* Subscribe Button */}
         <TouchableOpacity
-          style={styles.subscribeButton}
+          style={[styles.subscribeButton, (loading || !iapReady) && styles.subscribeButtonDisabled]}
           onPress={() => handleSubscribe(selectedPlan)}
+          disabled={loading || !iapReady}
         >
-          <Text style={styles.subscribeButtonText}>
-            {selectedPlan === 'yearly' ? 'Yıllık Abonelik Başlat' : 'Aylık Abonelik Başlat'}
-          </Text>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.subscribeButtonText}>
+              {selectedPlan === 'yearly' ? 'Yıllık Abonelik Başlat' : 'Aylık Abonelik Başlat'}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        {/* Restore Button */}
+        <TouchableOpacity
+          style={styles.restoreButton}
+          onPress={handleRestore}
+          disabled={restoring || !iapReady}
+        >
+          {restoring ? (
+            <ActivityIndicator size="small" color="#059669" />
+          ) : (
+            <>
+              <RefreshCw size={16} color="#059669" />
+              <Text style={styles.restoreButtonText}>Satın Alımları Geri Yükle</Text>
+            </>
+          )}
         </TouchableOpacity>
 
         {/* Terms */}
         <Text style={styles.termsText}>
-          Abonelik otomatik olarak yenilenir. İstediğiniz zaman iptal edebilirsiniz.
+          Abonelik otomatik olarak yenilenir. İstediğiniz zaman {Platform.OS === 'ios' ? 'App Store' : 'Google Play'} ayarlarından iptal edebilirsiniz.
         </Text>
 
         <View style={{ height: 40 }} />
@@ -372,10 +450,28 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  subscribeButtonDisabled: {
+    backgroundColor: '#9ca3af',
+    opacity: 0.7,
+  },
   subscribeButtonText: {
     color: '#fff',
     fontSize: 17,
     fontWeight: 'bold',
+  },
+  restoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 20,
+    marginTop: 16,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  restoreButtonText: {
+    color: '#059669',
+    fontSize: 15,
+    fontWeight: '600',
   },
   termsText: {
     fontSize: 12,
