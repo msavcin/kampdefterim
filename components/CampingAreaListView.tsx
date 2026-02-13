@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { MapPin, Navigation, Info } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import type { CampingArea } from '@/lib/database';
 import { getCampingTypeLabel } from '@/lib/categories';
 
@@ -26,6 +27,8 @@ interface CampingAreaListViewProps {
   favorites: Set<string | number>;
   onToggleFavorite: (area: CampingArea) => void;
   disabled?: boolean;
+  isGuest?: boolean;
+  isConnected?: boolean;
 }
 
 const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
@@ -36,7 +39,10 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   favorites,
   onToggleFavorite,
   disabled = false,
+  isGuest = false,
+  isConnected = true,
 }) => {
+  const router = useRouter();
   const [loadingImages, setLoadingImages] = useState<Set<string | number>>(new Set());
 
   const getTypeLabel = (type: string) => {
@@ -216,6 +222,21 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
 
   return (
     <View style={styles.container}>
+      {/* Guest User Premium Banner - Hide when offline */}
+      {isGuest && isConnected && (
+        <View style={styles.guestBanner}>
+          <Text style={styles.guestBannerText}>
+            Tüm kamp alanlarını görebilmek için Premium aboneliği gerekmektedir.
+          </Text>
+          <TouchableOpacity
+            style={styles.premiumButton}
+            onPress={() => router.push('/premium' as any)}
+          >
+            <Text style={styles.premiumButtonText}>Premium Ol!</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
         data={campingAreas}
         renderItem={renderItem}
@@ -241,6 +262,37 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8fafc',
+  },
+  guestBanner: {
+    backgroundColor: '#fef3c7',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f59e0b',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  guestBannerText: {
+    fontSize: 13,
+    color: '#92400e',
+    fontWeight: '600',
+    textAlign: 'center',
+    flex: 1,
+  },
+  premiumButton: {
+    backgroundColor: '#059669',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginLeft: 8,
+  },
+  premiumButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   listContent: {
     padding: 12,

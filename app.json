@@ -20,7 +20,8 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Harita ve kamp alanlarını görmek için konum izni gereklidir.",
         "NSPhotoLibraryUsageDescription": "Yedek dosyalarını kaydetmek için izin gerekli.",
-        "NSCameraUsageDescription": "Kamp alanı fotoğrafları eklemek için kamera izni gerekli."
+        "NSCameraUsageDescription": "Kamp alanı fotoğrafları eklemek için kamera izni gerekli.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

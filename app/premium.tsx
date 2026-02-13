@@ -31,9 +31,15 @@ export default function PremiumScreen() {
   const [restoring, setRestoring] = useState(false);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [iapReady, setIapReady] = useState(false);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<{
+    isActive: boolean;
+    offlineRadiusKm?: number;
+    expiresAt?: string;
+  } | null>(null);
 
   useEffect(() => {
     initializeIAP();
+    checkCurrentSubscription();
     return () => {
       IAPManager.endIAP();
     };
@@ -50,6 +56,21 @@ export default function PremiumScreen() {
       }
     } catch (error) {
       console.error('[Premium] IAP init error:', error);
+    }
+  };
+
+  const checkCurrentSubscription = async () => {
+    try {
+      const status = await IAPManager.checkSubscriptionStatus();
+      if (status) {
+        setSubscriptionStatus({
+          isActive: status.isActive,
+          offlineRadiusKm: status.offlineRadiusKm,
+          expiresAt: status.expiresAt,
+        });
+      }
+    } catch (error) {
+      console.error('[Premium] Status check error:', error);
     }
   };
 
@@ -98,6 +119,8 @@ export default function PremiumScreen() {
     setLoading(true);
     try {
       await IAPManager.purchaseSubscription(plan);
+      // Satın alma başarılı oldu, status'u yenile
+      await checkCurrentSubscription();
     } catch (error: any) {
       console.error('[Premium] Purchase error:', error);
       if (error.code !== 'E_USER_CANCELLED') {
@@ -117,6 +140,8 @@ export default function PremiumScreen() {
     setRestoring(true);
     try {
       await IAPManager.restorePurchases();
+      // Restore başarılı oldu, status'u yenile
+      await checkCurrentSubscription();
     } catch (error) {
       console.error('[Premium] Restore error:', error);
     } finally {
@@ -155,6 +180,26 @@ export default function PremiumScreen() {
             Offline mod ve tüm gelişmiş özelliklerin kilidini açın
           </Text>
         </View>
+
+        {/* Active Subscription Banner */}
+        {subscriptionStatus?.isActive && (
+          <View style={styles.activeSubscriptionBanner}>
+            <View style={styles.activeBannerIcon}>
+              <Check size={20} color="#fff" />
+            </View>
+            <View style={styles.activeBannerContent}>
+              <Text style={styles.activeBannerTitle}>✨ Premium Aktif</Text>
+              <Text style={styles.activeBannerText}>
+                Offline radius: {subscriptionStatus.offlineRadiusKm} km
+              </Text>
+              {subscriptionStatus.expiresAt && (
+                <Text style={styles.activeBannerDate}>
+                  Yenileme: {new Date(subscriptionStatus.expiresAt).toLocaleDateString('tr-TR')}
+                </Text>
+              )}
+            </View>
+          </View>
+        )}
 
         {/* Features */}
         <View style={styles.featuresContainer}>
@@ -323,6 +368,49 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
     lineHeight: 24,
+  },
+  activeSubscriptionBanner: {
+    backgroundColor: '#059669',
+    marginHorizontal: 20,
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  activeBannerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  activeBannerContent: {
+    flex: 1,
+  },
+  activeBannerTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  activeBannerText: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.9,
+  },
+  activeBannerDate: {
+    fontSize: 12,
+    color: '#fff',
+    opacity: 0.8,
+    marginTop: 2,
   },
   featuresContainer: {
     backgroundColor: '#fff',

@@ -3374,6 +3374,7 @@ export default function MapScreen() {
             }}
             user={user}
             isGuest={isGuest}
+            isConnected={isConnected}
           />
           <TouchableOpacity onPress={() => {
             if (isMounted.current) setViewMode('map');
@@ -3566,6 +3567,8 @@ export default function MapScreen() {
             favorites={favorites}
             onToggleFavorite={handleToggleFavorite}
             disabled={syncProgress.isLoading}
+            isGuest={isGuest}
+            isConnected={isConnected}
           />
         </View>
       )}

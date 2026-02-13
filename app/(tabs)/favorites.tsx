@@ -8,8 +8,10 @@ import CampingAreaDetailModal from '../../components/CampingAreaDetailModal';
 import EditCampingAreaModal from '../../components/EditCampingAreaModal';
 import CampingAreaListView from '../../components/CampingAreaListView';
 import { getMe } from '../../lib/userCommunityApi';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 
 export default function FavoritesScreen() {
+  const isConnected = useNetworkStatus();
   const [user, setUser] = useState<any>(null);
   const [favorites, setFavorites] = useState<CampingArea[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +53,8 @@ export default function FavoritesScreen() {
   const loadFavorites = async () => {
     try {
       setLoading(true);
+      const me = await getMe();
+      setUser(me);
       const favoriteAreas = await getDatabase().getFavorites();
       setFavorites(favoriteAreas);
   const favoriteIdSet = new Set(favoriteAreas.map(area => (area as any).id));
@@ -160,6 +164,8 @@ export default function FavoritesScreen() {
           onNavigate={handleNavigate}
           favorites={favoriteIds}
           onToggleFavorite={handleToggleFavorite}
+          isGuest={user?.role === 'guest'}
+          isConnected={isConnected}
         />
       )}
       

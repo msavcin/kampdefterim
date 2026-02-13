@@ -150,7 +150,7 @@ async function verifyGooglePurchase(productId, purchaseToken) {
   try {
     const receipt = {
       data: {
-        packageName: 'com.kampdefterim.app', // Android package name
+        packageName: 'com.spondylus.boltexponativewind', // Android package name
         productId: productId,
         purchaseToken: purchaseToken,
       },

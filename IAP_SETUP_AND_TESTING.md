@@ -16,18 +16,20 @@ npm install react-native-iap@^12.15.6
 4. **Auto-Renewable Subscription** oluşturun:
 
 #### Ürün 1: Aylık Abonelik
-- **Product ID**: `com.kampdefterim.monthly`
+- **Product ID**: `com.spondylus.kampdefterim.monthly`
 - **Reference Name**: Premium Monthly Subscription
 - **Subscription Group**: Premium
 - **Price**: ₺49 (Tier 6)
 - **Subscription Duration**: 1 Month
+- **Bundle ID**: com.spondylus.kampdefterim
 
 #### Ürün 2: Yıllık Abonelik
-- **Product ID**: `com.kampdefterim.yearly`
+- **Product ID**: `com.spondylus.kampdefterim.yearly`
 - **Reference Name**: Premium Yearly Subscription
 - **Subscription Group**: Premium
 - **Price**: ₺299 (Tier 43)
 - **Subscription Duration**: 1 Year
+- **Bundle ID**: com.spondylus.kampdefterim
 
 ### 2. Xcode Projesinde Capability Ekle
 
@@ -81,22 +83,24 @@ Country: Turkey
 4. **Create subscription** butonuna tıklayın
 
 #### Ürün 1: Aylık Abonelik
-- **Product ID**: `com.kampdefterim.monthly`
+- **Product ID**: `com.spondylus.boltexponativewind.monthly`
 - **Name**: Premium Aylık
 - **Description**: Kampdefterim Premium - Aylık Abonelik
 - **Base plan**: 1 Month Auto-renewing
 - **Price**: ₺49.00 TRY
 - **Grace period**: 3 days
 - **Free trial**: 7 days (opsiyonel)
+- **Package Name**: com.spondylus.boltexponativewind
 
 #### Ürün 2: Yıllık Abonelik
-- **Product ID**: `com.kampdefterim.yearly`
+- **Product ID**: `com.spondylus.boltexponativewind.yearly`
 - **Name**: Premium Yıllık
 - **Description**: Kampdefterim Premium - Yıllık Abonelik
 - **Base plan**: 1 Year Auto-renewing
 - **Price**: ₺299.00 TRY
 - **Grace period**: 7 days
 - **Free trial**: 14 days (opsiyonel)
+- **Package Name**: com.spondylus.boltexponativewind
 
 ### 2. android/app/build.gradle Güncelle
 

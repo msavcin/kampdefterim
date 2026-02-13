@@ -6,6 +6,7 @@
 import { Platform, Alert } from 'react-native';
 import { getToken } from './auth';
 import { API_URL } from './config';
+import { SUBSCRIPTION_PRODUCTS, SUBSCRIPTION_ENDPOINTS } from '@/constants/subscriptionProducts';
 
 // Conditional import - paket yüklenmemişse mock types kullan
 let RNIap: any;
@@ -50,15 +51,11 @@ export interface Purchase {
 }
 
 // Product IDs - Store'larda tanımlanmalı (Backend ile aynı format)
+// iOS Bundle ID: com.spondylus.kampdefterim
+// Android Package Name: com.spondylus.boltexponativewind
 const PRODUCT_IDS = Platform.select({
-  ios: {
-    monthly: 'com.kampdefterim.monthly',
-    yearly: 'com.kampdefterim.yearly',
-  },
-  android: {
-    monthly: 'com.kampdefterim.monthly',
-    yearly: 'com.kampdefterim.yearly',
-  },
+  ios: SUBSCRIPTION_PRODUCTS.ios,
+  android: SUBSCRIPTION_PRODUCTS.android,
 }) || { monthly: '', yearly: '' };
 
 export type SubscriptionPlan = 'monthly' | 'yearly';
@@ -209,7 +206,7 @@ export async function purchaseSubscription(plan: SubscriptionPlan): Promise<void
 async function verifyPurchase(purchase: Purchase): Promise<void> {
   try {
     const token = await getToken();
-    const response = await fetch(`${API_URL}/node/subscriptions/verify`, {
+    const response = await fetch(`${API_URL}${SUBSCRIPTION_ENDPOINTS.verify}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -290,4 +287,39 @@ export function formatPrice(subscription: Subscription): string {
     return `₺${subscription.price}`;
   }
   return `${subscription.price} ${subscription.currency}`;
+}
+
+/**
+ * Backend'den subscription durumunu kontrol et
+ * Backend dokümanına göre: GET /node/subscriptions/status
+ */
+export async function checkSubscriptionStatus(): Promise<{
+  platform?: string;
+  productId?: string;
+  expiresAt?: string;
+  isActive: boolean;
+  offlineEnabled: boolean;
+  offlineRadiusKm: number;
+} | null> {
+  try {
+    const token = await getToken();
+    const response = await fetch(`${API_URL}${SUBSCRIPTION_ENDPOINTS.status}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.error('[IAP] Status check failed:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log('[IAP] Subscription status:', data.subscription);
+    return data.subscription;
+  } catch (error) {
+    console.error('[IAP] Check subscription status error:', error);
+    return null;
+  }
 }

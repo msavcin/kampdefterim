@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, TextInput, FlatList, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Search } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import type { CampingArea } from '../lib/database';
 import { getCampingTypeLabel } from '../lib/categories';
 import { filterCampingAreasByUser } from '../lib/accessControl';
@@ -11,6 +12,7 @@ interface Props {
   onShowOnMap?: (area: CampingArea) => void;
   user?: any;
   isGuest?: boolean;
+  isConnected?: boolean;
 }
 
 // Merkezi kamp türü yönetiminden label çek
@@ -18,7 +20,8 @@ function getTypeLabel(type: string): string {
   return getCampingTypeLabel(type);
 }
 
-export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnMap, user, isGuest }: Props) {
+export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnMap, user, isGuest, isConnected = true }: Props) {
+  const router = useRouter();
   const isMountedRef = useRef(true);
   const [searchText, setSearchText] = useState('');
   const [results, setResults] = useState<CampingArea[]>([]);
@@ -51,6 +54,21 @@ export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnM
 
   return (
     <View style={styles.container}>
+      {/* Guest User Premium Banner - Hide when offline */}
+      {isGuest && isConnected && (
+        <View style={styles.guestBanner}>
+          <Text style={styles.guestBannerText}>
+            Tüm kamp alanlarında arama yapabilmek için Premium aboneliğe sahip olmanız gerekmektedir.
+          </Text>
+          <TouchableOpacity
+            style={styles.premiumButton}
+            onPress={() => router.push('/premium' as any)}
+          >
+            <Text style={styles.premiumButtonText}>Premium Ol!</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.searchRow}>
         <Search size={22} color="#059669" style={{ marginRight: 8 }} />
         <TextInput
@@ -101,6 +119,39 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 2,
+  },
+  guestBanner: {
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  guestBannerText: {
+    fontSize: 13,
+    color: '#92400e',
+    fontWeight: '600',
+    textAlign: 'center',
+    flex: 1,
+  },
+  premiumButton: {
+    backgroundColor: '#059669',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginLeft: 8,
+  },
+  premiumButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   searchRow: {
     flexDirection: 'row',
