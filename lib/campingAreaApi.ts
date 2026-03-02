@@ -1,120 +1,121 @@
+// Spec: docs/API/campground_api_spec.md
+// Dizi/obje alanları için gerçek dizi/obje gönder (spec: "frontend için diziler tercih edin")
+
+/** Herhangi bir değeri gerçek diziye normalize eder */
+function toArray(value: any): any[] {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined || value === '') return [];
+  if (typeof value === 'string') {
+    try { const p = JSON.parse(value); return Array.isArray(p) ? p : []; } catch { return []; }
+  }
+  return [];
+}
+
+/** Herhangi bir değeri gerçek objeye normalize eder */
+function toObject(value: any): Record<string, any> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (value === null || value === undefined || value === '') return {};
+  if (typeof value === 'string') {
+    try { const p = JSON.parse(value); return (p && typeof p === 'object' && !Array.isArray(p)) ? p : {}; } catch { return {}; }
+  }
+  return {};
+}
+
 // API'ya gönderilecek veriyi temizle (sanitize) fonksiyonu
 export function sanitizeCampingAreaData(data: any) {
-  // API şemasında olmayan alanları gönderme
-  const allowedKeys = [
-    'name', 'latitude', 'longitude', 'type', 'description', 'website', 'phone', 'opening_hours',
-    'capacity', 'fee', 'status', 'rating', 'review_count', 'price_range', 'facilities', 'accessibility',
-    'social_media', 'booking_url', 'contact_email', 'last_verified', 'visibility', 'owner_id',
-    'external_id', 'source_id', 'photo_links', 'amenities', 'tags', 'images',
-    'friend_user_ids' // Arkadaş paylaşımı için friend_user_ids de gönderilsin
-  ];
   const sanitized: any = {};
-  // Varsayılan olarak boş değerleri null'a çevir (opsiyonel alanlar için)
 
-  // Her zaman string olarak gönderilecek alanlar (TEXT/STRING):
-  const stringifiedFields = ['facilities', 'accessibility', 'social_media', 'images', 'tags'];
-  // Her zaman dizi olarak gönderilecek alan:
-  const arrayFields = ['amenities'];
-  // photo_links ve images alanlarını her zaman string olarak bırak
-  if (data && typeof data === 'object' && 'photo_links' in data) {
-    if (typeof data['photo_links'] !== 'string') {
-      sanitized['photo_links'] = JSON.stringify(data['photo_links'] ?? []);
+  // ── Zorunlu alanlar ────────────────────────────────────────────────────
+  sanitized.name      = data.name      ?? '';
+  sanitized.latitude  = Number(data.latitude);
+  sanitized.longitude = Number(data.longitude);
+  sanitized.type      = data.type      ?? 'campground';
+
+  // ── Visibility ──────────────────────────────────────────────────────────
+  const visibility = data.visibility ?? 'private';
+  sanitized.visibility = visibility;
+
+  // friend_user_ids: SADECE visibility==="friends" için STRING dizisi olarak gönder.
+  // Backend JSONB sorgusu: friend_user_ids::jsonb @> '["userId"]'
+  // Bu sorguda userId string olarak aranır. Integer gönderirsek ([123]) eşleşmez.
+  // Doğru format: ["123", "456"] — string ID'ler.
+  if (visibility === 'friends') {
+    const rawFriends = data.friend_user_ids ?? data.friends ?? [];
+    sanitized.friend_user_ids = toArray(rawFriends)
+      .map(v => String(v).trim())
+      .filter(s => s !== '' && !isNaN(Number(s)) && Number(s) > 0);
+  }
+  // community_id: frontend göndermek zorunda değil (spec), gönderilmişse ekle
+  if (data.community_id !== undefined && data.community_id !== null && data.community_id !== '') {
+    sanitized.community_id = Number(data.community_id);
+  }
+
+  // ── owner_id (source_id===0 için zorunlu) ──────────────────────────────
+  if (data.owner_id !== undefined && data.owner_id !== null && data.owner_id !== '') {
+    sanitized.owner_id = Number(data.owner_id);
+  }
+
+  // ── source_id ──────────────────────────────────────────────────────────
+  if (data.source_id !== undefined && data.source_id !== null) {
+    sanitized.source_id = Number(data.source_id);
+  }
+
+  // ── external_id (string) ───────────────────────────────────────────────
+  if (data.external_id !== undefined) sanitized.external_id = data.external_id ?? '';
+
+  // ── Opsiyonel string alanlar ────────────────────────────────────────────
+  const stringFields = ['description', 'phone', 'status', 'price_range', 'last_verified'];
+  for (const key of stringFields) {
+    if (data[key] !== undefined) sanitized[key] = data[key] ?? '';
+  }
+
+  // ── URL / Email alanlar: boş string yerine null gönder (Sequelize isUrl/isEmail validator) ──
+  const urlEmailFields = ['website', 'booking_url', 'contact_email'];
+  for (const key of urlEmailFields) {
+    if (data[key] !== undefined) {
+      const val = data[key];
+      sanitized[key] = (val === '' || val === null || val === undefined) ? null : val;
+    }
+  }
+
+  // ── opening_hours: DB'ye JSON-string kaydedilir (spec md-14) ──────────
+  if (data.opening_hours !== undefined) {
+    const oh = data.opening_hours;
+    if (oh === null || oh === undefined || oh === '' ||
+        (Array.isArray(oh) && oh.length === 0)) {
+      sanitized.opening_hours = null;
+    } else if (typeof oh === 'object') {
+      sanitized.opening_hours = JSON.stringify(oh);
     } else {
-      sanitized['photo_links'] = data['photo_links'];
-    }
-  }
-  if (data && typeof data === 'object' && 'images' in data) {
-    if (typeof data['images'] !== 'string') {
-      sanitized['images'] = JSON.stringify(data['images'] ?? []);
-    } else {
-      sanitized['images'] = data['images'];
+      sanitized.opening_hours = oh; // zaten string
     }
   }
 
-  for (const key of allowedKeys) {
-    // photo_links ve images yukarıda işlendi, tekrar işleme
-    if (key === 'photo_links' || key === 'images') continue;
-    let value = data[key];
-    if (typeof value === 'undefined') continue;
-
-    // INTEGER alanlar: owner_id, rating, review_count, capacity, source_id
-    if ([ 'owner_id', 'rating', 'review_count', 'capacity', 'source_id' ].includes(key)) {
-      if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
-        sanitized[key] = null;
-        continue;
-      }
-      sanitized[key] = Number(value);
-      continue;
-    }
-
-    // Her zaman string olarak gönderilecek alanlar (TEXT/STRING)
-    if (stringifiedFields.includes(key)) {
-      if (value === null || value === undefined || (Array.isArray(value) && value.length === 0) || (typeof value === 'object' && Object.keys(value).length === 0)) {
-        sanitized[key] = '';
-      } else if (typeof value === 'string') {
-        sanitized[key] = value;
-      } else {
-        sanitized[key] = JSON.stringify(value);
-      }
-      continue;
-    }
-
-    // Her zaman dizi olarak gönderilecek alan (ARRAY)
-    if (arrayFields.includes(key)) {
-      if (Array.isArray(value)) {
-        sanitized[key] = value;
-      } else if (typeof value === 'string') {
-        try {
-          const arr = JSON.parse(value);
-          sanitized[key] = Array.isArray(arr) ? arr : [];
-        } catch {
-          sanitized[key] = [];
-        }
-      } else {
-        sanitized[key] = [];
-      }
-      continue;
-    }
-
-    // opening_hours: boşsa null, nesne/dizi ise stringe çevir
-    if (key === 'opening_hours') {
-      if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
-        sanitized[key] = null;
-      } else if (typeof value === 'object') {
-        sanitized[key] = JSON.stringify(value);
-      } else {
-        sanitized[key] = value;
-      }
-      continue;
-    }
-
-    // created_at ve updated_at asla gönderilmesin
-    if (key === 'created_at' || key === 'updated_at') {
-      continue;
-    }
-
-    // fee: boolean ise 1/0, null/boşsa null
-    if (key === 'fee') {
-      if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
-        sanitized[key] = null;
-      } else if (value === true || value === 1 || value === '1') sanitized[key] = 1;
-      else if (value === false || value === 0 || value === '0') sanitized[key] = 0;
-      else sanitized[key] = null;
-      continue;
-    }
-
-    // Diğer TEXT/STRING alanlar: null ise boş string gönder (özellikle allowNull: false için)
-    if (typeof value === 'string' && value === null) {
-      sanitized[key] = '';
-      continue;
-    }
-    // Diğer alanlar: boş obje ise null, aksi halde olduğu gibi
-    if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
-      sanitized[key] = null;
-      continue;
-    }
-    sanitized[key] = value;
+  // ── Integer alanlar ─────────────────────────────────────────────────────
+  if (data.rating !== undefined)      sanitized.rating       = Number(data.rating)       || 0;
+  if (data.review_count !== undefined) sanitized.review_count = Number(data.review_count) || 0;
+  if (data.capacity !== undefined && data.capacity !== '' && data.capacity !== null) {
+    sanitized.capacity = Number(data.capacity);
   }
+
+  // ── fee: 0 veya 1 ────────────────────────────────────────────────────
+  if (data.fee !== undefined) {
+    const f = data.fee;
+    sanitized.fee = (f === true || f === 1 || f === '1') ? 1 : 0;
+  }
+
+  // ── Dizi alanlar — gerçek array gönder (spec: "frontend için diziler tercih edin") ──
+  if (data.facilities    !== undefined) sanitized.facilities    = toArray(data.facilities);
+  if (data.accessibility !== undefined) sanitized.accessibility = toArray(data.accessibility);
+  if (data.amenities     !== undefined) sanitized.amenities     = toArray(data.amenities);
+  if (data.images        !== undefined) sanitized.images        = toArray(data.images);
+  // photo_links: backend "string violation" hatası — controller JSON-string bekliyor (spec: "kesinlikle string olarak saklar")
+  if (data.photo_links   !== undefined) sanitized.photo_links   = JSON.stringify(toArray(data.photo_links));
+
+  // ── Obje alanlar — gerçek object gönder ────────────────────────────────
+  if (data.social_media !== undefined) sanitized.social_media = toObject(data.social_media);
+  if (data.tags         !== undefined) sanitized.tags         = toObject(data.tags);
+
   return sanitized;
 }
 // Kamp alanı güncelleme (PUT)
@@ -144,7 +145,7 @@ export async function deleteCampingAreaOnServer(id: string | number, by?: 'exter
   const token = await getToken();
   const query = by ? `?by=${by}` : '';
   console.log('[API][DELETE] /campgrounds/' + id + query);
-  const res = await fetch(`${API_URL}/campgrounds/${id}${query}`, {
+  const res = await apiFetch(`${API_URL}/campgrounds/${id}${query}`, {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',

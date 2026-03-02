@@ -74,6 +74,7 @@ import { deleteCampingAreaOnServer } from './campingAreaApi';
 import { addPendingChange } from './pendingChanges';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { syncPendingChanges } from './syncPendingChanges';
+import { getRefreshToken, saveToken, saveRefreshToken } from './auth';
 // Merkezi silme fonksiyonu: online ise API'ya silme, offline ise pending'e ekle ve localden sil
 export async function deleteCampingAreaSmart({ campingArea, isConnected }) {
   const db = getDatabase();
@@ -81,26 +82,66 @@ export async function deleteCampingAreaSmart({ campingArea, isConnected }) {
     // 1. Localden sil
     await db.deleteCampingArea(campingArea.id);
     if (isConnected) {
-      // Online ise API'ya hemen gönder
+      // Online ise API'ya hemen gönder — önce token yenilemeyi dene
       try {
-        const extId = campingArea.external_id || campingArea.id;
-        await deleteCampingAreaOnServer(extId, campingArea.external_id ? 'external_id' : 'id');
-  // ...existing code...
+        // Token'ın güncel olduğundan emin olmak için önce yenileme denenir
+        const storedRefreshToken = await getRefreshToken();
+        if (storedRefreshToken) {
+          const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken: storedRefreshToken }),
+          });
+          if (refreshRes.ok) {
+            const data = await refreshRes.json();
+            if (data.token) await saveToken(data.token);
+            if (data.refreshToken) await saveRefreshToken(data.refreshToken);
+            console.log('[deleteCampingAreaSmart] Token silme öncesi yenilendi.');
+          }
+        }
+        // external_id geçerli mi? Sadece numeric ise (lokal id ile aynı) by=external_id kullanma
+        // Örn: "user_1_2077" → geçerli, "2077" → geçersiz (lokal id'nin string hali)
+        const hasValidExternalId =
+          !!campingArea.external_id &&
+          isNaN(Number(campingArea.external_id)) && // pure numeric ise geçersiz
+          String(campingArea.external_id) !== String(campingArea.id);
+
+        let extId: string | number;
+        let byParam: 'external_id' | 'id';
+
+        if (hasValidExternalId) {
+          extId = campingArea.external_id;
+          byParam = 'external_id';
+        } else if (campingArea.owner_id) {
+          // Kullanıcının oluşturduğu alan: create sırasında gönderilen formatı yeniden oluştur
+          extId = `user_${campingArea.owner_id}_${campingArea.id}`;
+          byParam = 'external_id';
+          // Local DB'yi de güncelle (sonraki işlemler için)
+          try {
+            await db.updateCampingAreaExternalIdByLocalId(Number(campingArea.id), extId as string);
+          } catch {}
+          console.log(`[deleteCampingAreaSmart] external_id yeniden oluşturuldu: ${extId}`);
+        } else {
+          extId = campingArea.id;
+          byParam = 'id';
+        }
+        console.log(`[deleteCampingAreaSmart] extId=${extId}, byParam=${byParam}, raw external_id=${campingArea.external_id}`);
+        await deleteCampingAreaOnServer(extId, byParam);
       } catch (apiErr) {
-        // API hatası olursa pending'e ekle
+        // API hatası olursa pending'e ekle (owner_id de dahil)
         console.warn('[deleteCampingAreaSmart] ❌ Server delete failed, adding to pending:', apiErr);
         await addPendingChange({
           type: 'delete',
           campground_id: campingArea.id?.toString() ?? undefined,
-          data: { id: campingArea.id, external_id: campingArea.external_id }
+          data: { id: campingArea.id, external_id: campingArea.external_id, owner_id: campingArea.owner_id }
         });
       }
     } else {
-      // Offline ise pending'e ekle
+      // Offline ise pending'e ekle (owner_id de dahil)
       await addPendingChange({
         type: 'delete',
         campground_id: campingArea.id?.toString() ?? undefined,
-        data: { id: campingArea.id, external_id: campingArea.external_id }
+        data: { id: campingArea.id, external_id: campingArea.external_id, owner_id: campingArea.owner_id }
       });
     }
     return true;
@@ -245,6 +286,35 @@ async function syncPendingImages(userId) {
 
 
 
+// Kamp alanı delta senkronizasyonu
+export async function syncCampingAreas(userId?: string): Promise<boolean> {
+  const db = getDatabase();
+  try {
+    const count = await db.fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, userId });
+    if (__DEV__) console.log('[syncCampingAreas] ✅ Kamp alanları senkronize edildi, güncellenen:', count);
+    if (count && count > 0) {
+      emit('campingAreas:updated', { count });
+    }
+    // Arkadaş paylaşımından çıkartılan alanları temizle
+    if (userId) {
+      await db.cleanupRevokedFriendAreas(userId);
+    }
+    return true;
+  } catch (error) {
+    if (error instanceof Error) {
+      const errMsg = error.message || '';
+      if (errMsg.includes('Network') || errMsg.includes('fetch')) {
+        console.warn('[syncCampingAreas] 🌐 Ağ bağlantısı hatası:', errMsg);
+      } else {
+        console.error('[syncCampingAreas] ❌ Kamp alanları senkronize edilemedi:', errMsg);
+      }
+    } else {
+      console.error('[syncCampingAreas] ❌ Kamp alanları senkronize edilemedi:', error);
+    }
+    return false;
+  }
+}
+
 // Tüm senkronizasyonu başlatan ana fonksiyon
 export async function syncAll({ userId, onProgress }: { userId?: number; onProgress?: (current: number, total: number) => void } = {}) {
   // 1. Fotoğraflar
@@ -255,6 +325,8 @@ export async function syncAll({ userId, onProgress }: { userId?: number; onProgr
   await syncPendingChanges(userId, onProgress);
   // 4. Duyuru delta sync
   await syncAnnouncements();
+  // 5. Kamp alanı delta sync (userId ile birlikte arkadaş erişim temizliği)
+  await syncCampingAreas(userId !== undefined ? String(userId) : undefined);
 }
 
 // Geliştirilebilir: isConnected değiştiğinde veya uygulama açıldığında bu fonksiyon çağrılır

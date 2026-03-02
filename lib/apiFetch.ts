@@ -53,6 +53,35 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
     }
     // Refresh başarısızsa logout yapılmaz, response döndürülür
   }
-  // 403 durumunda logout yapılmaz, response döndürülür
+  // 403 durumunda token yenilemeyi dene (sunucu bazı durumlarda 403 döner)
+  if (response.status === 403) {
+    const refreshToken = await getRefreshToken();
+    console.log('[apiFetch] 403 alındı, refresh token mevcut mu:', !!refreshToken);
+    if (refreshToken) {
+      const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      console.log('[apiFetch] 403 refresh yanıtı:', refreshRes.status);
+      if (refreshRes.ok) {
+        const data = await refreshRes.json();
+        if (data.token) {
+          await saveToken(data.token);
+          console.log('[apiFetch] 403 sonrası yeni token kaydedildi, istek tekrarlanıyor...');
+        }
+        if (data.refreshToken) await saveRefreshToken(data.refreshToken);
+        // Orijinal isteği yeni token ile tekrar dene
+        if (typeof headers === 'object') {
+          headers['Authorization'] = `Bearer ${data.token}`;
+        }
+        init.headers = headers;
+        response = await fetch(input, init);
+        console.log('[apiFetch] 403 retry yanıtı:', response.status);
+        // Yine 403 gelirse direkt döndür (gerçek yetki hatası)
+        return response;
+      }
+    }
+  }
   return response;
 }

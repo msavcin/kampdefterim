@@ -177,20 +177,11 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
   const isSuperAdmin = (options as any)?.isSuperAdmin === true;
   const userId = options.currentUserId ? String(options.currentUserId) : undefined;
   let areas = await getDatabase().searchCampingAreasByLocation(lat, lng, searchRadius, normalizedTags, true, userId, isSuperAdmin);
-      // --- friend_user_ids filtrelemesi ---
-      if (!isSuperAdmin && userId) {
-        areas = areas.filter(area => {
-          if (area.visibility !== 'friends') return true;
-          // Eğer owner ise her zaman görebilsin
-          if (String(area.owner_id) === userId) return true;
-          const friendIds = Array.isArray((area as any).friend_user_ids)
-            ? (area as any).friend_user_ids.map(String)
-            : Array.isArray((area as any).friends)
-              ? (area as any).friends.map((f: any) => typeof f === 'object' && f !== null && f.user_id !== undefined ? String(f.user_id) : String(f))
-              : [];
-          return friendIds.includes(userId);
-        });
-      }
+      // --- friend_user_ids istemci filtresi kaldırıldı ---
+      // Backend, visibility='friends' kontrolünü sunucu tarafında yapıyor
+      // (campground_friend_access tablosu + friend_user_ids::jsonb kontrolü).
+      // İstemci tarafı filtre, backend friend_user_ids sütununu null/[] olarak
+      // döndürdüğü durumlarda arkadaşın alanı görememesine yol açıyordu.
       console.log('Found camping areas:', areas.length);
       // Debug: Kullanıcı alanlarını logla
       const userAreas = areas.filter(area => 

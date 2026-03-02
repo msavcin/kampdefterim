@@ -70,13 +70,14 @@ async function _syncPendingChanges(currentUserId?: string | number, onProgress?:
             // ...existing code...
             const newId = serverResult?.id;
             const newUuid = serverResult?.uuid || (change as any).data.uuid;
+            const newExternalId = serverResult?.external_id;
             if (newId && newUuid) {
               try {
                 const db = getDatabase();
-                await db.updateCampingAreaIdByUuid(newUuid, newId);
-                // ...existing code...
+                await db.updateCampingAreaIdByUuid(newUuid, newId, newExternalId || undefined);
+                console.log(`[syncPendingChanges] CREATE: local id=${newId}, external_id=${newExternalId} güncellendi.`);
               } catch (e) {
-                // ...existing code...
+                console.warn('[syncPendingChanges] CREATE: id/external_id güncellenemedi:', e);
               }
             }
             await markChangeAsSynced((change as any).id);
@@ -145,8 +146,31 @@ async function _syncPendingChanges(currentUserId?: string | number, onProgress?:
                   }
                 }
             }
-            let deleteKey = externalId || localId;
-            let by: 'external_id' | 'id' = externalId ? 'external_id' : 'id';
+            // external_id geçerli mi? Sadece numeric ise (lokal id ile aynı) by=external_id kullanma
+            const hasValidExternalId =
+              !!externalId &&
+              isNaN(Number(externalId)) &&
+              String(externalId) !== String(localId);
+
+            let deleteKey: string | number;
+            let by: 'external_id' | 'id';
+
+            if (hasValidExternalId) {
+              deleteKey = externalId;
+              by = 'external_id';
+            } else {
+              // owner_id varsa user_{owner_id}_{localId} formatini dene
+              const ownerIdForKey = (change as any).data?.owner_id;
+              if (ownerIdForKey && localId) {
+                deleteKey = `user_${ownerIdForKey}_${localId}`;
+                by = 'external_id';
+                console.log(`[syncPendingChanges] DELETE: external_id yeniden oluşturuldu: ${deleteKey}`);
+              } else {
+                deleteKey = localId;
+                by = 'id';
+              }
+            }
+            console.log(`[syncPendingChanges] DELETE: deleteKey=${deleteKey}, by=${by}, raw externalId=${externalId}`);
             if (!deleteKey) {
               await markChangeAsError((change as any).id);
               return;
@@ -171,13 +195,43 @@ async function _syncPendingChanges(currentUserId?: string | number, onProgress?:
               }
             }
             let updateId = updateData?.external_id || updateData?.id;
-            // Local id'den external_id'yi bul
-            if (updateId) {
-              const db = getDatabase();
-              const allAreas = await db.getAllCampingAreas();
-              const found = allAreas.find(area => (area as any).id === updateId || String((area as any).id) === String(updateId));
-              if (found?.external_id) {
-                updateId = found.external_id;
+            // Önce: pending change'in campground_id'siyle local DB'den güncel external_id'yi bul.
+            // Bu, offline eklenen bir alan senkronize edildiğinde localId sunucu ID'sine
+            // güncellenebileceğinden updateData.external_id'nin eskimiş/yanlış olabileceği
+            // durumu düzeltiyor.
+            const campgroundIdInChange = (change as any).campground_id;
+            if (campgroundIdInChange) {
+              try {
+                const db = getDatabase();
+                const allAreas = await db.getAllCampingAreas();
+                const foundByCampId = allAreas.find(area =>
+                  String((area as any).id) === String(campgroundIdInChange)
+                );
+                if (foundByCampId?.external_id) {
+                  const extId = foundByCampId.external_id;
+                  // Sayısal external_id (örn. "2081") geçerli format değil — source_id=0
+                  // alanlarda user_{ownerId}_{id} formatı üret
+                  const isNumericExtId = !isNaN(Number(extId));
+                  const ownerIdForUpdate = updateData?.owner_id || (foundByCampId as any).owner_id;
+                  const resolvedForUpdate =
+                    isNumericExtId && ownerIdForUpdate
+                      ? `user_${ownerIdForUpdate}_${extId}`
+                      : extId;
+                  updateId = resolvedForUpdate;
+                  updateData = { ...updateData, external_id: resolvedForUpdate };
+                  console.log(`[syncPendingChanges] UPDATE: campground_id=${campgroundIdInChange} üzerinden external_id düzeltildi: ${updateId}`);
+                } else if (updateId) {
+                  // campground_id ile bulunamazsa external_id string ile ara (sayısal olmayan)
+                  const foundByExtId = isNaN(Number(updateId))
+                    ? allAreas.find(area => (area as any).external_id === updateId)
+                    : allAreas.find(area => String((area as any).id) === String(updateId));
+                  if (foundByExtId?.external_id) {
+                    updateId = foundByExtId.external_id;
+                    updateData = { ...updateData, external_id: foundByExtId.external_id };
+                  }
+                }
+              } catch (lookupErr) {
+                console.warn('[syncPendingChanges] UPDATE: local DB external_id araması başarısız:', lookupErr);
               }
             }
             if (!updateId) throw new Error('Güncellenecek kaydın id/external_id alanı yok!');
@@ -227,7 +281,11 @@ async function _syncPendingChanges(currentUserId?: string | number, onProgress?:
     try {
       // Sync sonrası local veritabanını güncelle (Delta Sync ile sadece değişenleri çek)
       console.log('[syncPendingChanges] Tüm değişiklikler işlendi, local veritabanı güncelleniyor...');
-      await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, onProgress });
+      const db = getDatabase();
+      await db.fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, onProgress, userId: currentUserId !== undefined ? String(currentUserId) : undefined });
+      if (currentUserId) {
+        await db.cleanupRevokedFriendAreas(String(currentUserId));
+      }
       console.log('[syncPendingChanges] tamamlandı.');
     } catch (e) {
       console.log('[syncPendingChanges] SONDA HATA:', e);

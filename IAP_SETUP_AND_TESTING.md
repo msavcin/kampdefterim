@@ -212,7 +212,7 @@ developer@kampdefterim.com
 
 IAP doğrulaması için backend'e endpoint eklenmiştir:
 
-### POST /node/subscriptions/verify
+### POST /subscriptions/verify
 
 **Request:**
 ```json
@@ -295,7 +295,7 @@ Kod içinde şu log'lar var:
 
 ### Backend
 - [x] Backend IAP entegrasyonu tamamlandı
-- [x] `/node/subscriptions/verify` endpoint eklendi
+- [x] `/subscriptions/verify` endpoint eklendi
 - [x] Database migration çalıştırıldı (subscription alanları)
 - [x] Cron job eklendi (süresi dolan abonelikler)
 - [ ] Apple Shared Secret environment variable'a eklendi
@@ -312,8 +312,8 @@ Kod içinde şu log'lar var:
 - [ ] App Store / Play Store açıklamalarına abonelik bilgileri eklendi
 
 ### Backend Endpoint
-- **URL**: `POST /node/subscriptions/verify`
-- **Status Check**: `GET /node/subscriptions/status`
+- **URL**: `POST /subscriptions/verify`
+- **Status Check**: `GET /subscriptions/status`
 
 ---
 

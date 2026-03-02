@@ -6,11 +6,16 @@ import { getSVGIcon } from '@/app/icons/svgIcons';
 import { SvgXml } from 'react-native-svg';
 import { Dimensions } from 'react-native';
 // Arkadaş tipini tanımla
+// API /friends?user_id=X endpoint'i { id, name, email, avatar_url } formatında döner
+// (types/friend.ts ile uyumlu). user_id de olabilir — her iki alanı destekliyoruz.
 type Friend = {
-  user_id: string | number;
+  id?: string | number;
+  user_id?: string | number;
   first_name?: string;
   last_name?: string;
+  name?: string;
   avatar?: string;
+  avatar_url?: string;
   email?: string;
 };
 // Basit avatar bileşeni
@@ -483,6 +488,28 @@ export default function CampingAreaDetailModal({
       console.log('[CampingAreaDetailModal] fee değeri:', campingArea.fee, 'tipi:', typeof campingArea.fee);
     }
   }, [campingArea]);
+
+  // owner_username state: önce campingArea'dan al, yoksa API'den owner_id ile çek
+  const [ownerUsername, setOwnerUsername] = useState<string>('');
+  useEffect(() => {
+    if (!campingArea) { setOwnerUsername(''); return; }
+    const stored = campingArea.owner_username || '';
+    if (stored) {
+      setOwnerUsername(stored);
+      return;
+    }
+    // Saklanan username yoksa ve owner_id varsa sunucudan çek
+    const ownerId = Number((campingArea as any).owner_id);
+    if (!ownerId || ownerId <= 0) { setOwnerUsername(''); return; }
+    import('@/lib/userMembership').then(({ getUserById }) => {
+      getUserById(ownerId)
+        .then(info => {
+          if (info?.username) setOwnerUsername(info.username);
+          else setOwnerUsername('');
+        })
+        .catch(() => setOwnerUsername(''));
+    });
+  }, [campingArea?.id, campingArea?.owner_username, (campingArea as any)?.owner_id]);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
@@ -598,7 +625,13 @@ export default function CampingAreaDetailModal({
     const friendUserIds: string[] = Array.isArray((campingArea as any).friend_user_ids)
       ? (campingArea as any).friend_user_ids.map(String)
       : Array.isArray((campingArea as any).friends)
-        ? (campingArea as any).friends.map((f: any) => typeof f === 'object' && f !== null && f.user_id !== undefined ? String(f.user_id) : String(f))
+        ? (campingArea as any).friends.map((f: any) => {
+            if (typeof f === 'object' && f !== null) {
+              const fId = f.user_id ?? f.id;
+              return fId !== undefined ? String(fId) : String(f);
+            }
+            return String(f);
+          })
         : [];
     if (!friendUserIds.length) {
       setFriends([]);
@@ -622,8 +655,12 @@ export default function CampingAreaDetailModal({
         }
         const data = await res.json();
         // Sadece friend_user_ids'de olanları göster
+        // API { id } veya { user_id } formatında dönebilir — her ikisini de kontrol et
         const filtered = Array.isArray(data)
-          ? data.filter((f: any) => friendUserIds.includes(String(f.user_id)))
+          ? data.filter((f: any) => {
+              const fId = f.user_id ?? f.id;
+              return fId !== undefined && friendUserIds.includes(String(fId));
+            })
           : [];
         setFriends(filtered);
       } catch (e: any) {
@@ -632,7 +669,7 @@ export default function CampingAreaDetailModal({
         setLoadingFriends(false);
       }
     })();
-  }, [visible, campingArea && (campingArea as any).campground_id, (campingArea as any)?.friend_user_ids, (campingArea as any)?.friends]);
+  }, [visible, campingArea?.id, JSON.stringify((campingArea as any)?.friend_user_ids), JSON.stringify((campingArea as any)?.friends)]);
 
   if (!campingArea) return null;
 
@@ -834,7 +871,7 @@ export default function CampingAreaDetailModal({
                 </View>
                 <View style={styles.userSubmittedChip}>
                   <Text style={styles.userSubmittedText}>
-                    @{campingArea.owner_username ? campingArea.owner_username : 'KampDefterim'} ekledi
+                    @{ownerUsername || 'KampDefterim'} ekledi
                   </Text>
                 </View>
               </View>
@@ -988,6 +1025,39 @@ export default function CampingAreaDetailModal({
                     {campingArea.visibility === 'community' && 'Topluluğa Açık'}
                     {campingArea.visibility === 'friends' && 'Arkadaşlara Açık'}
                   </Text>
+                </View>
+              </View>
+            )}
+            {/* Paylaşılan arkadaşlar — sadece visibility='friends' ve owner için */}
+            {campingArea.visibility === 'friends' && currentUserId && String(campingArea.owner_id) === String(currentUserId) && (
+              <View style={[styles.detailItem, { alignItems: 'flex-start' }]}>
+                <Users size={20} color="#059669" style={{ marginTop: 2 }} />
+                <View style={[styles.detailContent, { flexShrink: 1 }]}>
+                  <Text style={styles.detailLabel}>Paylaşılan Kişiler</Text>
+                  {loadingFriends && <ActivityIndicator size="small" color="#059669" style={{ marginTop: 4 }} />}
+                  {friendsError ? (
+                    <Text style={{ color: '#dc2626', fontSize: 13, marginTop: 4 }}>{friendsError}</Text>
+                  ) : !loadingFriends && friends.length === 0 ? (
+                    <Text style={{ color: '#6b7280', fontSize: 13, marginTop: 4 }}>Hiç arkadaşla paylaşılmamış.</Text>
+                  ) : (
+                    friends.map(f => (
+                      <View key={String(f.user_id ?? (f as any).id)} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                        <FriendAvatar
+                          avatar={(f as any).avatar_url || f.avatar}
+                          name={(f as any).name || f.first_name || f.email || ''}
+                        />
+                        <View>
+                          <Text style={{ fontWeight: '600', color: '#374151', fontSize: 14 }}>
+                            {(f as any).name || f.first_name || ''}{f.last_name ? ' ' + f.last_name : ''}
+                          </Text>
+                          {f.email ? <Text style={{ color: '#6b7280', fontSize: 12 }}>{f.email}</Text> : null}
+                        </View>
+                        <View style={{ marginLeft: 8, backgroundColor: '#dcfce7', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#22c55e' }}>
+                          <Text style={{ color: '#22c55e', fontWeight: 'bold', fontSize: 12 }}>✓ Paylaşıldı</Text>
+                        </View>
+                      </View>
+                    ))
+                  )}
                 </View>
               </View>
             )}

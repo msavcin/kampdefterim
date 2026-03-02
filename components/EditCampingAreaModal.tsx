@@ -1,7 +1,7 @@
 
 
 import { syncAll } from '@/lib/syncManager';
-import { campingTypes, getCampingTypeLabel, getCampingTypeIcon } from '@/lib/categories';
+import { campingTypes, getCampingTypeLabel, getCampingTypeIcon, getCampingAreaBgColor } from '@/lib/categories';
 import { TYPE_COLORS } from '../app/icons/svgIcons';
 import { SvgXml } from 'react-native-svg';
 
@@ -10,11 +10,16 @@ import { useState, useEffect } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 // Arkadaş tipini tanımla
+// API /friends?user_id=X endpoint'i { id, name, email, avatar_url } formatında döner
+// (types/friend.ts ile uyumlu). user_id de olabilir — her iki alanı destekliyoruz.
 type Friend = {
-  user_id: string | number;
+  id?: string | number;
+  user_id?: string | number;
   first_name?: string;
   last_name?: string;
+  name?: string;
   avatar?: string;
+  avatar_url?: string;
   email?: string;
 };
 // Basit avatar bileşeni
@@ -149,30 +154,48 @@ export default function EditCampingAreaModal({ visible, onClose, campingArea, on
   const [allFriends, setAllFriends] = useState<Friend[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
-  // Arkadaş listesini yükle (sadece friends görünürlüğü seçiliyse ve modal açıldığında)
+
+  // Arkadaş listesi için yüksekliği hesaplamak üzere sabitler
+  const FRIEND_ITEM_HEIGHT = 56; // yaklaşık satır yüksekliği (avatar + paddings)
+  const MAX_VISIBLE_FRIENDS = 5;
+
+  // Arkadaş listesini yükle.
+  // ÖNEMLI: İki ayrı effect yerine tek bir effect kullanılıyor.
+  // Sebep: [campingArea, visible] effect formData'yı async günceller. Eğer friends fetch
+  // sadece formData.visibility'e bağlıysa, formData henüz 'private' durumundayken erken
+  // dönülüyor ve friends hiç yüklenmiyor (waterfall race condition).
+  // Çözüm: campingArea.visibility (anlık kayıt değeri) veya formData.visibility 'friends'
+  // ise fetch yap. Modal kapandığında listeyi sıfırla.
   useEffect(() => {
-    if (!visible || formData.visibility !== 'friends') return;
+    if (!visible) {
+      // Modal kapanınca sıfırla — sonraki açılışta stale veri gösterilmesin
+      setAllFriends([]);
+      setFriendsError(null);
+      return;
+    }
+    // campingArea'dan gelen değeri öncelikli kullan (formData henüz güncel olmayabilir)
+    const effectiveVisibility =
+      (campingArea as any)?.visibility === 'friends' || formData.visibility === 'friends';
+    if (!effectiveVisibility) {
+      setAllFriends([]);
+      setFriendsError(null);
+      return;
+    }
     if (!currentUserId) {
-      console.log('[useEffect] currentUserId yok, arkadaşlar fetch edilmeyecek.');
       setFriendsError('Kullanıcı oturumu bulunamadı.');
       setAllFriends([]);
       setLoadingFriends(false);
       return;
     }
+    let cancelled = false;
     setLoadingFriends(true);
     setFriendsError(null);
-    console.log('[useEffect] Arkadaşlar yükleniyor... currentUserId:', currentUserId);
     fetchFriendsList(currentUserId)
-      .then(list => {
-        console.log('[useEffect] Arkadaş listesi geldi:', list);
-        setAllFriends(list);
-      })
-      .catch(e => {
-        console.error('[useEffect] Arkadaşlar yüklenemedi:', e);
-        setFriendsError(e.message || 'Arkadaşlar yüklenemedi');
-      })
-      .finally(() => setLoadingFriends(false));
-  }, [visible, formData.visibility, currentUserId]);
+      .then(list => { if (!cancelled) setAllFriends(list); })
+      .catch(e => { if (!cancelled) setFriendsError(e.message || 'Arkadaşlar yüklenemedi'); })
+      .finally(() => { if (!cancelled) setLoadingFriends(false); });
+    return () => { cancelled = true; };
+  }, [visible, campingArea, formData.visibility, currentUserId]);
 
   // Modal açıldığında user community_id'sini fetch et
   useEffect(() => {
@@ -310,7 +333,10 @@ useEffect(() => {
       accessibility: Array.isArray(campingArea.accessibility) ? campingArea.accessibility : [],
       images: Array.isArray(campingArea.images) ? campingArea.images : [],
       photo_links: Array.isArray((campingArea as any).photo_links) ? (campingArea as any).photo_links : [],
-      visibility: (campingArea.visibility as any) || 'private',
+      // Geçerli bir değer yoksa (null, undefined, boş string) 'private' kullan
+      visibility: (['public', 'private', 'community', 'friends'].includes((campingArea as any).visibility)
+        ? (campingArea as any).visibility
+        : 'private'),
       friends: friendsList,
     }));
   }
@@ -516,18 +542,47 @@ useEffect(() => {
         }
       }
 
+      // Eğer görünürlük 'friends' seçili ama paylaşılacak kimse yoksa,
+      // kaydedilen görünürlüğü 'private' (Sadece Ben) yap.
+      const finalVisibility = (formData.visibility === 'friends' && (!friendsToUse || friendsToUse.length === 0))
+        ? 'private'
+        : formData.visibility;
+
       // community_id'yi belirle: visibility 'community' ise kullanıcının community_id'si
       let communityIdValue: number | undefined = undefined;
-      if (formData.visibility === 'community') {
+      if (finalVisibility === 'community') {
         communityIdValue = userCommunityId;
         if (!communityIdValue) {
           console.warn('[handleSubmit] community_id eksik, visibility community seçilmiş ama kullanıcının topluluğu yok!');
         }
       }
 
+      const localId = (campingArea as any).id;
+      const resolvedOwnerId = ownerId || (campingArea as any).owner_id;
+      // source_id DB'den string "0" veya number 0 gelebilir — Number() ile normalize et
+      const sourceId = Number((campingArea as any).source_id);
+      // external_id öncelik sırası:
+      // 1. DB'de kayıtlı proper external_id (sayısal olmayan, örn. "user_5_34")
+      // 2. source_id===0 olan kullanıcı alanları için user_{ownerId}_{localId} hesapla
+      //    (localId artık sunucu ID'si olabilir — sync sonrası güncellenir)
+      // 3. Diğer durumlar için DB'deki ham external_id (sayısal olsa bile)
+      // NOT: Bazı eski kayıtlarda external_id yalnızca sunucunun sayısal ID'si olarak
+      //      saklanmış olabilir ("2081" gibi). Bu geçerli bir external_id formatı değil;
+      //      source_id===0 alanlarda sunucu user_{ownerId}_{id} formatı bekler.
+      const savedExternalId = (campingArea as any).external_id;
+      const isProperExternalId = savedExternalId &&
+        typeof savedExternalId === 'string' &&
+        isNaN(Number(savedExternalId));
+      const resolvedExternalId =
+        isProperExternalId
+          ? savedExternalId
+          : (sourceId === 0 && resolvedOwnerId && localId
+              ? `user_${resolvedOwnerId}_${localId}`
+              : savedExternalId);
+
       // API'ya gönderilecek veri (tipler uyumlu)
       const rawApiUpdateData = {
-        id: (campingArea as any).id,
+        id: localId,
         name: formData.name,
         latitude: (campingArea as any).latitude,
         longitude: (campingArea as any).longitude,
@@ -551,13 +606,13 @@ useEffect(() => {
         contact_email: formData.contact_email,
         social_media: typeof campingArea.social_media === 'string' ? campingArea.social_media : JSON.stringify(campingArea.social_media ?? {}),
         status: 'active',
-        visibility: formData.visibility,
+        visibility: finalVisibility,
         community_id: communityIdValue,
         friends: JSON.stringify(friendsToUse),
         friend_user_ids: JSON.stringify(friendsToUse),
-        external_id: (campingArea as any).external_id,
-        owner_id: String(ownerId || (campingArea as any).owner_id),
-        source_id: (campingArea as any).source_id,
+        external_id: resolvedExternalId,
+        owner_id: String(resolvedOwnerId),
+        source_id: sourceId,
       };
       const apiUpdateData = sanitizeCampingAreaData(rawApiUpdateData);
 
@@ -586,13 +641,18 @@ useEffect(() => {
         contact_email: formData.contact_email,
         social_media: campingArea.social_media,
         status: 'active',
-        visibility: formData.visibility,
+        visibility: finalVisibility,
         community_id: communityIdValue,
         friends: friendsToUse,
         friend_user_ids: friendsToUse,
-        external_id: (campingArea as any).external_id,
-        owner_id: String(ownerId || (campingArea as any).owner_id),
-        source_id: (campingArea as any).source_id,
+        // Lokal DB güncellemesinde DB'de saklı gerçek external_id kullanılmalı.
+        // resolvedExternalId sunucu senkronizasyonu için user_X_Y formatındadır;
+        // bu format DB'deki kayıtla eşleşmediğinden yanlışlıkla yeni kayıt oluşur.
+        external_id: (campingArea as any).external_id ?? resolvedExternalId,
+        uuid: (campingArea as any).uuid,
+        owner_id: String(resolvedOwnerId),
+        owner_username: (campingArea as any).owner_username ?? '',
+        source_id: String(sourceId),
       };
 
       await getDatabase().insertOrUpdateCampingArea(localUpdateData);
@@ -646,7 +706,7 @@ useEffect(() => {
             <X size={24} color="#6b7280" />
           </TouchableOpacity>
         </View>
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
           {/* Temel Bilgiler */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Temel Bilgiler</Text>
@@ -676,65 +736,55 @@ useEffect(() => {
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Görünürlük</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                <TouchableOpacity
-                  style={[
-                    styles.priceChip,
-                    formData.visibility === 'private' && styles.priceChipSelected
-                  ]}
-                  onPress={() => setFormData(prev => ({ ...prev, visibility: 'private', friends: [] }))}
-                >
-                  <Text style={[
-                    styles.priceLabel,
-                    formData.visibility === 'private' && styles.priceLabelSelected
-                  ]}>Sadece Ben (Private)</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.priceChip,
-                    formData.visibility === 'public' && styles.priceChipSelected
-                  ]}
-                  onPress={() => setFormData(prev => ({ ...prev, visibility: 'public', friends: [] }))}
-                >
-                  <Text style={[
-                    styles.priceLabel,
-                    formData.visibility === 'public' && styles.priceLabelSelected
-                  ]}>Herkes (Public)</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.priceChip,
-                    formData.visibility === 'community' && styles.priceChipSelected,
-                    !userCommunityId && { opacity: 0.5 }
-                  ]}
-                  onPress={() => {
-                    if (!userCommunityId) {
-                      Alert.alert('Uyarı', 'Toplulukla paylaşmak için bir topluluğa üye olmanız gerekiyor.');
-                      return;
-                    }
-                    setFormData(prev => ({ ...prev, visibility: 'community', friends: [] }));
-                  }}
-                  disabled={!userCommunityId}
-                >
-                  <Text style={[
-                    styles.priceLabel,
-                    formData.visibility === 'community' && styles.priceLabelSelected
-                  ]}>Topluluk (Community)</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.priceChip,
-                    formData.visibility === 'friends' && styles.priceChipSelected
-                  ]}
-                  onPress={() => setFormData(prev => ({ ...prev, visibility: 'friends' }))}
-                >
-                  <Text style={[
-                    styles.priceLabel,
-                    formData.visibility === 'friends' && styles.priceLabelSelected
-                  ]}>Arkadaşlar (Friends)</Text>
-                </TouchableOpacity>
+                {(
+                  [
+                    { key: 'private', label: 'Sadece Ben (Private)' },
+                    { key: 'public', label: 'Herkes (Public)' },
+                    { key: 'community', label: 'Topluluk (Community)', disabled: !userCommunityId },
+                    { key: 'friends', label: 'Arkadaşlar (Friends)', disabled: !isConnected },
+                  ] as { key: string; label: string; disabled?: boolean }[]
+                ).map(({ key, label, disabled }) => {
+                  const selected = formData.visibility === key;
+                  const color = getCampingAreaBgColor({ owner_id: 'user', visibility: key });
+                  // Renk #RRGGBBAA (9 karakter) veya #RRGGBB (7 karakter) olabilir;
+                  // arka plan için RGB kısmını alıp %13 alpha uygula
+                  const rgbPart = color.length >= 7 ? color.slice(0, 7) : color;
+                  const bgColor = rgbPart + '22';
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[
+                        styles.priceChip,
+                        selected && { borderColor: rgbPart, backgroundColor: bgColor },
+                        disabled && { opacity: 0.5 },
+                      ]}
+                      onPress={() => {
+                        if (disabled) {
+                          if (key === 'community') {
+                            Alert.alert('Uyarı', 'Toplulukla paylaşmak için bir topluluğa üye olmanız gerekiyor.');
+                          } else if (key === 'friends') {
+                            Alert.alert('Uyarı', 'Çevrimdışı modda arkadaşlarla paylaşım devre dışıdır.');
+                          }
+                          return;
+                        }
+                        setFormData(prev => ({
+                          ...prev,
+                          visibility: key,
+                          ...(key !== 'friends' ? { friends: [] } : {}),
+                        }));
+                      }}
+                      disabled={!!disabled}
+                    >
+                      <Text style={[
+                        styles.priceLabel,
+                        selected && { color: rgbPart, fontWeight: '600' },
+                      ]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
               {/* Arkadaş seçimi alanı */}
-              {formData.visibility === 'friends' && (
+              {formData.visibility === 'friends' && isConnected && (
                 <View style={{ marginTop: 16 }}>
                   <Text style={{ fontSize: 14, color: '#374151', fontWeight: '500', marginBottom: 8 }}>Paylaşılacak Arkadaşlar</Text>
                   {loadingFriends ? (
@@ -744,10 +794,15 @@ useEffect(() => {
                   ) : allFriends.length === 0 ? (
                     <Text style={{ color: '#6b7280' }}>Hiç arkadaşınız yok.</Text>
                   ) : (
-                    <View style={{ maxHeight: 180 }}>
-                      <ScrollView>
+                    <View style={{ height: Math.min(allFriends.length * FRIEND_ITEM_HEIGHT, MAX_VISIBLE_FRIENDS * FRIEND_ITEM_HEIGHT), borderRadius: 8, backgroundColor: '#f9fafb', overflow: 'hidden' }}>
+                      <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={true} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                         {allFriends.map((f, idx) => {
-                          const friendId = f.user_id !== undefined ? String(f.user_id) : ((f as any).id !== undefined ? String((f as any).id) : String(idx));
+                          // API user_id veya id döndürebilir. Güvenilir ID: önce user_id, sonra id.
+                          // Sadece geçerli sayısal bir ID kullan; yoksa index (hiç seçilmez).
+                          const rawFriendId = f.user_id ?? f.id;
+                          const friendId = (rawFriendId !== undefined && rawFriendId !== null && !isNaN(Number(rawFriendId)) && Number(rawFriendId) > 0)
+                            ? String(rawFriendId)
+                            : String(idx);
                           const selected = Array.isArray(formData.friends) && formData.friends.includes(friendId);
                           return (
                             <View key={friendId} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 4, backgroundColor: selected ? '#f0fdf4' : 'transparent', borderRadius: 8, marginBottom: 2 }}>
@@ -758,11 +813,10 @@ useEffect(() => {
                               </View>
                               {selected ? (
                                 <TouchableOpacity
-                                  onPress={async () => {
+                                  onPress={() => {
                                     setFormData(prev => {
                                       const prevFriends = Array.isArray(prev.friends) ? prev.friends.map(String) : [];
                                       const newFriends = prevFriends.filter(id => id !== friendId);
-                                      setTimeout(() => handleSubmit(newFriends), 0);
                                       return {
                                         ...prev,
                                         friends: newFriends
@@ -775,11 +829,10 @@ useEffect(() => {
                                 </TouchableOpacity>
                               ) : (
                                 <TouchableOpacity
-                                  onPress={async () => {
+                                  onPress={() => {
                                     setFormData(prev => {
                                       const prevFriends = Array.isArray(prev.friends) ? prev.friends.map(String) : [];
                                       const newFriends = [...prevFriends, friendId];
-                                      setTimeout(() => handleSubmit(newFriends), 0);
                                       return {
                                         ...prev,
                                         friends: newFriends

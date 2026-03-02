@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity, Image, Modal } from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity, Image, Modal, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
 import GuestInfoModal from '../../components/GuestInfoModal';
 import { loginUser, getMe, listCommunityMembers } from '../../lib/userCommunityApi';
@@ -156,102 +156,110 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.logoWrapper}>
-        <Image
-          source={require('../../assets/images/login_screen.png')}
-          style={styles.logo}
-          resizeMode="contain"
-          accessibilityLabel="Logo"
-        />
-      </View>
-      <Text style={styles.title}>Giriş Yap</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="E-posta veya Kullanıcı Adı"
-        autoCapitalize="none"
-        value={identifier}
-        onChangeText={setIdentifier}
-        placeholderTextColor="#64748b"
-      />
-      <View style={styles.passwordRow}>
-        <TextInput
-          style={[styles.passwordInput, { color: '#222' }]}
-          placeholder="Şifre"
-          secureTextEntry={!showPassword}
-          value={password}
-          onChangeText={setPassword}
-          placeholderTextColor="#64748b"
-          autoCapitalize="none"
-        />
-        <TouchableOpacity
-          onPress={() => setShowPassword((s) => !s)}
-          accessible
-          accessibilityLabel={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
-          style={styles.passwordToggle}
-        >
-          {showPassword ? <EyeOff size={20} color="#64748b" /> : <Eye size={20} color="#64748b" />}
-        </TouchableOpacity>
-      </View>
-      <Button title={loading ? 'Giriş Yapılıyor...' : 'Giriş Yap'} onPress={() => handleLogin()} disabled={loading} />
-      <TouchableOpacity onPress={() => setForgotModalVisible(true)} style={styles.forgotContainer}>
-        <Text style={styles.forgotText}>Şifremi Unuttum</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => router.replace('/(auth)/register')} style={styles.linkContainer}>
-        <Text style={styles.link}>Hesabınız yok mu? Kayıt olun</Text>
-      </TouchableOpacity>
-
-      {/* Misafir olarak giriş */}
-      <TouchableOpacity onPress={handleGuestLogin} style={[styles.linkContainer, { marginTop: 8 }]}> 
-        <Text style={[styles.link, { color: '#facc15' }]}>Misafir olarak oturum aç</Text>
-      </TouchableOpacity>
-
-      {/* Misafir bilgilendirme modalı */}
-      <GuestInfoModal
-        visible={guestModalVisible}
-        onClose={() => {
-          setGuestModalVisible(false);
-          if (guestLoginPendingRedirect.current) {
-            guestLoginPendingRedirect.current = false;
-            // Modal animasyonu tamamlansın diye küçük gecikme
-            setTimeout(() => {
-              router.replace('/(auth)/community');
-            }, 200);
-          }
-        }}
-      />
-
-      {/* Şifremi Unuttum Modalı */}
-      <Modal
-        visible={forgotModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setForgotModalVisible(false)}
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Şifre Sıfırlama</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Kayıtlı E-posta adresiniz"
-              autoCapitalize="none"
-              value={forgotEmail}
-              onChangeText={setForgotEmail}
-              placeholderTextColor="#64748b"
-              keyboardType="email-address"
-            />
-            <Button
-              title={forgotLoading ? 'Gönderiliyor...' : 'Sıfırlama Linki Gönder'}
-              onPress={handleForgotPassword}
-              disabled={forgotLoading || !forgotEmail}
-            />
-            <TouchableOpacity onPress={() => setForgotModalVisible(false)} style={{ marginTop: 12 }}>
-              <Text style={{ color: '#64748b', textAlign: 'center' }}>Kapat</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.logoWrapper}>
+          <Image
+            source={require('../../assets/images/login_screen.png')}
+            style={styles.logo}
+            resizeMode="contain"
+            accessibilityLabel="Logo"
+          />
         </View>
-      </Modal>
-    </View>
+        <Text style={styles.title}>Giriş Yap</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="E-posta veya Kullanıcı Adı"
+          autoCapitalize="none"
+          value={identifier}
+          onChangeText={setIdentifier}
+          placeholderTextColor="#64748b"
+        />
+        <View style={styles.passwordRow}>
+          <TextInput
+            style={[styles.passwordInput, { color: '#222' }]}
+            placeholder="Şifre"
+            secureTextEntry={!showPassword}
+            value={password}
+            onChangeText={setPassword}
+            placeholderTextColor="#64748b"
+            autoCapitalize="none"
+          />
+          <TouchableOpacity
+            onPress={() => setShowPassword((s) => !s)}
+            accessible
+            accessibilityLabel={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+            style={styles.passwordToggle}
+          >
+            {showPassword ? <EyeOff size={20} color="#64748b" /> : <Eye size={20} color="#64748b" />}
+          </TouchableOpacity>
+        </View>
+        <Button title={loading ? 'Giriş Yapılıyor...' : 'Giriş Yap'} onPress={() => handleLogin()} disabled={loading} />
+        <TouchableOpacity onPress={() => setForgotModalVisible(true)} style={styles.forgotContainer}>
+          <Text style={styles.forgotText}>Şifremi Unuttum</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.replace('/(auth)/register')} style={styles.linkContainer}>
+          <Text style={styles.link}>Hesabınız yok mu? Kayıt olun</Text>
+        </TouchableOpacity>
+
+        {/* Misafir olarak giriş */}
+        <TouchableOpacity onPress={handleGuestLogin} style={[styles.linkContainer, { marginTop: 8 }]}> 
+          <Text style={[styles.link, { color: '#facc15' }]}>Misafir olarak oturum aç</Text>
+        </TouchableOpacity>
+
+        {/* Misafir bilgilendirme modalı */}
+        <GuestInfoModal
+          visible={guestModalVisible}
+          onClose={() => {
+            setGuestModalVisible(false);
+            if (guestLoginPendingRedirect.current) {
+              guestLoginPendingRedirect.current = false;
+              // Modal animasyonu tamamlansın diye küçük gecikme
+              setTimeout(() => {
+                router.replace('/(auth)/community');
+              }, 200);
+            }
+          }}
+        />
+
+        {/* Şifremi Unuttum Modalı */}
+        <Modal
+          visible={forgotModalVisible}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setForgotModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Şifre Sıfırlama</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Kayıtlı E-posta adresiniz"
+                autoCapitalize="none"
+                value={forgotEmail}
+                onChangeText={setForgotEmail}
+                placeholderTextColor="#64748b"
+                keyboardType="email-address"
+              />
+              <Button
+                title={forgotLoading ? 'Gönderiliyor...' : 'Sıfırlama Linki Gönder'}
+                onPress={handleForgotPassword}
+                disabled={forgotLoading || !forgotEmail}
+              />
+              <TouchableOpacity onPress={() => setForgotModalVisible(false)} style={{ marginTop: 12 }}>
+                <Text style={{ color: '#64748b', textAlign: 'center' }}>Kapat</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -980,15 +980,27 @@ export default function MapScreen() {
     }, []);
   // Online olduğunda merkezi sync fonksiyonunu tetikle
   useEffect(() => {
+    let cancelled = false;
     (async () => {
+      if (!isMounted.current) return;
       if (isConnected) {
         const token = await getToken();
+        if (!isMounted.current) return;
         if (token) {
+          // İlk full sync henüz tamamlanmamışsa syncAll'u atla
+          // (initial sync useEffect progress bar ile bunu halledecek)
+          const hasInitialSync = await SecureStore.getItemAsync('hasInitialSync');
+          if (!hasInitialSync) {
+            if (__DEV__) console.log('[SYNC][isConnected] hasInitialSync yok, syncAll atlanıyor - initial sync useEffect bunu halledecek');
+            return;
+          }
           // Konum kontrolü - değişmişse haritayı güncelle
           try {
             const { status } = await Location.getForegroundPermissionsAsync();
+            if (!isMounted.current) return;
             if (status === 'granted') {
               const newLocation = await Location.getCurrentPositionAsync({});
+              if (!isMounted.current) return;
               if (newLocation && newLocation.coords) {
                 // Mevcut konum ile yeni konum arasında anlamlı fark varsa (>0.01 derece ~1km)
                 if (location && (Math.abs(location.coords.latitude - newLocation.coords.latitude) > 0.01 || 
@@ -1000,23 +1012,29 @@ export default function MapScreen() {
           } catch (e) {
             console.warn('[SYNC] Konum kontrolü hatası:', e);
           }
-          
+          if (cancelled || !isMounted.current) return;
           const user = await getMe();
+          if (cancelled || !isMounted.current) return;
           if (__DEV__) console.log('[DEBUG][PROGRESS] Sync başlıyor...');
           setSyncProgress({ current: 0, total: 0, isLoading: true });
           await syncAll({ 
             userId: user?.id,
             onProgress: (current, total) => {
+              if (!isMounted.current) return;
               if (__DEV__) console.log('[DEBUG][PROGRESS] Progress güncellendi:', current, '/', total);
               setSyncProgress({ current, total, isLoading: true });
             }
           });
+          if (!isMounted.current) return;
           if (__DEV__) console.log('[DEBUG][PROGRESS] Sync tamamlandı');
           setSyncProgress({ current: 0, total: 0, isLoading: false });
         } else {
         }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [isConnected]);
   
   // Akıllı offline cache sistemi (WiFi'da otomatik favorileri cache'ler)
@@ -1491,6 +1509,20 @@ export default function MapScreen() {
             } catch (err) {
               if (__DEV__) console.warn('[AppState] Duyuru delta sync hatası:', err);
             }
+
+            // Kamp alanları için delta sync yap
+            try {
+              if (__DEV__) console.log('[AppState] Kamp alanları için delta sync başlatılıyor...');
+              const dbInst = getDatabase();
+              const count = await dbInst.fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, userId: user?.id !== undefined ? String(user.id) : undefined });
+              if (__DEV__) console.log('[AppState] Kamp alanları delta sync tamamlandı, güncellenen:', count);
+              if (user?.id) { try { await dbInst.cleanupRevokedFriendAreas(String(user.id)); } catch {} }
+              if (count && count > 0 && refreshDataRef.current && isMounted.current) {
+                refreshDataRef.current();
+              }
+            } catch (err) {
+              if (__DEV__) console.warn('[AppState] Kamp alanı delta sync hatası:', err);
+            }
           } else {
             // Offline ise sadece local kontrol
             try {
@@ -1551,6 +1583,24 @@ export default function MapScreen() {
     };
   }, []);
 
+  // Delta sync sonrası kamp alanı güncellemelerini dinle
+  useEffect(() => {
+    const handler = (payload: any) => {
+      if (__DEV__) console.log('[CAMPING_AREAS][EVENT] Kamp alanları güncellendi, yenileniyor:', payload);
+      try {
+        if (refreshDataRef.current && isMounted.current && typeof refreshDataRef.current === 'function') {
+          refreshDataRef.current();
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[CAMPING_AREAS][EVENT] refreshData hata:', e);
+      }
+    };
+    onEvent('campingAreas:updated', handler);
+    return () => {
+      offEvent('campingAreas:updated', handler);
+    };
+  }, []);
+
   // Versiyon güncellendiğinde full sync tetikle
   useEffect(() => {
     const handler = async () => {
@@ -1594,13 +1644,16 @@ export default function MapScreen() {
         await SecureStore.setItemAsync('isInitialSyncComplete', 'false');
         setSyncProgress({ current: 0, total: 0, isLoading: true });
         
-        const count = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { 
+        const dbInst = getDatabase();
+        const count = await dbInst.fetchAndStoreCampingAreasFromAPI(undefined, { 
           forceFull: true,
+          userId: user?.id !== undefined ? String(user.id) : undefined,
           onProgress: (current, total) => {
             if (__DEV__) console.log('[VERSION_UPDATED][PROGRESS]:', current, '/', total);
             setSyncProgress({ current, total, isLoading: true });
           }
         });
+        if (user?.id) { try { await dbInst.cleanupRevokedFriendAreas(String(user.id)); } catch {} }
         
         if (__DEV__) console.log('[VERSION_UPDATED] Full sync tamamlandı:', count, 'kayıt');
         await SecureStore.setItemAsync('hasInitialSync', 'true');
@@ -1755,13 +1808,16 @@ export default function MapScreen() {
               if (__DEV__) console.log('[DEBUG][SYNC] Delta sync yapılacak (full sync atlanıyor)');
             }
             
-            const count = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { 
+            const dbInst = getDatabase();
+            const count = await dbInst.fetchAndStoreCampingAreasFromAPI(undefined, { 
               forceFull: shouldForceFullSync,
+              userId: user?.id !== undefined ? String(user.id) : undefined,
               onProgress: shouldForceFullSync ? (current, total) => {
                 if (__DEV__) console.log('[DEBUG][PROGRESS] Full sync progress:', current, '/', total);
                 setSyncProgress({ current, total, isLoading: true });
               } : undefined
             });
+            if (user?.id) { try { await dbInst.cleanupRevokedFriendAreas(String(user.id)); } catch {} }
             
             if (shouldForceFullSync) {
               if (__DEV__) console.log('[DEBUG][PROGRESS] Full sync tamamlandı:', count, 'kayıt');
@@ -2430,8 +2486,18 @@ export default function MapScreen() {
                 map.removeLayer(selectedLocationMarker);
               }
               
-              // Add new marker
-              selectedLocationMarker = L.marker([lat, lng]).addTo(map);
+              // Add new marker (pure CSS pin - no SVG/quote escaping issues, works offline)
+              selectedLocationMarker = L.marker([lat, lng], {
+                icon: L.divIcon({
+                  className: '',
+                  html: '<div style="position:relative;width:32px;height:42px;display:flex;justify-content:center;">' +
+                        '<div style="width:28px;height:28px;border-radius:50% 50% 50% 0;background:#ef4444;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);position:absolute;top:0;left:2px;"></div>' +
+                        '<div style="width:6px;height:6px;border-radius:50%;background:#fff;position:absolute;top:11px;left:13px;"></div>' +
+                        '</div>',
+                  iconSize: [32, 42],
+                  iconAnchor: [16, 42]
+                })
+              }).addTo(map);
               selectedLocationMarker.bindPopup('Seçilen konum: ' + lat.toFixed(6) + ', ' + lng.toFixed(6)).openPopup();
               
               // Send location to React Native
@@ -2482,7 +2548,7 @@ export default function MapScreen() {
             }).addTo(map).bindPopup(\`
           <div class="custom-popup" style="display: flex; flex-direction: row; gap: 0; min-width: 320px; max-width: 380px; align-items: stretch;">
             <div style="position: relative; flex: 0 0 45%; width: 45%; min-width: 90px; max-width: 160px; aspect-ratio: 1/1; border-radius: 0; background: #f3f4f6; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0; padding: 0; left: 0; top: 0; border: none;">
-              ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='Kapak' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" />` : `<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
+              ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center;"><svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 137.5 137.5'><g><path fill='none' d='M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z'/><path fill='#444444ff' d='M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z'/></g></svg></div>` : `<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
                 <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 137.5 137.5"><g><path fill="none" d="M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z"/><path fill="#444444ff" d="M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z"/></g></svg>
               </div>`}
               <!-- Favori butonu sol üstte, fotoğraf üzerinde -->
@@ -2666,7 +2732,7 @@ export default function MapScreen() {
           longitude: data.longitude
         });
         setIsLocationPickerMode(false);
-        if (isMounted.current) setShowAddModal(true);
+        if (isMounted.current && !syncProgress.isLoading) setShowAddModal(true);
       } else if (data.type === 'addCampingAreaAtCurrentLocation') {
         // Guest kullanıcı için limit kontrolü
         if (isGuest && !canAddMoreAreas) {
@@ -2689,7 +2755,7 @@ export default function MapScreen() {
           latitude: data.latitude,
           longitude: data.longitude
         });
-        if (isMounted.current) setShowAddModal(true);
+        if (isMounted.current && !syncProgress.isLoading) setShowAddModal(true);
       } else if (data.type === 'campingAreaClicked') {
         const area = campingAreas.find(a => 
           Math.abs((a as any).latitude - data.latitude) < 0.0001 && 
@@ -2818,12 +2884,12 @@ export default function MapScreen() {
       return;
     }
     
-    if (location) {
+      if (location) {
       setSelectedLocation({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude
       });
-      setShowAddModal(true);
+      if (!syncProgress.isLoading) setShowAddModal(true);
     }
   };
 
@@ -3178,12 +3244,19 @@ export default function MapScreen() {
             <Filter size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.actionButton}
-            onPress={isBusy ? undefined : handleManualSync}
+            style={[
+              styles.actionButton,
+              (isFullSyncInProgressRef.current || syncProgress.isLoading) && { opacity: 0.4 }
+            ]}
+            onPress={
+              isBusy || isFullSyncInProgressRef.current || syncProgress.isLoading
+                ? undefined
+                : handleManualSync
+            }
             accessibilityLabel="Manuel Senkronize Et"
-            disabled={isBusy}
+            disabled={isBusy || isFullSyncInProgressRef.current || syncProgress.isLoading}
           >
-            {isBusy ? (
+            {isBusy || isFullSyncInProgressRef.current || syncProgress.isLoading ? (
               <Animated.View style={{ transform: [{ rotate: spin }] }}>
                 <Loader2 size={20} color="#ef4444" />
               </Animated.View>
@@ -3270,7 +3343,7 @@ export default function MapScreen() {
           </Text>
           {syncProgress.total > 100 && (
             <Text style={styles.progressSubText}>
-              Duyuru sekmesi eşitleme sonrası aktif olacaktır.
+               Pasif sekmeler eşitleme sonrası aktif olacaktır.
             </Text>
           )}
         </View>
@@ -3475,13 +3548,21 @@ export default function MapScreen() {
 
           {/* Floating Action Buttons */}
           {!isLocationPickerMode && !showMapPopup && (
-            <View style={styles.fabContainer} pointerEvents={isBusy ? 'none' : 'auto'}>
-              <TouchableOpacity style={[styles.fab, styles.fabSecondary]} onPress={() => {
-                if (isMounted.current) setIsLocationPickerMode(true);
-              }} disabled={isBusy}>
+            <View style={styles.fabContainer} pointerEvents={(isBusy || syncProgress.isLoading) ? 'none' : 'auto'}>
+              <TouchableOpacity
+                style={[styles.fab, styles.fabSecondary, (isBusy || syncProgress.isLoading) ? { opacity: 0.45 } : {}]}
+                onPress={() => {
+                  if (isMounted.current && !syncProgress.isLoading) setIsLocationPickerMode(true);
+                }}
+                disabled={isBusy || syncProgress.isLoading}
+              >
                 <Plus size={28} color="white" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.fab} onPress={handleShowCurrentLocation} disabled={isBusy}>
+              <TouchableOpacity
+                style={[styles.fab, (isBusy || syncProgress.isLoading) ? { opacity: 0.45 } : {}]}
+                onPress={handleShowCurrentLocation}
+                disabled={isBusy || syncProgress.isLoading}
+              >
                 <LocateFixed size={24} color="white" />
               </TouchableOpacity>
             </View>
@@ -3513,7 +3594,7 @@ export default function MapScreen() {
 
           {/* Info Panel */}
           {!isLocationPickerMode && (
-            <View style={styles.infoPanel} pointerEvents={isBusy ? 'none' : 'auto'}>
+            <View style={styles.infoPanel} pointerEvents={(isBusy || syncProgress.isLoading) ? 'none' : 'auto'}>
               <View style={styles.infoPanelHeader}>
                 <MapPin size={16} color="#059669" />
                 <Text style={styles.infoPanelTitle}>
@@ -3527,17 +3608,17 @@ export default function MapScreen() {
             {location && (
               <View style={styles.buttonContainer}>
                 <TouchableOpacity 
-                  style={styles.planCampButton}
+                  style={[styles.planCampButton, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
                   onPress={handlePlanCamp}
-                  disabled={isBusy}
+                  disabled={isBusy || syncProgress.isLoading}
                 >
                   <Calendar size={14} color="#7c3aed" />
                   <Text style={styles.planCampButtonText}>Kamp Planla</Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={styles.currentLocationButton}
+                  style={[styles.currentLocationButton, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
                   onPress={addCampingAreaAtCurrentLocation}
-                  disabled={isBusy}
+                  disabled={isBusy || syncProgress.isLoading}
                 >
                   <Plus size={14} color="#059669" />
                   <Text style={styles.currentLocationButtonText}>Mevcut Konuma Ekle</Text>
@@ -3669,11 +3750,18 @@ export default function MapScreen() {
           setIsLocationPickerMode(false);
           setShowMapPopup(false);
           await refreshData();
-          // Güncellenen kaydı tekrar bul ve state'e yaz
+          // Güncel veriyi doğrudan DB'den oku.
+          // campingAreas closure'u bu noktada stale (eski) olduğundan .find() kullanmak
+          // friend_user_ids gibi yeni yazılan alanların kaybolmasına yol açıyordu.
           if (selectedCampingArea) {
-            const updated = campingAreas.find(a => (a as any).id === (selectedCampingArea as any).id);
-            if (updated) setSelectedCampingArea(updated);
+            try {
+              const updated = await getDatabase().getCampingAreaById((selectedCampingArea as any).id);
+              if (updated) setSelectedCampingArea(updated as any);
+            } catch (_e) { /* ignore */ }
           }
+          // React Native WebView source prop değişikliğine tepki vermez; yeni
+          // görünürlük renginin haritaya yansıması için WebView'i yeniden mount et.
+          setMapKey(prev => prev + 1);
         }}
         currentUserId={user?.id}
       />

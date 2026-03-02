@@ -1,10 +1,8 @@
 import { SvgXml } from 'react-native-svg';
-import { syncAll } from '@/lib/syncManager';
-import { updateCampingAreaOnServer } from '@/lib/campingAreaApi';
 import { campingTypes, getCampingTypeLabel, getCampingTypeIcon } from '@/lib/categories';
 import { TYPE_COLORS } from '../app/icons/svgIcons';
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert, Platform, ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { X, MapPin, Camera, Star, DollarSign, Wifi, Car, Utensils, ShowerHead as Shower, Zap, TreePine, Image as ImageIcon, Trash2, ChevronUp, ChevronDown } from 'lucide-react-native';
 import { Image } from 'react-native';
@@ -16,12 +14,62 @@ function generateImageId() {
   return 'photo_' + Date.now() + '_' + Math.floor(Math.random() * 1e8);
 }
 import { getDatabase } from '@/lib/database';
+import { generateUUID } from '@/lib/uuid';
 import { addPendingChange } from '@/lib/pendingChanges';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { createCampingAreaOnServer, sanitizeCampingAreaData } from '@/lib/campingAreaApi';
 import { getMe } from '@/lib/userCommunityApi';
 import * as SecureStore from 'expo-secure-store';
 import { getLargeItemAsync, setLargeItemAsync } from '@/lib/largeStorage';
+import { API_URL } from '@/lib/config';
+import { getToken } from '@/lib/auth';
+
+// Arkadaş tipi
+// API /friends?user_id=X endpoint'i { id, name, email, avatar_url } formatında döner
+// (types/friend.ts ile uyumlu). user_id de olabilir — her iki alanı destekliyoruz.
+type Friend = {
+  id?: string | number;
+  user_id?: string | number;
+  first_name?: string;
+  last_name?: string;
+  avatar?: string;
+  avatar_url?: string;
+  email?: string;
+  name?: string;
+};
+
+// Basit avatar bileşeni
+const FriendAvatar = ({ avatar, name }: { avatar?: string; name: string }) => (
+  avatar ? (
+    <Image source={{ uri: avatar }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#e5e7eb' }} />
+  ) : (
+    <View style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: '#6b7280', fontWeight: 'bold', fontSize: 18 }}>{(name && name.length > 0) ? name[0].toUpperCase() : '?'}</Text>
+    </View>
+  )
+);
+
+// Arkadaş listesini fetch eden yardımcı fonksiyon
+async function fetchFriendsList(userId: string | number | undefined): Promise<Friend[]> {
+  if (!userId) return [];
+  try {
+    const token = await getToken();
+    if (!token) throw new Error('Oturum bulunamadı (token eksik)');
+    const res = await fetch(`${API_URL}/friends?user_id=${userId}`, {
+      credentials: 'include',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) throw new Error('Arkadaşlar yüklenemedi');
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error('[fetchFriendsList] Hata:', err);
+    throw err;
+  }
+}
 
 interface AddCampingAreaModalProps {
   visible: boolean;
@@ -373,11 +421,38 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     facilities: [] as string[],
     accessibility: [] as string[],
     images: [] as { image_id: string; local_uri: string; image_url: string | null; status: 'pending' | 'uploaded' | 'failed' }[],
-  visibility: 'private' as 'private' | 'public' | 'community',
+  visibility: 'private' as 'private' | 'public' | 'community' | 'friends',
+  friends: [] as string[],
   });
+
+  // Arkadaş seçimi için state
+  const [allFriends, setAllFriends] = useState<Friend[]>([]);
+  const [loadingFriends, setLoadingFriends] = useState(false);
+  const [friendsError, setFriendsError] = useState<string | null>(null);
+
+  // Arkadaş listesi için yüksekliği hesaplamak üzere sabitler
+  const FRIEND_ITEM_HEIGHT = 56; // yaklaşık satır yüksekliği (avatar + paddings)
+  const MAX_VISIBLE_FRIENDS = 5;
 
   const [loading, setLoading] = useState(false);
   const [imagePickerLoading, setImagePickerLoading] = useState(false);
+
+  // Arkadaş listesini yükle (sadece 'friends' görünürlüğü seçiliyse)
+  useEffect(() => {
+    if (!visible || formData.visibility !== 'friends') return;
+    const currentUserId = user?.id;
+    if (!currentUserId) {
+      setFriendsError('Kullanıcı oturumu bulunamadı.');
+      setAllFriends([]);
+      return;
+    }
+    setLoadingFriends(true);
+    setFriendsError(null);
+    fetchFriendsList(currentUserId)
+      .then(list => setAllFriends(list))
+      .catch(e => setFriendsError(e.message || 'Arkadaşlar yüklenemedi'))
+      .finally(() => setLoadingFriends(false));
+  }, [visible, formData.visibility, user?.id]);
 
   // Modal her açıldığında formu sıfırla
   useEffect(() => {
@@ -404,7 +479,10 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
         accessibility: [],
         images: [],
         visibility: 'private',
+        friends: [],
       });
+      setAllFriends([]);
+      setFriendsError(null);
     }
   }, [visible, initialLocation]);
   const toggleAmenity = (amenityId: string) => {
@@ -561,39 +639,51 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       // Öncelik: getMe ile kullanıcıyı çek
       user = await getMe();
       userId = typeof user?.id === 'number' ? user.id : Number(user?.id) || undefined;
-      // Eğer online ve getMe'den kullanıcı geldiyse localUser kaydını kontrol et
+      // Eğer online ve getMe'den kullanıcı geldiyse localUser'ı her zaman güncelle
       if (userId && user) {
-        const { getLargeItemAsync, setLargeItemAsync } = await import('@/lib/largeStorage');
-        const localUserStr = await getLargeItemAsync('localUser');
-        if (!localUserStr) {
-          await setLargeItemAsync('localUser', JSON.stringify(user));
-          console.log('[AddCampingArea] localUser kaydedildi:', userId);
-        }
+        await setLargeItemAsync('localUser', JSON.stringify(user));
+        console.log('[AddCampingArea] localUser güncellendi:', userId);
       }
       if (!userId) {
         // getMe başarısızsa localUser'dan dene
-        const { getLargeItemAsync } = await import('@/lib/largeStorage');
         const localUserStr = await getLargeItemAsync('localUser');
         if (localUserStr) {
           const localUser = JSON.parse(localUserStr);
           userId = typeof localUser?.id === 'number' ? localUser.id : Number(localUser?.id) || undefined;
         }
+        // localUser da yoksa cachedUserData'dan dene (index.tsx'te kaydedilir)
+        if (!userId) {
+          const cachedDataStr = await SecureStore.getItemAsync('cachedUserData');
+          if (cachedDataStr) {
+            const cachedData = JSON.parse(cachedDataStr);
+            userId = typeof cachedData?.id === 'number' ? cachedData.id : Number(cachedData?.id) || undefined;
+            console.log('[AddCampingArea] cachedUserData\'dan userId alındı:', userId);
+          }
+        }
       }
       console.log('[AddCampingArea] Kullanıcı ID:', userId);
     } catch (e) {
-      // getMe başarısızsa localUser'dan dene (OFFLINE mod)
+      // getMe başarısızsa localUser veya cachedUserData'dan dene (OFFLINE mod)
       try {
-        const { getLargeItemAsync } = await import('@/lib/largeStorage');
         const localUserStr = await getLargeItemAsync('localUser');
         if (localUserStr) {
           const localUser = JSON.parse(localUserStr);
           userId = typeof localUser?.id === 'number' ? localUser.id : Number(localUser?.id) || undefined;
           console.log('[AddCampingArea] [OFFLINE] localUser.id ile userId atandı:', userId);
-        } else {
-          console.log('[AddCampingArea] [OFFLINE] localUser bulunamadı. userId atanamadı.');
+        }
+        if (!userId) {
+          // localUser yoksa cachedUserData'dan dene (index.tsx'te kaydedilir)
+          const cachedDataStr = await SecureStore.getItemAsync('cachedUserData');
+          if (cachedDataStr) {
+            const cachedData = JSON.parse(cachedDataStr);
+            userId = typeof cachedData?.id === 'number' ? cachedData.id : Number(cachedData?.id) || undefined;
+            console.log('[AddCampingArea] [OFFLINE] cachedUserData\'dan userId atandı:', userId);
+          } else {
+            console.log('[AddCampingArea] [OFFLINE] localUser ve cachedUserData bulunamadı. userId atanamadı.');
+          }
         }
       } catch (err) {
-        console.log('[AddCampingArea] [OFFLINE] localUser okunamadı:', err);
+        console.log('[AddCampingArea] [OFFLINE] userId okunamadı:', err);
       }
     }
 
@@ -690,9 +780,15 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
        !formData.opening_hours?.weekend?.open && !formData.opening_hours?.weekend?.close);
     const openingHoursForDb = isOpeningHoursEmpty ? null : formData.opening_hours;
 
+    // Eğer görünürlük 'friends' seçili ama paylaşılacak kimse yoksa,
+    // kaydedilen görünürlüğü 'private' (Sadece Ben) yap.
+    const finalVisibility = (formData.visibility === 'friends' && (!formData.friends || formData.friends.length === 0))
+      ? 'private'
+      : formData.visibility;
+
     // community_id'yi belirle: visibility 'community' ise kullanıcının community_id'si
     let communityIdValue: number | undefined = undefined;
-    if (formData.visibility === 'community') {
+    if (finalVisibility === 'community') {
       communityIdValue = userCommunityId;
       if (!communityIdValue) {
         console.warn('[AddCampingArea] community_id eksik, visibility community seçilmiş ama kullanıcının topluluğu yok!');
@@ -700,7 +796,13 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     }
 
     // Yeni kamp alanı verisi
+    // uuid burada üretiliyor; hem lokal DB'ye hem apiData'ya ekleniyor.
+    // Bu sayede syncPendingChanges, CREATE sonrası updateCampingAreaIdByUuid ile
+    // lokal kaydı sunucu id/external_id'siyle güncelleyebilir → uygulama yeniden
+    // açıldığında delta sync duplicate kayıt oluşturmaz.
+    const campingAreaUUID = generateUUID();
     const campingAreaData = {
+      uuid: campingAreaUUID,
       rentech_id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name,
       latitude: parseFloat(formData.latitude),
@@ -726,8 +828,12 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       status: 'active',
       source_id: '0',
       owner_id: userId ? userId.toString() : '',
-      visibility: formData.visibility,
+      // username: getMe() veya localUser'dan gelen kullanıcı adı
+      owner_username: (user as any)?.username || '',
+      visibility: finalVisibility,
       community_id: communityIdValue,
+      friends: finalVisibility === 'friends' ? formData.friends : [],
+      friend_user_ids: finalVisibility === 'friends' ? formData.friends : [],
     };
 
 
@@ -741,12 +847,6 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       // Alert.alert('Bilgi', 'Local kayıt tamamlandı.');
 
 
-      // Sync işlemini tetikle
-      try {
-        await syncAll({ userId });
-      } catch (e) {
-        // ignore
-      }
       if (onSuccess) onSuccess();
       onClose();
 
@@ -783,10 +883,11 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
         photo_links: imagesToSend,
         social_media: campingAreaData.social_media ? campingAreaData.social_media : {},
         tags: { type: formData.type },
-        external_id: localId ? String(localId) : undefined,
+        // external_id: user_{userId}_{localId} formatı — farklı cihazlardaki aynı lokal ID'lerin çakışmasını önler
+        external_id: localId ? `user_${userId}_${localId}` : undefined,
         // created_at ve updated_at kesinlikle gönderilmesin!
       };
-      const apiData = sanitizeCampingAreaData(rawApiData);
+      const apiData = { ...sanitizeCampingAreaData(rawApiData), uuid: campingAreaUUID };
       // Alert.alert('Bilgi', 'API veri hazırlanıyor (sanitize):\n' + JSON.stringify(apiData, null, 2));
 
       // Sunucuya arka planda gönder
@@ -801,6 +902,18 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
         try {
           const apiResult = await createCampingAreaOnServer(apiData);
           console.log('[createCampingAreaOnServer][SUCCESS]', apiResult);
+          // Server'dan dönen external_id'yi local DB'ye kaydet
+          // Server external_id döndürmezse gönderilen değeri (apiData.external_id) fallback olarak kullan
+          const resolvedExternalId = apiResult?.external_id || apiData.external_id;
+          if (localId && resolvedExternalId) {
+            try {
+              const db2 = getDatabase();
+              await db2.updateCampingAreaExternalIdByLocalId(Number(localId), resolvedExternalId);
+              console.log('[AddCampingArea] external_id local DB\'ye kaydedildi:', resolvedExternalId);
+            } catch (e) {
+              console.warn('[AddCampingArea] external_id güncellenemedi:', e);
+            }
+          }
           Alert.alert('Başarılı', 'Kamp alanı başarıyla sunucuya kaydedildi.');
         } catch (e: any) {
           let errorMsg = 'API kaydı başarısız:';
@@ -947,7 +1060,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                       Alert.alert('Uyarı', 'Toplulukla paylaşmak için bir topluluğa üye olmanız gerekiyor.');
                       return;
                     }
-                    setFormData(prev => ({ ...prev, visibility: 'community' }));
+                    setFormData(prev => ({ ...prev, visibility: 'community', friends: [] }));
                   }}
                   disabled={!userCommunityId}
                 >
@@ -955,7 +1068,74 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                     Topluluk (Community)
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 20,
+                    borderWidth: 1,
+                    borderColor: formData.visibility === 'friends' ? '#059669' : '#d1d5db',
+                    backgroundColor: formData.visibility === 'friends' ? '#f0fdf4' : 'white',
+                    marginBottom: 8,
+                  }}
+                  onPress={() => setFormData(prev => ({ ...prev, visibility: 'friends' }))}
+                >
+                  <Text style={{ color: formData.visibility === 'friends' ? '#059669' : '#6b7280', fontWeight: formData.visibility === 'friends' ? '600' : '400' }}>
+                    Arkadaşlar (Friends)
+                  </Text>
+                </TouchableOpacity>
               </View>
+              {/* Arkadaş seçimi alanı */}
+              {formData.visibility === 'friends' && (
+                <View style={{ marginTop: 16 }}>
+                  <Text style={{ fontSize: 14, color: '#374151', fontWeight: '500', marginBottom: 8 }}>Paylaşılacak Arkadaşlar</Text>
+                  {loadingFriends ? (
+                    <ActivityIndicator size="small" color="#059669" />
+                  ) : friendsError ? (
+                    <Text style={{ color: '#dc2626' }}>{friendsError}</Text>
+                  ) : allFriends.length === 0 ? (
+                    <Text style={{ color: '#6b7280' }}>Hiç arkadaşınız yok.</Text>
+                  ) : (
+                    <View style={{ height: Math.min(allFriends.length * FRIEND_ITEM_HEIGHT, MAX_VISIBLE_FRIENDS * FRIEND_ITEM_HEIGHT), borderRadius: 8, backgroundColor: '#f9fafb', overflow: 'hidden' }}>
+                      <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
+                        {allFriends.map((f, idx) => {
+                          // API user_id veya id döndürebilir. Güvenilir ID: önce user_id, sonra id.
+                          // Sadece geçerli sayısal bir ID kullan; yoksa index (hiç seçilmez).
+                          const rawFriendId = f.user_id ?? f.id;
+                          const friendId = (rawFriendId !== undefined && rawFriendId !== null && !isNaN(Number(rawFriendId)) && Number(rawFriendId) > 0)
+                            ? String(rawFriendId)
+                            : String(idx);
+                          const selected = Array.isArray(formData.friends) && formData.friends.includes(friendId);
+                          return (
+                            <View key={friendId} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 4, backgroundColor: selected ? '#f0fdf4' : 'transparent', borderRadius: 8, marginBottom: 2 }}>
+                              <FriendAvatar avatar={f.avatar_url || f.avatar} name={f.name || f.first_name || f.email || ''} />
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontWeight: '600', color: '#374151' }}>{f.name || f.first_name || ''} {f.last_name || ''}</Text>
+                                <Text style={{ color: '#6b7280', fontSize: 13 }}>{f.email}</Text>
+                              </View>
+                              {selected ? (
+                                <TouchableOpacity
+                                  onPress={() => setFormData(prev => ({ ...prev, friends: prev.friends.filter(id => id !== friendId) }))}
+                                  style={{ marginLeft: 8, backgroundColor: '#dcfce7', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#22c55e' }}
+                                >
+                                  <Text style={{ color: '#22c55e', fontWeight: 'bold', fontSize: 13 }}>✓ Ekli</Text>
+                                </TouchableOpacity>
+                              ) : (
+                                <TouchableOpacity
+                                  onPress={() => setFormData(prev => ({ ...prev, friends: [...prev.friends, friendId] }))}
+                                  style={{ marginLeft: 8, backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#d1d5db' }}
+                                >
+                                  <Text style={{ color: '#6b7280', fontWeight: 'bold', fontSize: 13 }}>Ekle</Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Enlem</Text>

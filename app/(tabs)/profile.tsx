@@ -221,6 +221,10 @@ export default function ProfileScreen(props: any) {
   const [friendSearchLoading, setFriendSearchLoading] = useState(false);
   const [friendError, setFriendError] = useState<string | null>(null);
 
+  // Arkadaş listesi yüksekliği sabitleri
+  const FRIEND_ITEM_HEIGHT = 56;
+  const MAX_VISIBLE_FRIENDS = 5;
+
   // Arkadaş listesini getir
   const fetchFriends = async () => {
     try {
@@ -564,6 +568,9 @@ export default function ProfileScreen(props: any) {
   // Topluluk üyeleri (lider için)
   const [communityMembers, setCommunityMembers] = useState<any[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  // Dinamik liste yüksekliği için sabitler
+  const COMMUNITY_ITEM_HEIGHT = 56; // tahmini bir satır yüksekliği
+  const MAX_VISIBLE_MEMBERS = 5;
   // Üye durum modalı
   const [statusModal, setStatusModal] = useState<{ open: boolean; member: any | null }>({ open: false, member: null });
   const statusOptions = [
@@ -572,9 +579,9 @@ export default function ProfileScreen(props: any) {
     { label: 'Reddedildi', value: 'rejected', color: '#dc2626', icon: <XCircle size={16} color="#dc2626" /> },
   ];
 
-  // Topluluk lideri ise üyeleri çek
+  // Topluluk lideri veya üyesi ise üyeleri çek
   useEffect(() => {
-    if (user && membership && membership.role === 'leader' && user.community_id) {
+    if (user && membership && (membership.role === 'leader' || membership.role === 'member') && user.community_id) {
       setMembersLoading(true);
       listCommunityMembers(user.community_id)
         .then(members => {
@@ -1059,6 +1066,7 @@ export default function ProfileScreen(props: any) {
         marginTop: 16,
         backgroundColor: '#059669',
         paddingVertical: 10,
+        paddingHorizontal: 14,
         borderRadius: 12,
         alignItems: 'center',
       }}>
@@ -1091,8 +1099,10 @@ export default function ProfileScreen(props: any) {
            {friends.length === 0 ? (
              <Text style={{ color: '#64748b' }}>Henüz arkadaşınız yok.</Text>
            ) : (
-             friends.map((f, i) => (
-               <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, backgroundColor: '#f1f5f9', borderRadius: 10, padding: 10 }}>
+             <View style={{ width: '100%', height: Math.min(friends.length * FRIEND_ITEM_HEIGHT, MAX_VISIBLE_FRIENDS * FRIEND_ITEM_HEIGHT), borderRadius: 8, backgroundColor: '#f1f5f9', overflow: 'hidden' }}>
+               <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }} contentContainerStyle={{ padding: 8 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
+                 {friends.map((f, i) => (
+                   <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, backgroundColor: '#f1f5f9', borderRadius: 10, padding: 10 }}>
                  <View style={{ marginRight: 12 }}>
                    <FriendAvatar
                      avatar_url={f.avatar_url && f.avatar_url.trim() !== '' ? f.avatar_url : undefined}
@@ -1156,7 +1166,9 @@ export default function ProfileScreen(props: any) {
                    </TouchableOpacity>
                  </View>
                </View>
-             ))
+             ))}
+             </ScrollView>
+             </View>
            )}
            {/* Gelen Arkadaşlık İstekleri Alanı - Kart içinde */}
            {friendRequests.length > 0 && (
@@ -1433,8 +1445,8 @@ export default function ProfileScreen(props: any) {
                   )}
                   </>
                 )}
-                {/* Topluluk lideri ise üyeleri ve status dropdown'u sadece burada göster */}
-                {membership && membership.role === 'leader' && (
+                {/* Topluluk lideri veya üyesi ise üyeleri göster, admin yetkileri sadece liderde */}
+                {membership && (membership.role === 'leader' || membership.role === 'member') && (
                   <View style={{ 
                     marginTop: 20, 
                     width: '100%', 
@@ -1464,7 +1476,9 @@ export default function ProfileScreen(props: any) {
                         Üye bulunamadı.
                       </Text>
                     ) : (
-                      communityMembers.map(member => {
+                      <View style={{ height: Math.min(communityMembers.length * COMMUNITY_ITEM_HEIGHT, MAX_VISIBLE_MEMBERS * COMMUNITY_ITEM_HEIGHT), borderRadius: 8, backgroundColor: '#f8fafc', overflow: 'hidden' }}>
+                        <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }} contentContainerStyle={{ padding: 8 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
+                          {communityMembers.map(member => {
                         // Mevcut durumu başa al, diğerlerini sırala
                         const sortedOptions = [
                           ...statusOptions.filter(opt => opt.value === member.status),
@@ -1518,20 +1532,24 @@ export default function ProfileScreen(props: any) {
                                 <Text style={{ color: '#64748b', fontSize: 13, fontStyle: 'italic' }}>İsimsiz Üye</Text>
                               )}
                             </View>
-                            {/* Durum badge ve seçim butonu */}
-                            <TouchableOpacity
-                              style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: statusOptions.find(opt => opt.value === member.status)?.color + '22', borderWidth: 1, borderColor: statusOptions.find(opt => opt.value === member.status)?.color || '#e5e7eb' }}
-                              onPress={() => setStatusModal({ open: true, member })}
-                              activeOpacity={0.85}
-                            >
-                              {statusOptions.find(opt => opt.value === member.status)?.icon}
-                              <Text style={{ marginLeft: 6, color: statusOptions.find(opt => opt.value === member.status)?.color, fontWeight: 'bold', fontSize: 13 }}>
-                                {statusOptions.find(opt => opt.value === member.status)?.label}
-                              </Text>
-                            </TouchableOpacity>
+                            {/* Durum badge ve seçim butonu: sadece lider/admin için, üye rolünde hiç gösterme */}
+                            {(membership.role === 'leader') && (
+                              <TouchableOpacity
+                                style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: statusOptions.find(opt => opt.value === member.status)?.color + '22', borderWidth: 1, borderColor: statusOptions.find(opt => opt.value === member.status)?.color || '#e5e7eb' }}
+                                onPress={() => setStatusModal({ open: true, member })}
+                                activeOpacity={0.85}
+                              >
+                                {statusOptions.find(opt => opt.value === member.status)?.icon}
+                                <Text style={{ marginLeft: 6, color: statusOptions.find(opt => opt.value === member.status)?.color, fontWeight: 'bold', fontSize: 13 }}>
+                                  {statusOptions.find(opt => opt.value === member.status)?.label}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
                           </View>
                         );
-                      })
+                          })}
+                        </ScrollView>
+                      </View>
                     )}
                   </View>
                 )}

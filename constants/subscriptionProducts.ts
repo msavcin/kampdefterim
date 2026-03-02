@@ -27,8 +27,8 @@ export const SUBSCRIPTION_PRODUCTS = {
  * API_URL lib/config.ts dosyasından import edilmelidir
  */
 export const SUBSCRIPTION_ENDPOINTS = {
-  verify: '/node/subscriptions/verify',
-  status: '/node/subscriptions/status',
+  verify: '/subscriptions/verify',
+  status: '/subscriptions/status',
 };
 
 /**

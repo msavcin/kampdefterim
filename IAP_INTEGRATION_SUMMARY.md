@@ -44,7 +44,7 @@
 
 ### 1. Subscription Doğrulama
 ```
-POST /node/subscriptions/verify
+POST /subscriptions/verify
 Authorization: Bearer <JWT_TOKEN>
 Content-Type: application/json
 ```
@@ -71,7 +71,7 @@ Content-Type: application/json
 
 ### 2. Subscription Durumu Kontrolü
 ```
-GET /node/subscriptions/status
+GET /subscriptions/status
 Authorization: Bearer <JWT_TOKEN>
 ```
 

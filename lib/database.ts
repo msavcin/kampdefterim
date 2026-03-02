@@ -820,13 +820,29 @@ export class DatabaseManager {
       return row;
     });
   }
-  // uuid ile local id güncelle
-  async updateCampingAreaIdByUuid(uuid: string, newId: number) {
+  // uuid ile local id (ve varsa external_id) güncelle
+  async updateCampingAreaIdByUuid(uuid: string, newId: number, externalId?: string) {
+    if (!this.db) await this.init();
+    if (externalId) {
+      await this.db!.runAsync(
+        `UPDATE camping_areas SET id = ?, external_id = ? WHERE uuid = ?`,
+        [newId, externalId, uuid]
+      );
+    } else {
+      await this.db!.runAsync(
+        `UPDATE camping_areas SET id = ? WHERE uuid = ?`,
+        [newId, uuid]
+      );
+    }
+  }
+  // local id ile external_id güncelle (create sonrası server yanıtından)
+  async updateCampingAreaExternalIdByLocalId(localId: number, externalId: string) {
     if (!this.db) await this.init();
     await this.db!.runAsync(
-      `UPDATE camping_areas SET id = ? WHERE uuid = ?`,
-      [newId, uuid]
+      `UPDATE camping_areas SET external_id = ? WHERE id = ?`,
+      [externalId, localId]
     );
+    console.log(`[DB] external_id güncellendi: localId=${localId}, external_id=${externalId}`);
   }
   // --- PENDING CHANGES ---
   async insertPendingChange(type: string, campground_id: string | null, data: any) {
@@ -887,7 +903,7 @@ export class DatabaseManager {
   // fetchAndStoreCampingAreasFromAPI fonksiyonu statement/connection hatalarını önleyecek şekilde güncellendi
   async fetchAndStoreCampingAreasFromAPI(
     apiUrl: string = API_URL + '/campgrounds',
-    options: { forceFull?: boolean; onProgress?: (current: number, total: number) => void } = {}
+    options: { forceFull?: boolean; userId?: string; onProgress?: (current: number, total: number) => void } = {}
   ): Promise<number> {
     // Merkezi queue ile tüm yazma işlemleri sıraya alınır
     return DatabaseManager.enqueue(async () => {
@@ -1043,6 +1059,12 @@ export class DatabaseManager {
             : (item.opening_hours || '');
           // owner_id string'e çevir
           const ownerIdStr = item.owner_id !== undefined && item.owner_id !== null ? String(item.owner_id) : '';
+          // friend_user_ids ve community_id
+          // Sunucu null döndürürse mevcut lokal değeri koru (COALESCE ile UPDATE sırasında korunur)
+          const friendUserIdsStr = (item.friend_user_ids !== null && item.friend_user_ids !== undefined)
+            ? (Array.isArray(item.friend_user_ids) ? JSON.stringify(item.friend_user_ids) : (item.friend_user_ids || '[]'))
+            : null;
+          const communityIdVal = item.community_id ?? null;
           
           // Fee değerini loglayalım
           if (item.external_id === '1472' || item.id === 1472) {
@@ -1067,8 +1089,8 @@ export class DatabaseManager {
               `UPDATE camping_areas SET 
                 name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
                 capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
-                social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?, updated_at = CURRENT_TIMESTAMP,
-                source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?
+                social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
+                source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?
                WHERE external_id = ?`,
               [
                 item.name ?? '',
@@ -1091,13 +1113,15 @@ export class DatabaseManager {
                 item.booking_url ?? '',
                 item.contact_email ?? '',
                 item.last_verified ?? '',
-                item.visibility ?? '',
+                item.visibility || null,
                 ownerIdStr,
                 item.source_id ?? '',
                 photoLinksStr,
                 amenitiesStr,
                 tagsStr,
                 imagesStr,
+                friendUserIdsStr,
+                communityIdVal,
                 item.external_id ?? ''
               ]
             );
@@ -1105,8 +1129,16 @@ export class DatabaseManager {
             // Eğer update başarısızsa ve external_id mevcutsa, aynı koordinatlara veya name'e sahip ve external_id'si boş olan kaydın external_id'sini güncelle
             if (updateResult.changes === 0) {
               // Önce latitude/longitude ile dene, yoksa name ile dene
+              // NOT: Offline eklenen kayıtlar INSERT sonrası external_id = lastInsertRowId ("34" gibi sayısal)
+              // olarak set edilir — NULL değil ama gerçek user_X_Y formatı da değil.
+              // Bu yüzden IS NULL yerine hem NULL hem de sayısal placeholder'ı kapsayan koşul kullanılır.
               const existingRow = await this.db!.getFirstAsync(
-                'SELECT id FROM camping_areas WHERE external_id IS NULL AND ABS(latitude - ?) < 0.0001 AND ABS(longitude - ?) < 0.0001',
+                `SELECT id FROM camping_areas WHERE
+                  (external_id IS NULL OR external_id = ''
+                   OR (external_id NOT LIKE 'user_%'
+                       AND CAST(external_id AS INTEGER) > 0
+                       AND external_id = CAST(CAST(external_id AS INTEGER) AS TEXT)))
+                  AND ABS(latitude - ?) < 0.0001 AND ABS(longitude - ?) < 0.0001`,
                 [item.latitude ?? 0, item.longitude ?? 0]
               ) as any;
               if (existingRow && existingRow.id) {
@@ -1119,8 +1151,8 @@ export class DatabaseManager {
                   `UPDATE camping_areas SET 
                     name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
                     capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
-                    social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?, updated_at = CURRENT_TIMESTAMP,
-                    source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?
+                    social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
+                    source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?
                    WHERE external_id = ?`,
                   [
                     item.name ?? '',
@@ -1143,20 +1175,27 @@ export class DatabaseManager {
                     item.booking_url ?? '',
                     item.contact_email ?? '',
                     item.last_verified ?? '',
-                    item.visibility ?? '',
+                    item.visibility || null,
                     ownerIdStr,
                     item.source_id ?? '',
                     photoLinksStr,
                     amenitiesStr,
                     tagsStr,
                     imagesStr,
+                    friendUserIdsStr,
+                    communityIdVal,
                     item.external_id ?? ''
                   ]
                 );
               } else {
                 // Name ile de dene (daha düşük öncelik)
                 const existingByName = await this.db!.getFirstAsync(
-                  'SELECT id FROM camping_areas WHERE external_id IS NULL AND name = ?',
+                  `SELECT id FROM camping_areas WHERE
+                    (external_id IS NULL OR external_id = ''
+                     OR (external_id NOT LIKE 'user_%'
+                         AND CAST(external_id AS INTEGER) > 0
+                         AND external_id = CAST(CAST(external_id AS INTEGER) AS TEXT)))
+                    AND name = ?`,
                   [item.name ?? '']
                 ) as any;
                 if (existingByName && existingByName.id) {
@@ -1168,8 +1207,8 @@ export class DatabaseManager {
                     `UPDATE camping_areas SET 
                       name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
                       capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
-                      social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?, updated_at = CURRENT_TIMESTAMP,
-                      source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?
+                      social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
+                      source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?
                      WHERE external_id = ?`,
                     [
                       item.name ?? '',
@@ -1192,13 +1231,15 @@ export class DatabaseManager {
                       item.booking_url ?? '',
                       item.contact_email ?? '',
                       item.last_verified ?? '',
-                      item.visibility ?? '',
+                      item.visibility || null,
                       ownerIdStr,
                       item.source_id ?? '',
                       photoLinksStr,
                       amenitiesStr,
                       tagsStr,
                       imagesStr,
+                      friendUserIdsStr,
+                      communityIdVal,
                       item.external_id ?? ''
                     ]
                   );
@@ -1210,8 +1251,8 @@ export class DatabaseManager {
             const insertResult = await this.db!.runAsync(
               `INSERT INTO camping_areas (
                 name, latitude, longitude, type, description, website, phone, opening_hours, capacity, fee, status, rating, review_count, price_range,
-                facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`,
+                facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images, friend_user_ids, community_id
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 item.name ?? '',
                 item.latitude ?? 0,
@@ -1241,7 +1282,9 @@ export class DatabaseManager {
                 photoLinksStr,
                 amenitiesStr,
                 tagsStr,
-                imagesStr
+                imagesStr,
+                friendUserIdsStr ?? '[]',
+                communityIdVal
               ]
             );
             if (item.source_id === 0 || item.source_id === '0') {
@@ -1274,15 +1317,25 @@ export class DatabaseManager {
         
         // Lokal veritabanındaki tüm external_id'li kayıtları al
         const localAreasWithExtId = await this.db!.getAllAsync(
-          'SELECT id, external_id, tags FROM camping_areas WHERE external_id IS NOT NULL AND external_id != ""'
-        ) as { id: number; external_id: string; tags?: string }[];
+          'SELECT id, external_id, tags, owner_id FROM camping_areas WHERE external_id IS NOT NULL AND external_id != ""'
+        ) as { id: number; external_id: string; tags?: string; owner_id?: string }[];
         
         let deletedCount = 0;
         for (const localArea of localAreasWithExtId) {
-          // User submitted alanları SILME (kullanıcıya özel yerler)
+          // User submitted alanları koruma: SADECE kullanıcının kendi oluşturduğu alanlar
           if (localArea.tags && localArea.tags.includes('user_submitted')) {
-            if (__DEV__) console.log(`[USER_SUBMITTED_PROTECTION] Full sync silme atlandı (user_submitted): external_id=${localArea.external_id}`);
-            continue;
+            const isOwnArea = options.userId && String(localArea.owner_id) === String(options.userId);
+            if (isOwnArea) {
+              if (__DEV__) console.log(`[USER_SUBMITTED_PROTECTION] Full sync silme atlandı (kendi alanı): external_id=${localArea.external_id}`);
+              continue;
+            }
+            // Başkasının alanı: sunucuda döndürülmüyorsa erişim kaldırılmış olabilir, sil
+            if (!options.userId) {
+              // userId bilinmiyorsa güvenli tarafta kal, silme
+              if (__DEV__) console.log(`[USER_SUBMITTED_PROTECTION] Full sync: userId bilinmiyor, silme atlandı: external_id=${localArea.external_id}`);
+              continue;
+            }
+            if (__DEV__) console.log(`[USER_SUBMITTED_PROTECTION] Başkasının alanı sunucuda yok → arkadaş erişimi kaldırılmış, siliniyor: external_id=${localArea.external_id}`);
           }
           
           // Pending insert/update varsa SILME (kullanıcının değişikliği kaybolmasın)
@@ -1324,6 +1377,69 @@ export class DatabaseManager {
       }
     });
   }
+  /**
+   * Arkadaş paylaşımından çıkartılan kullanıcının cihazındaki erişimi iptal edilmiş
+   * friend-visibility alanlarını temizler.
+   *
+   * Sunucu GET /campgrounds?source_id=0 ile YALNIZCA erişilebilen user-submitted
+   * alanları döndürür. Lokal DB'deki visibility='friends' ve owner_id!=userId
+   * olan alanlardan sunucuda artık bulunmayanlar silinir.
+   */
+  async cleanupRevokedFriendAreas(userId: string, apiUrl: string = API_URL + '/campgrounds'): Promise<number> {
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      try {
+        // 1. Sunucudan erişilebilen user-submitted alanların external_id listesini al
+        const token = await getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const url = `${apiUrl}?source_id=0`;
+        const response = await apiFetch(url, { headers });
+        if (!response.ok) {
+          if (__DEV__) console.warn('[cleanupRevokedFriendAreas] Sunucu yanıtı başarısız:', response.status);
+          return 0;
+        }
+        const data = await response.json();
+        if (!Array.isArray(data)) return 0;
+
+        const serverExtIds = new Set<string>(
+          (data as any[]).filter(item => item.external_id).map(item => String(item.external_id))
+        );
+
+        // 2. Lokal DB'deki visibility='friends' ve owner_id != userId olan alanları bul
+        const localFriendAreas = await this.db!.getAllAsync(
+          `SELECT id, external_id FROM camping_areas
+           WHERE visibility = 'friends' AND deleted = 0
+             AND owner_id IS NOT NULL AND owner_id != '' AND owner_id != ?`,
+          [userId]
+        ) as { id: number; external_id: string }[];
+
+        // 3. Sunucuda olmayan alanları sil
+        let deletedCount = 0;
+        for (const area of localFriendAreas) {
+          if (!area.external_id) continue;
+          if (!serverExtIds.has(String(area.external_id))) {
+            await this.db!.runAsync('DELETE FROM camping_areas WHERE id = ?', [area.id]);
+            deletedCount++;
+            if (__DEV__) console.log(`[cleanupRevokedFriendAreas] Erişim kaldırılmış alan silindi: external_id=${area.external_id}, id=${area.id}`);
+          }
+        }
+
+        if (deletedCount > 0) {
+          console.log(`[cleanupRevokedFriendAreas] ${deletedCount} erişim kaldırılmış arkadaş alanı temizlendi.`);
+        }
+        return deletedCount;
+      } catch (error) {
+        if (error instanceof Error && (error.message.includes('Network') || error.message.includes('fetch'))) {
+          if (__DEV__) console.warn('[cleanupRevokedFriendAreas] Ağ hatası, temizlik atlandı.');
+        } else {
+          console.error('[cleanupRevokedFriendAreas] Hata:', error);
+        }
+        return 0;
+      }
+    });
+  }
+
   private db: SQLite.SQLiteDatabase | null = null;
 
   async init() {
@@ -1494,6 +1610,17 @@ export class DatabaseManager {
           }
         }
       }
+      // Mevcut satırlardaki boş/null visibility değerlerini onar.
+      // Eski delta sync bug'ı bu alanı '' olarak yazıyordu; bu yüzden
+      // Edit modal her seferinde 'private' gösteriyordu.
+      try {
+        await this.db.execAsync(
+          `UPDATE camping_areas SET visibility = 'private' WHERE (visibility IS NULL OR visibility = '') AND source_id = '0'`
+        );
+        console.log('[DB][MIGRATION] Boş visibility satırları private olarak onarıldı.');
+      } catch (e) {
+        console.warn('[DB][MIGRATION] visibility onarım hatası:', e);
+      }
     } else {
       // Table doesn't exist - create it
       await this.db.execAsync(`
@@ -1658,7 +1785,8 @@ export class DatabaseManager {
             uuid = ?,
             name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
             capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
-            social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?, updated_at = CURRENT_TIMESTAMP,
+            social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?,
+            owner_username = COALESCE(NULLIF(?, ''), owner_username), updated_at = CURRENT_TIMESTAMP,
             source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = ?, community_id = ?
            WHERE external_id = ?`;
           updateParams = [
@@ -1683,8 +1811,12 @@ export class DatabaseManager {
             area.booking_url ?? '',
             area.contact_email ?? '',
             area.last_verified ?? '',
-            area.visibility ?? '',
+            // Boş string yazılmasın; geçerli değer yoksa 'private' kullan
+            (['public', 'private', 'community', 'friends'].includes(area.visibility as string)
+              ? area.visibility
+              : 'private'),
             area.owner_id ?? '',
+            (area as any).owner_username ?? '',
             area.source_id ?? '',
             photoLinksStr,
             amenitiesStr,
@@ -1702,6 +1834,30 @@ export class DatabaseManager {
           // ...existing code...
         }
 
+        // external_id ile güncelleme başarısız olduysa uuid ile dene (local-only kayıtlar)
+        if (result.changes === 0 && area.uuid) {
+          const uuidUpdateQuery = `UPDATE camping_areas SET 
+            name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
+            capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
+            social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?,
+            owner_username = COALESCE(NULLIF(?, ''), owner_username), updated_at = CURRENT_TIMESTAMP,
+            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = ?, community_id = ?
+           WHERE uuid = ?`;
+          const uuidUpdateParams = [
+            area.name, latitude, longitude, area.type,
+            area.description ?? '', area.website ?? '', area.phone ?? '', openingHoursStr,
+            area.capacity ?? 0, feeValue, area.status ?? 'active', area.rating ?? 0, area.review_count ?? 0,
+            area.price_range ?? '', facilitiesStr, accessibilityStr, socialMediaStr,
+            area.booking_url ?? '', area.contact_email ?? '', area.last_verified ?? '',
+            (['public', 'private', 'community', 'friends'].includes(area.visibility as string) ? area.visibility : 'private'),
+            area.owner_id ?? '', (area as any).owner_username ?? '',
+            area.source_id ?? '', photoLinksStr, amenitiesStr, tagsStr, imagesStr, friendUserIdsStr,
+            area.community_id ?? null, area.uuid,
+          ];
+          result = await this.db!.runAsync(uuidUpdateQuery, uuidUpdateParams);
+          console.log('[DB][insertOrUpdateCampingArea] uuid ile güncelleme:', { uuid: area.uuid, changes: result.changes });
+        }
+
         if (result.changes === 0) {
           // Insert if update didn't affect any rows
           // uuid üret
@@ -1712,8 +1868,8 @@ export class DatabaseManager {
           const insertResult = await this.db!.runAsync(
             `INSERT INTO camping_areas (
               uuid, name, latitude, longitude, type, description, website, phone, opening_hours, capacity, fee, status, rating, review_count, price_range,
-              facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, friend_user_ids, community_id, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`
+              facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, friend_user_ids, community_id, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`
             , [
               uuid,
               area.name ?? '',
@@ -1738,6 +1894,7 @@ export class DatabaseManager {
               area.last_verified ?? '',
               area.visibility ?? '',
               area.owner_id ?? '',
+              (area as any).owner_username ?? '',
               friendUserIdsStr,
               area.community_id ?? null,
               // created_at ve updated_at için parametre yok!
@@ -1907,7 +2064,8 @@ export class DatabaseManager {
             if (typeof row.friend_user_ids === 'string') {
               try { return JSON.parse(row.friend_user_ids || '[]'); } catch { return []; }
             }
-            return row.friend_user_ids;
+            // null/undefined ise boş dizi döndür (istemci filtrelerinin yanlış engellemesini önler)
+            return Array.isArray(row.friend_user_ids) ? row.friend_user_ids : [];
           })(),
           opening_hours: (() => {
             if (typeof row.opening_hours === 'string' && row.opening_hours.trim().length > 0 && (row.opening_hours.trim().startsWith('{') || row.opening_hours.trim().startsWith('['))) {
