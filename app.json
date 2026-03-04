@@ -69,8 +69,6 @@
       "expo-sqlite",
       "expo-web-browser",
       "expo-secure-store",
-      "expo-iap",
-      "./plugins/withIapDimensionStrategy",
       ["expo-build-properties", {"android": {"kotlinVersion": "2.0.21"}}]
     ],
     "experiments": {

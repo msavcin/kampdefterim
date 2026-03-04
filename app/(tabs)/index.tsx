@@ -1387,6 +1387,66 @@ export default function MapScreen() {
     setSelectedFilters(FILTERS.map(f => f.key));
   }, [FILTERS]);
 
+  // Türkiye geneli filtre state'leri
+  const [turkeyWideKeys, setTurkeyWideKeys] = useState<string[]>([]);
+  const [turkeyWideAreas, setTurkeyWideAreas] = useState<CampingArea[]>([]);
+
+  // Türkiye geneli alanları DB'den çek (radius kısıtı olmadan)
+  useEffect(() => {
+    if (turkeyWideKeys.length === 0) {
+      setTurkeyWideAreas([]);
+      return;
+    }
+    (async () => {
+      try {
+        const allAreas = await getDatabase().getAllCampingAreas();
+        const filtered = allAreas.filter(area => {
+          if (turkeyWideKeys.includes('own') && user?.id && String(area.owner_id) === String(user.id)) return true;
+          if (turkeyWideKeys.includes('community') && area.community_id && user?.community_id && String(area.community_id) === String(user.community_id)) return true;
+          if (turkeyWideKeys.includes('friend') && Array.isArray(user?.friends) && user.friends.length > 0) {
+            let friendList: any[] = [];
+            try {
+              friendList = Array.isArray(area.friend_user_ids)
+                ? area.friend_user_ids
+                : typeof area.friend_user_ids === 'string'
+                  ? JSON.parse(area.friend_user_ids)
+                  : [];
+            } catch { friendList = []; }
+            const userFriendIds = user.friends.map((f: any) => String(f.id));
+            if (friendList.some((id: any) => userFriendIds.includes(String(id)))) return true;
+          }
+          return false;
+        });
+        setTurkeyWideAreas(filtered);
+      } catch (e) {
+        setTurkeyWideAreas([]);
+      }
+    })();
+  }, [turkeyWideKeys, user?.id, user?.community_id, user?.friends]);
+
+  // Offline modda Türkiye geneli filtreyi sıfırla
+  useEffect(() => {
+    if (!isConnected) {
+      setTurkeyWideKeys([]);
+      setTurkeyWideAreas([]);
+    }
+  }, [isConnected]);
+
+  // Tüm TR aktifken 'user' ve 'system' filtrelerini devre dışı bırak / geri aç
+  useEffect(() => {
+    if (turkeyWideKeys.length > 0) {
+      setSelectedFilters(prev => prev.filter(k => k !== 'user' && k !== 'system'));
+    } else {
+      // Tüm TR kapatılınca user ve system'ı geri ekle
+      setSelectedFilters(prev => {
+        const next = [...prev];
+        if (!next.includes('user')) next.push('user');
+        if (!next.includes('system')) next.push('system');
+        return next;
+      });
+    }
+  }, [turkeyWideKeys.length]);
+
   const [favorites, setFavorites] = useState<Set<string | number>>(new Set());
   // Harita merkezini ve buton state'ini tut
   const [mapCenter, setMapCenter] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -1777,8 +1837,75 @@ export default function MapScreen() {
       if (!selectedFilters.includes('system') && (!area.owner_id || area.owner_id === '')) return false;
       return true;
     });
+
+    // Türkiye geneli alanları ekle (radius dışındaki alanlar, duplicate kontrolü ile)
+    if (turkeyWideAreas.length > 0) {
+      const existingIds = new Set(filtered.map((a: any) => String(a.id)));
+      const accessFiltered = filterCampingAreasByUser(turkeyWideAreas, user, isGuest);
+      for (const area of accessFiltered) {
+        if (existingIds.has(String((area as any).id))) continue;
+
+        // Kamp türü filtresini uygula (selectedTags)
+        const rawTags = (area as any).tags;
+        const areaType: string =
+          (typeof rawTags === 'object' && rawTags !== null && rawTags.type)
+            ? rawTags.type
+            : (typeof rawTags === 'string' && (rawTags as string).trim() !== '')
+              ? rawTags
+              : (typeof (area as any).type === 'string' ? (area as any).type : '');
+        if (selectedTags.length > 0 && areaType && !selectedTags.includes(areaType)) continue;
+
+        // Seçili filtreyi kontrol et (sol checkbox)
+        let include = false;
+        if (turkeyWideKeys.includes('own') && selectedFilters.includes('own') && user?.id && String(area.owner_id) === String(user.id)) include = true;
+        if (turkeyWideKeys.includes('community') && selectedFilters.includes('community') && area.community_id && user?.community_id && String(area.community_id) === String(user.community_id)) include = true;
+        if (turkeyWideKeys.includes('friend') && selectedFilters.includes('friend') && Array.isArray(user?.friends) && user.friends.length > 0) {
+          let friendList: any[] = [];
+          try {
+            friendList = Array.isArray(area.friend_user_ids)
+              ? area.friend_user_ids
+              : typeof area.friend_user_ids === 'string'
+                ? JSON.parse(area.friend_user_ids)
+                : [];
+          } catch { friendList = []; }
+          const userFriendIds = user.friends.map((f: any) => String(f.id));
+          if (friendList.some((id: any) => userFriendIds.includes(String(id)))) include = true;
+        }
+        if (include) {
+          existingIds.add(String((area as any).id));
+          filtered.push(area);
+        }
+      }
+    }
+
     return filtered;
-  }, [campingAreas, user, isGuest, selectedFilters]);
+  }, [campingAreas, user, isGuest, selectedFilters, selectedTags, turkeyWideAreas, turkeyWideKeys]);
+
+  // Türkiye geneli filtre aktifken haritayı tüm markerları kapsayacak şekilde zoom out yap
+  useEffect(() => {
+    if (turkeyWideKeys.length === 0) return;
+    if (!isWebViewReady) return;
+    if (filteredCampingAreas.length === 0) return;
+    const coords = filteredCampingAreas
+      .filter(a => typeof a.latitude === 'number' && typeof a.longitude === 'number')
+      .map(a => [a.latitude, a.longitude]);
+    if (coords.length === 0) return;
+    const script = `
+      (function() {
+        var coords = ${JSON.stringify(coords)};
+        if (typeof map !== 'undefined' && coords.length > 0) {
+          var bounds = L.latLngBounds(coords.map(function(c) { return [c[0], c[1]]; }));
+          map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+        }
+      })();
+      true;
+    `;
+    // WebView hazır olduktan sonra kısa gecikme ile enjekte et
+    const t = setTimeout(() => {
+      safeInjectJavaScript(script, 'TurkeyWideFitBounds');
+    }, 400);
+    return () => clearTimeout(t);
+  }, [turkeyWideKeys, filteredCampingAreas, isWebViewReady]);
 
   // API senkronizasyonu sadece ilk mount'ta çalışsın
   const isSyncingRef = useRef(false);
@@ -2153,6 +2280,14 @@ export default function MapScreen() {
     setSelectedFilters(prev =>
       prev.includes(key)
         ? prev.filter(f => f !== key)
+        : [...prev, key]
+    );
+  }
+
+  const toggleTurkeyWide = (key: string) => {
+    setTurkeyWideKeys(prev =>
+      prev.includes(key)
+        ? prev.filter(k => k !== key)
         : [...prev, key]
     );
   }
@@ -2784,18 +2919,18 @@ export default function MapScreen() {
         });
         if (isMounted.current && !syncProgress.isLoading) setShowAddModal(true);
       } else if (data.type === 'campingAreaClicked') {
-        const area = campingAreas.find(a => 
-          Math.abs((a as any).latitude - data.latitude) < 0.0001 && 
-          Math.abs((a as any).longitude - data.longitude) < 0.0001
+        const area = filteredCampingAreas.find((a: any) =>
+          Math.abs(a.latitude - data.latitude) < 0.0001 &&
+          Math.abs(a.longitude - data.longitude) < 0.0001
         );
         if (area && isMounted.current) {
           setSelectedCampingArea(area as CampingArea);
           setShowDetailModal(true);
         }
       } else if (data.type === 'toggleFavorite') {
-        const area = campingAreas.find(a => 
-          Math.abs((a as any).latitude - data.latitude) < 0.0001 && 
-          Math.abs((a as any).longitude - data.longitude) < 0.0001
+        const area = filteredCampingAreas.find((a: any) =>
+          Math.abs(a.latitude - data.latitude) < 0.0001 &&
+          Math.abs(a.longitude - data.longitude) < 0.0001
         );
         if (area) {
           handleToggleFavorite(area as CampingArea);
@@ -3244,7 +3379,15 @@ export default function MapScreen() {
             <Feather name="search" size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
+            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 },
+              (() => {
+                const isFilterActive =
+                  turkeyWideKeys.length > 0 ||
+                  selectedTags.length < campingTypes.length ||
+                  selectedFilters.length < FILTERS.filter(f => f.visible).length;
+                return isFilterActive ? { backgroundColor: '#059669' } : undefined;
+              })()
+            ]}
             onPress={() => {
               if (syncProgress.isLoading) {
                 return;
@@ -3268,7 +3411,26 @@ export default function MapScreen() {
             }}
             disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
           >
-            <Filter size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
+            {(() => {
+              const disabled = !isConnected && !user?.offline_enabled;
+              const isFilterActive =
+                turkeyWideKeys.length > 0 ||
+                selectedTags.length < campingTypes.length ||
+                selectedFilters.length < FILTERS.filter(f => f.visible).length;
+              return (
+                <View style={{ position: 'relative' }}>
+                  <Filter size={20} color={disabled ? '#9ca3af' : isFilterActive ? '#fff' : '#059669'} />
+                  {isFilterActive && !disabled && (
+                    <View style={{
+                      position: 'absolute', top: -4, right: -4,
+                      width: 8, height: 8, borderRadius: 4,
+                      backgroundColor: '#f97316',
+                      borderWidth: 1, borderColor: '#fff',
+                    }} />
+                  )}
+                </View>
+              );
+            })()}
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -3314,6 +3476,9 @@ export default function MapScreen() {
             disabled={isBusy}
             filteredAreas={filteredCampingAreas}
             userId={user?.id}
+            turkeyWideFilters={turkeyWideKeys}
+            onTurkeyWideToggle={toggleTurkeyWide}
+            isOffline={!isConnected}
           />
         </View>
       )}

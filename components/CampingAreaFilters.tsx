@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import { Check, CheckSquare, Square } from 'lucide-react-native';
+import { Check, CheckSquare, Square, Map } from 'lucide-react-native';
 import { campingTypes } from '../lib/categories';
 import type { CampingArea } from '../lib/database';
 
@@ -21,6 +21,9 @@ interface Props {
   onClose?: () => void;
   disabled?: boolean;
   filteredAreas?: CampingArea[];
+  turkeyWideFilters?: string[];
+  onTurkeyWideToggle?: (key: string) => void;
+  isOffline?: boolean;
 }
 
 // Modern Checkbox Component
@@ -49,7 +52,12 @@ export default function CampingAreaFilters({
   disabled = false,
   filteredAreas = [],
   userId,
+  turkeyWideFilters = [],
+  onTurkeyWideToggle,
+  isOffline = false,
 }: Props & { userId?: string | number }) {
+  // Türkiye geneli checkbox gösterilecek filtre anahtarları
+  const TURKEY_WIDE_KEYS = ['own', 'community', 'friend'];
   // Her kamp türü için alan sayısını hesapla
   const getCountForType = (typeId: string): number => {
     return filteredAreas.filter(area => {
@@ -83,37 +91,67 @@ export default function CampingAreaFilters({
     }).length;
   };
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+    <View style={styles.wrapper}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
       {/* Kullanıcı Filtresi Bölümü */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Kullanıcı Filtresi</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Kullanıcı Filtresi</Text>
+          {onTurkeyWideToggle && (
+            <View style={styles.turkeyHeaderHint}>
+              <Map size={15} color={isOffline ? '#d1d5db' : '#f97316'} strokeWidth={2} />
+              <Text style={[styles.turkeyHeaderHintText, isOffline && { color: '#d1d5db' }]}>Tüm TR</Text>
+            </View>
+          )}
+        </View>
         <View style={styles.userFiltersGrid}>
           {userFilters.filter(f => f.visible).map(filter => {
             const count = getCountForUserFilter(filter.key);
+            // Tüm TR aktifken user ve system pasife alınır
+            const disabledByTurkey = turkeyWideFilters.length > 0 && (filter.key === 'user' || filter.key === 'system');
             return (
-              <TouchableOpacity
-                key={filter.key}
-                style={[
-                  styles.userFilterItem,
-                  filter.disabled && styles.userFilterItemDisabled,
-                ]}
-                onPress={() => !filter.disabled && !disabled && onUserFilterToggle(filter.key)}
-                disabled={filter.disabled || disabled}
-                activeOpacity={0.7}
-              >
-                <ModernCheckbox
-                  checked={selectedUserFilters.includes(filter.key)}
-                  disabled={filter.disabled || disabled}
-                />
-                <Text
+              <View key={filter.key} style={styles.userFilterRow}>
+                <TouchableOpacity
                   style={[
-                    styles.userFilterLabel,
-                    filter.disabled && styles.userFilterLabelDisabled,
+                    styles.userFilterItem,
+                    styles.userFilterItemFlex,
+                    (filter.disabled || disabledByTurkey) && styles.userFilterItemDisabled,
                   ]}
+                  onPress={() => !filter.disabled && !disabled && !disabledByTurkey && onUserFilterToggle(filter.key)}
+                  disabled={filter.disabled || disabled || disabledByTurkey}
+                  activeOpacity={0.7}
                 >
-                  {filter.label} ({count})
-                </Text>
-              </TouchableOpacity>
+                  <ModernCheckbox
+                    checked={selectedUserFilters.includes(filter.key)}
+                    disabled={filter.disabled || disabled || disabledByTurkey}
+                  />
+                  <Text
+                    style={[
+                      styles.userFilterLabel,
+                      (filter.disabled || disabledByTurkey) && styles.userFilterLabelDisabled,
+                    ]}
+                  >
+                    {filter.label} ({count})
+                  </Text>
+                </TouchableOpacity>
+                {TURKEY_WIDE_KEYS.includes(filter.key) && onTurkeyWideToggle && (
+                  <TouchableOpacity
+                    style={[
+                      styles.turkeyCheckbox,
+                      turkeyWideFilters.includes(filter.key) && styles.turkeyCheckboxActive,
+                      (disabled || isOffline) && { opacity: 0.35 },
+                    ]}
+                    onPress={() => !disabled && !isOffline && onTurkeyWideToggle(filter.key)}
+                    disabled={disabled || isOffline}
+                    activeOpacity={0.7}
+                  >
+                    <ModernCheckbox
+                      checked={turkeyWideFilters.includes(filter.key)}
+                      disabled={disabled}
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
             );
           })}
         </View>
@@ -167,21 +205,28 @@ export default function CampingAreaFilters({
         </View>
       </View>
       
-      {/* Uygula Butonu */}
+      </ScrollView>
+
+      {/* Uygula Butonu - her zaman altta sabit */}
       {onClose && (
-        <TouchableOpacity
-          style={styles.applyButton}
-          onPress={onClose}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.applyButtonText}>Uygula</Text>
-        </TouchableOpacity>
+        <View style={styles.applyContainer}>
+          <TouchableOpacity
+            style={styles.applyButton}
+            onPress={onClose}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.applyButtonText}>Uygula</Text>
+          </TouchableOpacity>
+        </View>
       )}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: {
+    flex: 1,
+  },
   container: {
     flex: 1,
   },
@@ -206,6 +251,11 @@ const styles = StyleSheet.create({
   userFiltersGrid: {
     gap: 12,
   },
+  userFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   userFilterItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -216,8 +266,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
+  userFilterItemFlex: {
+    flex: 1,
+  },
   userFilterItemDisabled: {
     opacity: 0.5,
+  },
+  turkeyCheckbox: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    minWidth: 48,
+  },
+  turkeyCheckboxActive: {
+    backgroundColor: '#fff7ed',
+    borderColor: '#f97316',
+  },
+  turkeyHeaderHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  turkeyHeaderHintText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#f97316',
   },
   userFilterLabel: {
     fontSize: 15,
@@ -249,14 +328,14 @@ const styles = StyleSheet.create({
   campingTypesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
   campingTypeChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
     backgroundColor: '#f3f4f6',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: '#e5e7eb',
   },
   campingTypeChipActive: {
@@ -264,30 +343,35 @@ const styles = StyleSheet.create({
     borderColor: '#059669',
   },
   campingTypeLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
     color: '#4b5563',
   },
   campingTypeLabelActive: {
     color: '#fff',
   },
+  applyContainer: {
+    paddingTop: 10,
+    paddingBottom: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    backgroundColor: '#fff',
+  },
   applyButton: {
     backgroundColor: '#059669',
-    paddingVertical: 16,
+    paddingVertical: 13,
     borderRadius: 12,
     alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 8,
     shadowColor: '#059669',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
   },
   applyButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
 });
