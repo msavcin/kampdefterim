@@ -797,8 +797,11 @@ export default function ChecklistScreen({ navigation }: any) {
             body,
             token
           });
-          // Guest kullanıcı ise Alert gösterme, sadece logla
-          if (!(userRole === 'guest' && res.status === 403 && body.includes('yetkisi yok'))) {
+          // Guest kullanıcı 403/yetkisi yok hatası ise Alert gösterme, sadece logla
+          const isGuestPermissionError = res.status === 403 && body.includes('yetkisi yok');
+          if (isGuestPermissionError) {
+            if (__DEV__) console.log('[Custom Checklist] Guest kullanıcı yetki hatası (403), alert gösterilmiyor:', body);
+          } else {
             Alert.alert('Checklist Hatası', `Sunucudan veri alınamadı: ${res.status}\n${body}`);
           }
         } else {

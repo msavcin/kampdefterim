@@ -689,6 +689,8 @@ export default function MapScreen() {
   // Bildirim kuyruğu (üst üste binmeyi önlemek için)
   const notificationQueueRef = useRef<{notifications: any[], type: string}[]>([]);
   const isShowingNotificationRef = useRef(false);
+  // Full sync sırasında biriken bildirimler (sync bitince gösterilecek)
+  const pendingNotificationsAfterSyncRef = useRef<{notifications: any[], type: string}[]>([]);
   
   // Kuyruğa bildirim ekle
   const addToNotificationQueue = (notifs: any[], type: string) => {
@@ -703,6 +705,17 @@ export default function MapScreen() {
     }
   };
   
+  // Full sync tamamlandığında bekleyen bildirimleri kuyruğa boşalt
+  const flushPendingNotifications = () => {
+    const pending = pendingNotificationsAfterSyncRef.current;
+    if (pending.length === 0) return;
+    pendingNotificationsAfterSyncRef.current = [];
+    if (__DEV__) console.log(`[NOTIFICATION QUEUE] Full sync sonrası ${pending.length} bekleyen bildirim kuyruğa ekleniyor`);
+    for (const item of pending) {
+      addToNotificationQueue(item.notifications, item.type);
+    }
+  };
+
   // Kuyruktan sonraki bildirimi göster
   const showNextNotification = () => {
     if (notificationQueueRef.current.length === 0) {
@@ -1320,14 +1333,24 @@ export default function MapScreen() {
         }
 
         // Bildirimleri öncelik sırasıyla kuyruğa ekle (kamp alanı > checklist > arkadaşlık)
+        // Full sync devam ediyorsa beklet, bitince göster
+        const enqueueOrPend = (notifs: any[], type: string) => {
+          if (!Array.isArray(notifs) || notifs.length === 0) return;
+          if (isFullSyncInProgressRef.current) {
+            pendingNotificationsAfterSyncRef.current.push({ notifications: notifs, type });
+            if (__DEV__) console.log(`[NOTIFICATION QUEUE] Full sync devam ediyor, ${type} bildirimi bekletildi (${notifs.length} adet)`);
+          } else {
+            addToNotificationQueue(notifs, type);
+          }
+        };
         if (Array.isArray(campingAreaNotifs) && campingAreaNotifs.length > 0) {
-          addToNotificationQueue(campingAreaNotifs, 'camping_area_share');
+          enqueueOrPend(campingAreaNotifs, 'camping_area_share');
         }
         if (Array.isArray(checklistNotifs) && checklistNotifs.length > 0) {
-          addToNotificationQueue(checklistNotifs, 'checklist_share');
+          enqueueOrPend(checklistNotifs, 'checklist_share');
         }
         if (Array.isArray(friendNotifs) && friendNotifs.length > 0) {
-          addToNotificationQueue(friendNotifs, 'friend_request');
+          enqueueOrPend(friendNotifs, 'friend_request');
         }
       } catch (e) {}
     })();
@@ -1660,6 +1683,8 @@ export default function MapScreen() {
         await SecureStore.setItemAsync('isInitialSyncComplete', 'true');
         isFullSyncInProgressRef.current = false;
         setSyncProgress({ current: 0, total: 0, isLoading: false });
+        // Full sync sırasında biriken bildirimleri göster
+        flushPendingNotifications();
         
         await refreshData();
         fetchAnnouncementsSilently(router, false);
@@ -1825,6 +1850,8 @@ export default function MapScreen() {
               await SecureStore.setItemAsync('isInitialSyncComplete', 'true'); // Duyurular tab'ını aç
               isFullSyncInProgressRef.current = false; // Bildirimleri aç
               setSyncProgress({ current: 0, total: 0, isLoading: false });
+              // Full sync sırasında biriken bildirimleri göster
+              flushPendingNotifications();
               
               // İlk açılışta duyuru bildirimi göster
               try {
@@ -3258,7 +3285,7 @@ export default function MapScreen() {
           >
             {isBusy || isFullSyncInProgressRef.current || syncProgress.isLoading ? (
               <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                <Loader2 size={20} color="#ef4444" />
+                <RefreshCw size={20} color="#ef4444" />
               </Animated.View>
             ) : (
               !isConnected ? (

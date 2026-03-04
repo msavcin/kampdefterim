@@ -6,7 +6,7 @@
 import { Platform, Alert } from 'react-native';
 import { getToken } from './auth';
 import { API_URL } from './config';
-import { SUBSCRIPTION_PRODUCTS, SUBSCRIPTION_ENDPOINTS } from '@/constants/subscriptionProducts';
+import { SUBSCRIPTION_PRODUCTS, SUBSCRIPTION_ENDPOINTS, FALLBACK_PRICES } from '@/constants/subscriptionProducts';
 
 // Conditional import - paket yüklenmemişse mock types kullan
 let RNIap: any;
@@ -64,11 +64,73 @@ let purchaseUpdateSubscription: any = null;
 let purchaseErrorSubscription: any = null;
 let cachedSubscriptions: Subscription[] = [];
 
+// API'den çekilen fiyat önbelleği
+let cachedApiPrices: Record<'ios' | 'android', Record<'monthly' | 'yearly', string>> | null = null;
+
+/**
+ * Backend'den fiyatları çek ve önbelleğe al.
+ * Auth gerektirmez — public endpoint.
+ * Başarısız olursa null döner, çağıran FALLBACK_PRICES kullanır.
+ */
+export async function fetchPricesFromAPI(): Promise<typeof cachedApiPrices> {
+  try {
+    const response = await fetch(`${API_URL}${SUBSCRIPTION_ENDPOINTS.prices}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      console.warn('[IAP] Prices endpoint HTTP', response.status);
+      return null;
+    }
+    const data = await response.json();
+
+    // Sarmalayıcı varsa: { success, prices: { ios, android } }
+    const payload = data?.prices ?? data;
+
+    // Format A — nested object: { ios: { monthly, yearly }, android: { monthly, yearly } }
+    if (payload?.ios?.monthly && payload?.android?.monthly) {
+      cachedApiPrices = {
+        ios: { monthly: payload.ios.monthly, yearly: payload.ios.yearly },
+        android: { monthly: payload.android.monthly, yearly: payload.android.yearly },
+      };
+      console.log('[IAP] API fiyatları yüklendi (object format):', cachedApiPrices);
+      return cachedApiPrices;
+    }
+
+    // Format B — array: [{ platform, plan, price }, ...]
+    if (Array.isArray(payload) && payload.length > 0) {
+      const built: any = { ios: {}, android: {} };
+      for (const row of payload) {
+        const plat: string = row.platform;
+        const plan: string = row.plan;
+        const price: string = row.price ?? row.formatted_price;
+        if ((plat === 'ios' || plat === 'android') && plan && price) {
+          built[plat][plan] = price;
+        }
+      }
+      if (built.ios.monthly && built.android.monthly) {
+        cachedApiPrices = built;
+        console.log('[IAP] API fiyatları yüklendi (array format):', cachedApiPrices);
+        return cachedApiPrices;
+      }
+    }
+
+    console.warn('[IAP] Prices endpoint beklenmedik format:', JSON.stringify(data));
+    return null;
+  } catch (e) {
+    console.warn('[IAP] Prices endpoint erişilemedi, fallback kullanılıyor.', e);
+    return null;
+  }
+}
+
 /**
  * IAP sistemini başlat
  */
 export async function initIAP(): Promise<boolean> {
   try {
+    // API fiyatlarını bekleyerek çek; getPriceForPlan cçağrılmadan önce cachedApiPrices dolsun
+    await fetchPricesFromAPI();
+
     if (!isIAPPackageAvailable) {
       console.warn('[IAP] react-native-iap paketi yüklü değil. Mock mode - satın alma özellikleri çalışmayacak.');
       return false;
@@ -276,17 +338,48 @@ export async function restorePurchases(): Promise<boolean> {
 }
 
 /**
- * Fiyat formatla (₺ işareti ile)
+ * Fiyat formatla
+ * Android yeni IAP sürümlerinde fiyat subscriptionOffers içinde gelir
  */
 export function formatPrice(subscription: Subscription): string {
+  // Android: subscriptionOffers[0].pricingPhases[0].formattedPrice
+  if (Platform.OS === 'android') {
+    const offer = (subscription as any).subscriptionOffers?.[0];
+    const phase = offer?.pricingPhases?.pricingPhaseList?.[0] ?? offer?.pricingPhases?.[0];
+    if (phase?.formattedPrice) {
+      return phase.formattedPrice;
+    }
+  }
+  // iOS ve Android fallback: localizedPrice
   if (subscription.localizedPrice) {
     return subscription.localizedPrice;
   }
-  // Fallback
+  // Manuel format
   if (subscription.currency === 'TRY') {
     return `₺${subscription.price}`;
   }
   return `${subscription.price} ${subscription.currency}`;
+}
+
+/**
+ * Plan için fiyat döndürür — öncelik sırası:
+ *  1. react-native-iap (store gerçek zamanlı)
+ *  2. API'den çekilen fiyat (fetchPricesFromAPI ile doldurulur)
+ *  3. constants/subscriptionProducts.ts => FALLBACK_PRICES (hardcoded)
+ */
+export function getPriceForPlan(plan: 'monthly' | 'yearly', subs: Subscription[] = cachedSubscriptions): string {
+  // 1. Store fiyatı
+  const sub = subs.find(s => s.productId.includes(plan));
+  if (sub) {
+    return formatPrice(sub);
+  }
+  const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
+  // 2. API fiyatı
+  if (cachedApiPrices?.[platform]?.[plan]) {
+    return cachedApiPrices[platform][plan];
+  }
+  // 3. Hardcoded fallback
+  return FALLBACK_PRICES[platform][plan];
 }
 
 /**

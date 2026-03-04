@@ -29,6 +29,7 @@ export const SUBSCRIPTION_PRODUCTS = {
 export const SUBSCRIPTION_ENDPOINTS = {
   verify: '/subscriptions/verify',
   status: '/subscriptions/status',
+  prices: '/subscriptions/prices',
 };
 
 /**
@@ -37,4 +38,19 @@ export const SUBSCRIPTION_ENDPOINTS = {
 export const OFFLINE_RADIUS_KM = {
   monthly: 20,
   yearly: 50,
+};
+
+/**
+ * Fallback fiyatlar — store'a bağlanılamazsa veya fiyat alınamazsa gösterilir.
+ * App Store Connect / Google Play Console'daki gerçek fiyatlarla eşleştirin.
+ */
+export const FALLBACK_PRICES: Record<'ios' | 'android', Record<'monthly' | 'yearly', string>> = {
+  ios: {
+    monthly: '₺49,99',
+    yearly: '₺499,99',
+  },
+  android: {
+    monthly: '₺39,99',
+    yearly: '₺399,99',
+  },
 };

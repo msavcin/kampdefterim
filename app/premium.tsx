@@ -31,6 +31,7 @@ export default function PremiumScreen() {
   const [restoring, setRestoring] = useState(false);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [iapReady, setIapReady] = useState(false);
+  const [pricesLoading, setPricesLoading] = useState(true);
   const [subscriptionStatus, setSubscriptionStatus] = useState<{
     isActive: boolean;
     offlineRadiusKm?: number;
@@ -56,6 +57,8 @@ export default function PremiumScreen() {
       }
     } catch (error) {
       console.error('[Premium] IAP init error:', error);
+    } finally {
+      setPricesLoading(false);
     }
   };
 
@@ -150,12 +153,8 @@ export default function PremiumScreen() {
   };
 
   const getSubscriptionPrice = (plan: 'monthly' | 'yearly'): string => {
-    const sub = subscriptions.find(s => s.productId.includes(plan));
-    if (sub) {
-      return IAPManager.formatPrice(sub);
-    }
-    // Fallback fiyatlar
-    return plan === 'yearly' ? '₺299' : '₺49';
+    if (pricesLoading) return '...';
+    return IAPManager.getPriceForPlan(plan, subscriptions);
   };
 
   return (
@@ -243,7 +242,7 @@ export default function PremiumScreen() {
               </View>
             </View>
             <View style={styles.savingsBadge}>
-              <Text style={styles.savingsText}>Aylığa göre %50 tasarruf edin!</Text>
+              <Text style={styles.savingsText}>Aylığa göre %20 tasarruf edin!</Text>
             </View>
           </TouchableOpacity>
 
