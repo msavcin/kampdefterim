@@ -3,6 +3,7 @@ import { setLargeItemAsync, getLargeItemAsync } from '@/lib/largeStorage';
 import Constants from 'expo-constants';
 import { clearTileCache, getTileCacheStats } from '@/lib/mapTileCache';
 import OfflineRegionSelector from '@/components/OfflineRegionSelector';
+import * as IAPManager from '@/lib/iapManager';
 // Sunucu eşleştirme fonksiyonu: source_id:1 olan tüm kamp alanlarını lokal veritabanına kaydet
 async function syncServerCampgroundsToLocal() {
   try {
@@ -517,6 +518,7 @@ export default function ProfileScreen(props: any) {
   };
 
   const [loading, setLoading] = useState(true);
+  const [monthlyPrice, setMonthlyPrice] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [locationPermissionStatus, setLocationPermissionStatus] = useState<string>('unknown');
@@ -762,6 +764,23 @@ export default function ProfileScreen(props: any) {
 
 
 
+
+      // Store'dan aylık fiyat çek (premium kart için)
+  useEffect(() => {
+    (async () => {
+      try {
+        const ready = await IAPManager.initIAP();
+        if (ready) {
+          const subs = await IAPManager.getSubscriptions();
+          setMonthlyPrice(IAPManager.getPriceForPlan('monthly', subs));
+        } else {
+          setMonthlyPrice(IAPManager.getPriceForPlan('monthly', []));
+        }
+      } catch (e) {
+        setMonthlyPrice(IAPManager.getPriceForPlan('monthly', []));
+      }
+    })();
+  }, []);
 
   // İlk yüklemeler
   useEffect(() => {
@@ -1071,7 +1090,9 @@ export default function ProfileScreen(props: any) {
         alignItems: 'center',
       }}>
         <Text style={{ color: '#fff', fontSize: 15, fontWeight: 'bold' }}>
-          Premium Ol - ₺49/ay'dan başlayan fiyatlarla
+          {monthlyPrice
+            ? `Premium Ol - ${monthlyPrice}/ay'dan başlayan fiyatlarla`
+            : 'Premium Ol - Fiyatlar yükleniyor...'}
         </Text>
       </View>
     </TouchableOpacity>
