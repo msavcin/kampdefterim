@@ -67,6 +67,52 @@ let cachedSubscriptions: Subscription[] = [];
 // API'den çekilen fiyat önbelleği
 let cachedApiPrices: Record<'ios' | 'android', Record<'monthly' | 'yearly', string>> | null = null;
 
+// Sunucudan alınan Google Play public key (base64, boşluksuz)
+let cachedGooglePlayPublicKey: string | null = null;
+
+/**
+ * Sunucudan public key'i alır ve önbelleğe koyar.
+ * Endpoint: GET /node/licenses/public-key (Authorization: Bearer <token>)
+ */
+export async function fetchGooglePlayPublicKey(): Promise<string | null> {
+  try {
+    const token = await getToken();
+    const resp = await fetch(`${API_URL}/node/licenses/public-key`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!resp.ok) {
+      console.warn('[IAP] Public key endpoint hata:', resp.status);
+      return null;
+    }
+
+    const data = await resp.json();
+    const key = (data && data.key) ? String(data.key).replace(/\s+/g, '') : null;
+    if (key) {
+      cachedGooglePlayPublicKey = key;
+      console.log('[IAP] Google Play public key alındı ve önbelleklendi');
+      return key;
+    }
+    return null;
+  } catch (e) {
+    console.warn('[IAP] Public key alınamadı', e);
+    return null;
+  }
+}
+
+export function getCachedGooglePlayPublicKey(): string | null {
+  return cachedGooglePlayPublicKey;
+}
+
+export function toPemFromBase64(base64Key: string): string {
+  const chunks = base64Key.match(/.{1,64}/g)?.join('\n') ?? base64Key;
+  return `-----BEGIN PUBLIC KEY-----\n${chunks}\n-----END PUBLIC KEY-----`;
+}
+
 /**
  * Backend'den fiyatları çek ve önbelleğe al.
  * Auth gerektirmez — public endpoint.
