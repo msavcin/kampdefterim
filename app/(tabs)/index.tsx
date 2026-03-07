@@ -47,6 +47,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import BlurOverlay from '../../components/BlurOverlay';
 import { getSVGIcon } from '../icons/svgIcons';
 import { syncAll } from '@/lib/syncManager';
+import { checkSubscriptionStatus, refreshSubscriptionStatus } from '@/lib/iapManager';
 import * as Location from 'expo-location';
 import { listAnnouncements } from '@/lib/announcementApi';
 import { initSmartCache } from '@/lib/smartOfflineCache';
@@ -1107,11 +1108,12 @@ export default function MapScreen() {
           setCommunityMember(null);
           return;
         }
-        const userData = await getMe(); // users tablosu (artık offline_enabled ve offline_radius_km içerir)
+        const userData = await getMe(); // users tablosu (isPremium, offline_enabled, offline_radius_km içerir)
         
         // Offline ayarlarını logla
         if (__DEV__) {
           console.log('[User] ✅ Offline ayarları:', {
+            isPremium: userData?.isPremium,
             offline_enabled: userData?.offline_enabled,
             offline_radius_km: userData?.offline_radius_km
           });
@@ -1128,7 +1130,41 @@ export default function MapScreen() {
         } catch (e) {
           friends = [];
         }
-        setUser({ ...userData, friends });
+        // Abonelik durumunu backend'den kontrol et — önce refresh (Google Play canlı sorgu), sonra status oku
+        // isPremium tek doğru kaynak (subscription_is_active AND expiresAt > now); offline_enabled fall-back
+        let resolvedOfflineEnabled = userData?.isPremium ?? userData?.offline_enabled;
+        let resolvedOfflineRadiusKm = userData?.offline_radius_km;
+        try {
+          // Refresh: backend'in Google Play API'yi sorgulamasını ve DB'yi güncellemesini sağla
+          await refreshSubscriptionStatus();
+        } catch (_) {}
+        try {
+          const subStatus = await checkSubscriptionStatus();
+          console.log('[User] getMe offline_enabled:', userData?.offline_enabled, '| /status yanıtı:', JSON.stringify(subStatus));
+          if (subStatus !== null) {
+            // /subscriptions/status endpoint'i kesin cevap verdiyse onu kullan
+            const prevOffline = resolvedOfflineEnabled;
+            resolvedOfflineEnabled = subStatus.offlineEnabled ?? subStatus.isActive ?? resolvedOfflineEnabled;
+            resolvedOfflineRadiusKm = subStatus.offlineRadiusKm ?? resolvedOfflineRadiusKm;
+            if (prevOffline !== resolvedOfflineEnabled) {
+              console.warn(`[User] offline_enabled düzeltildi: ${prevOffline} → ${resolvedOfflineEnabled} (isActive=${subStatus.isActive}, offlineEnabled=${subStatus.offlineEnabled})`);
+            }
+            eventBus.emit('subscription:statusUpdated', subStatus);
+          } else {
+            // null döndü: endpoint erişilemedi veya abonelik kaydı yok — getMe değerini koru
+            console.warn('[User] /subscriptions/status null döndü — getMe değeri korunuyor (offline_enabled=' + resolvedOfflineEnabled + ')');
+          }
+        } catch (subErr) {
+          console.warn('[User] checkSubscriptionStatus hatası (yoksayıldı):', subErr);
+        }
+
+        const mergedUser = {
+          ...userData,
+          friends,
+          offline_enabled: resolvedOfflineEnabled,
+          offline_radius_km: resolvedOfflineRadiusKm,
+        };
+        setUser(mergedUser);
         
         // Kullanıcı bilgilerini cache'le (offline kullanım için)
         if (userData) {
@@ -1136,8 +1172,8 @@ export default function MapScreen() {
             await SecureStore.setItemAsync('cachedUserData', JSON.stringify({
               community_id: userData.community_id,
               role: userData.role,
-              offline_enabled: userData.offline_enabled,
-              offline_radius_km: userData.offline_radius_km,
+              offline_enabled: resolvedOfflineEnabled,
+              offline_radius_km: resolvedOfflineRadiusKm,
               id: userData.id
             }));
             console.log('[User] Kullanıcı bilgileri cache\'lendi (offline için)');
@@ -1391,6 +1427,14 @@ export default function MapScreen() {
   const [turkeyWideKeys, setTurkeyWideKeys] = useState<string[]>([]);
   const [turkeyWideAreas, setTurkeyWideAreas] = useState<CampingArea[]>([]);
 
+  // Premium kullanıcı için own ve friend Tüm TR filtrelerini otomatik aktifleştir
+  useEffect(() => {
+    const isPrem = !!(user?.isPremium || user?.offline_enabled);
+    if (!isPrem) {
+      setTurkeyWideKeys(prev => prev.filter(k => k !== 'own' && k !== 'friend' && k !== 'community'));
+    }
+  }, [user?.isPremium, user?.offline_enabled]);
+
   // Türkiye geneli alanları DB'den çek (radius kısıtı olmadan)
   useEffect(() => {
     if (turkeyWideKeys.length === 0) {
@@ -1576,6 +1620,36 @@ export default function MapScreen() {
             }
           }
           
+          // Abonelik durumunu yenile — Google Play canlı sorgusu + DB güncelleme + state senkronizasyonu
+          if (isConnected) {
+            try {
+              await refreshSubscriptionStatus();
+              const subStatus = await checkSubscriptionStatus();
+              console.log('[AppState] Abonelik refresh sonucu:', JSON.stringify(subStatus));
+              if (subStatus !== null) {
+                const newOffline = subStatus.offlineEnabled ?? subStatus.isActive ?? false;
+                setUser((prev: any) => {
+                  if (!prev) return prev;
+                  if (prev.offline_enabled === newOffline) return prev; // değişmediyse render tetikleme
+                  console.warn(`[AppState] offline_enabled güncellendi: ${prev.offline_enabled} → ${newOffline}`);
+                  const updated = { ...prev, offline_enabled: newOffline, offline_radius_km: subStatus.offlineRadiusKm ?? prev.offline_radius_km };
+                  // Cache'i de senkronize et
+                  SecureStore.setItemAsync('cachedUserData', JSON.stringify({
+                    community_id: prev.community_id,
+                    role: prev.role,
+                    offline_enabled: newOffline,
+                    offline_radius_km: subStatus.offlineRadiusKm ?? prev.offline_radius_km,
+                    id: prev.id,
+                  })).catch(() => {});
+                  return updated;
+                });
+                eventBus.emit('subscription:statusUpdated', subStatus);
+              }
+            } catch (subErr) {
+              if (__DEV__) console.warn('[AppState] Abonelik refresh hatası (yoksayıldı):', subErr);
+            }
+          }
+
           // Duyurular için delta sync yap (online ise)
           if (isConnected) {
             try {
@@ -1762,6 +1836,78 @@ export default function MapScreen() {
       offEvent('version_updated', handler);
     };
   }, [hasLocationPermission]);
+
+  // Premium abonelik satın alındığında full sync tetikle
+  useEffect(() => {
+    const handler = async () => {
+      if (__DEV__) console.log('[PREMIUM] premium:subscribed alındı, kullanıcı bilgileri ve full sync güncelleniyor...');
+
+      // 1. Kullanıcı profilini sunucudan taze çek (rol, offline_enabled vb. güncellenmiş olacak)
+      try {
+        const freshUser = await getMe();
+        if (freshUser) {
+          // Friends listesini koru
+          setUser((prev: any) => ({ ...(prev ?? {}), ...freshUser }));
+          // Cache'i güncelle
+          await SecureStore.setItemAsync('cachedUserData', JSON.stringify({
+            community_id: freshUser.community_id,
+            role: freshUser.role,
+            offline_enabled: freshUser.isPremium ?? freshUser.offline_enabled,
+            offline_radius_km: freshUser.offline_radius_km,
+            id: freshUser.id,
+          }));
+          if (__DEV__) console.log('[PREMIUM] Kullanıcı profili güncellendi — role:', freshUser.role, 'isPremium:', freshUser.isPremium, 'offline_enabled:', freshUser.offline_enabled);
+        }
+      } catch (e) {
+        console.warn('[PREMIUM] getMe() hatası:', e);
+      }
+
+      if (!isConnected || hasLocationPermission !== true || isSyncingRef.current) return;
+
+      isSyncingRef.current = true;
+      hasInitialSyncRef.current = true;
+
+      try {
+        const token = await getToken();
+        if (!token) { isSyncingRef.current = false; return; }
+
+        isFullSyncInProgressRef.current = true;
+        await SecureStore.setItemAsync('isInitialSyncComplete', 'false');
+        setSyncProgress({ current: 0, total: 0, isLoading: true });
+
+        const dbInst = getDatabase();
+        const count = await dbInst.fetchAndStoreCampingAreasFromAPI(undefined, {
+          forceFull: true,
+          userId: user?.id !== undefined ? String(user.id) : undefined,
+          onProgress: (current, total) => {
+            setSyncProgress({ current, total, isLoading: true });
+          },
+        });
+        if (user?.id) { try { await dbInst.cleanupRevokedFriendAreas(String(user.id)); } catch {} }
+
+        await SecureStore.setItemAsync('hasInitialSync', 'true');
+        await SecureStore.setItemAsync('isInitialSyncComplete', 'true');
+        isFullSyncInProgressRef.current = false;
+        setSyncProgress({ current: 0, total: 0, isLoading: false });
+        flushPendingNotifications();
+        await refreshData();
+        fetchAnnouncementsSilently(router, false);
+
+        if (__DEV__) console.log('[PREMIUM] Full sync tamamlandı:', count, 'kayıt');
+      } catch (err) {
+        console.error('[PREMIUM] Sync hatası:', err);
+        isFullSyncInProgressRef.current = false;
+        setSyncProgress({ current: 0, total: 0, isLoading: false });
+      } finally {
+        isSyncingRef.current = false;
+      }
+    };
+
+    onEvent('premium:subscribed', handler);
+    return () => {
+      offEvent('premium:subscribed', handler);
+    };
+  }, [hasLocationPermission, isConnected]);
 
   // Konum izni durumunu kontrol et
   // Konum izni durumu sadece requestLocationPermission ile güncellenir
@@ -3479,6 +3625,7 @@ export default function MapScreen() {
             turkeyWideFilters={turkeyWideKeys}
             onTurkeyWideToggle={toggleTurkeyWide}
             isOffline={!isConnected}
+            isPremium={!!(user?.isPremium || user?.offline_enabled)}
           />
         </View>
       )}

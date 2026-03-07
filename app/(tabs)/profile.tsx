@@ -519,6 +519,9 @@ export default function ProfileScreen(props: any) {
 
   const [loading, setLoading] = useState(true);
   const [monthlyPrice, setMonthlyPrice] = useState<string | null>(null);
+  // İptal edilmiş ama süresi dolmamış abonelik banner' için
+  const [cancelledSubDaysLeft, setCancelledSubDaysLeft] = useState<number | null>(null);
+  const [cancelledSubExpiresAt, setCancelledSubExpiresAt] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [locationPermissionStatus, setLocationPermissionStatus] = useState<string>('unknown');
@@ -813,11 +816,35 @@ export default function ProfileScreen(props: any) {
           const accountUser = me?.member?.user ?? me?.user ?? null;
           // Merge so accountUser fields override top-level me when present, but keep other top-level flags (offline_enabled etc.)
           if (accountUser) {
-            return { ...me, ...accountUser, role: accountUser.role ?? me.role };
+            // offline_enabled'ı accountUser spread'i ezmemesi için açıkça koru:
+            // me.offline_enabled veya accountUser.offline_enabled true ise erişim verilir.
+            return {
+              ...me,
+              ...accountUser,
+              role: accountUser.role ?? me.role,
+              offline_enabled: !!(me.offline_enabled || accountUser.offline_enabled),
+            };
           }
           return { ...me, role: me.role };
         })();
         setUser(resolvedUser);
+        // İptal edilmiş ama süresi dolmamış abonelik: expiresAt + autoRenewing=false
+        try {
+          const subStatus = await IAPManager.checkSubscriptionStatus();
+          if (
+            subStatus?.isActive &&
+            subStatus?.autoRenewing === false &&
+            subStatus?.expiresAt
+          ) {
+            const msLeft = new Date(subStatus.expiresAt).getTime() - Date.now();
+            const daysLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
+            setCancelledSubDaysLeft(daysLeft);
+            setCancelledSubExpiresAt(new Date(subStatus.expiresAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }));
+          } else {
+            setCancelledSubDaysLeft(null);
+            setCancelledSubExpiresAt(null);
+          }
+        } catch (_) {}
         if (resolvedUser?.community_id && resolvedUser?.id) {
           const membershipData = await getUserMembershipRemote(resolvedUser.community_id, resolvedUser.id);
           if (membershipData) {
@@ -846,12 +873,35 @@ export default function ProfileScreen(props: any) {
     })();
   }, [isConnected]);
 
+  // subscription:statusUpdated event'ini dinle (index.tsx'ten gelen AppState / startup güncellemeleri)
+  useEffect(() => {
+    const handleSubStatusUpdated = (subStatus: any) => {
+      if (
+        subStatus?.isActive &&
+        subStatus?.autoRenewing === false &&
+        subStatus?.expiresAt
+      ) {
+        const msLeft = new Date(subStatus.expiresAt).getTime() - Date.now();
+        const daysLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
+        setCancelledSubDaysLeft(daysLeft);
+        setCancelledSubExpiresAt(new Date(subStatus.expiresAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }));
+      } else {
+        setCancelledSubDaysLeft(null);
+        setCancelledSubExpiresAt(null);
+      }
+    };
+    eventBus.on('subscription:statusUpdated', handleSubStatusUpdated);
+    return () => { eventBus.off('subscription:statusUpdated', handleSubStatusUpdated); };
+  }, []);
+
   // Guest kullanıcı ise sadece profil kartı göster
   const isGuest = user?.role === 'guest';
-  // Sadece user rolünde ve trial_user: true/1/'true' ise deneme süresi göster
-  const isTrialUser = user?.role === 'user' && (user?.trial_user === true || user?.trial_user === 1 || user?.trial_user === 'true');
+  // Sadece user rolünde, trial_user: true, ve premium değilse deneme süresi göster
+  const isTrialUser = user?.role === 'user'
+    && (user?.trial_user === true || user?.trial_user === 1 || user?.trial_user === 'true')
+    && !user?.offline_enabled; // Premium aboneler trial expire'dan etkilenmez
 
-  // Deneme süresi kalan gün hesabı (created_at'ten 7 gün geriye)
+  // Deneme süresi kalan gün hesabı
   let trialDaysLeft: number | null = null;
   let trialExpired = false;
   if (user?.created_at && isTrialUser) {
@@ -864,6 +914,21 @@ export default function ProfileScreen(props: any) {
       trialExpired = trialDaysLeft === 0;
     } catch {}
   }
+
+  // Deneme süresi dolduysa oturumu kapat (useEffect, JSX içinde değil burada)
+  useEffect(() => {
+    if (!trialExpired || !user) return;
+    Alert.alert('Deneme Süresi Doldu', 'Deneme süreniz sona erdi. Oturumunuz kapatılıyor.', [
+      {
+        text: 'Tamam',
+        onPress: async () => {
+          await removeToken();
+          setUser(null);
+          router.replace('/login');
+        }
+      }
+    ]);
+  }, [trialExpired]);
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -955,30 +1020,13 @@ export default function ProfileScreen(props: any) {
                     : 'Bilinmiyor'}
                 </Text>
               </View>
-              {/* Deneme süresi kalan gün/bilgi satırı (sadece user rolünde trial_user: true ise) */}
-              {isTrialUser && user?.created_at && (
-                trialExpired ? (
-                  // Deneme süresi dolduysa otomatik logout
-                  useEffect(() => {
-                    Alert.alert('Deneme Süresi Doldu', 'Deneme süreniz sona erdi. Oturumunuz kapatılıyor.', [
-                      {
-                        text: 'Tamam',
-                        onPress: async () => {
-                          await removeToken();
-                          setUser(null);
-                          router.replace('/login');
-                        }
-                      }
-                    ]);
-                  }, []),
-                  null
-                ) : (
-                  <View style={{ marginTop: 8, marginBottom: 2, backgroundColor: '#fef3c7', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}>
-                    <Text style={{ color: '#b45309', fontWeight: 'bold', fontSize: 14 }}>
-                      Deneme süresi: {trialDaysLeft} gün kaldı
-                    </Text>
-                  </View>
-                )
+              {/* Deneme süresi kalan gün/bilgi satırı (sadece user rolünde trial_user: true ve premium değilse) */}
+              {isTrialUser && user?.created_at && !trialExpired && (
+                <View style={{ marginTop: 8, marginBottom: 2, backgroundColor: '#fef3c7', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}>
+                  <Text style={{ color: '#b45309', fontWeight: 'bold', fontSize: 14 }}>
+                    Deneme süresi: {trialDaysLeft} gün kaldı
+                  </Text>
+                </View>
               )}
               {/* Guest ise kısıtlı erişim mesajı */}
               {isGuest && (
@@ -1027,6 +1075,46 @@ export default function ProfileScreen(props: any) {
   </View>
 
   {/* Premium Feature Card - Premium olmayan kullanıcılar için */}
+  {/* İptal edilmiş ama süresi dolmamış abonelik uyarısı */}
+  {user?.offline_enabled && cancelledSubDaysLeft !== null && (
+    <View style={{
+      marginHorizontal: 16,
+      marginTop: 16,
+      backgroundColor: '#fffbeb',
+      borderRadius: 16,
+      padding: 16,
+      borderWidth: 1.5,
+      borderColor: '#f59e0b',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    }}>
+      <Text style={{ fontSize: 28 }}>⏳</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#92400e', marginBottom: 4 }}>
+          {cancelledSubDaysLeft > 0
+            ? `Premium hesabının bitmesine ${cancelledSubDaysLeft} gün kaldı.`
+            : 'Premium erişiminiz bugün sona eriyor.'}
+        </Text>
+        <Text style={{ fontSize: 12, color: '#b45309' }}>
+          Aboneliğiniz yenilenmeyecek.{cancelledSubExpiresAt ? ` ${cancelledSubExpiresAt} tarihinde sona erecek.` : ''}
+        </Text>
+      </View>
+      <TouchableOpacity
+        onPress={() => router.push('/premium' as any)}
+        style={{
+          backgroundColor: '#f59e0b',
+          paddingVertical: 8,
+          paddingHorizontal: 14,
+          borderRadius: 10,
+        }}
+        activeOpacity={0.8}
+      >
+        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Premium Ol</Text>
+      </TouchableOpacity>
+    </View>
+  )}
+
   {!user?.offline_enabled && (
     <TouchableOpacity 
       style={{

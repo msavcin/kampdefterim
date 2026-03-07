@@ -38,7 +38,8 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "com.android.vending.BILLING"
       ],
-      "package": "com.spondylus.boltexponativewind"
+      "package": "com.spondylus.boltexponativewind",
+      "versionCode": 41
     },
     "plugins": [
       "expo-router",

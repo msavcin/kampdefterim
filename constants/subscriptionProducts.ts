@@ -17,9 +17,20 @@ export const SUBSCRIPTION_PRODUCTS = {
     yearly: 'com.spondylus.kampdefterim.yearly',
   },
   android: {
-    monthly: 'com.spondylus.boltexponativewind.monthly',
-    yearly: 'com.spondylus.boltexponativewind.yearly',
+    // Google Play'de TEK bir subscription urun var: com.spondylus.boltexponativewind
+    // Aylik / yillik ayrimi base plan ID'leri ile yapilir (ANDROID_BASE_PLAN_IDS)
+    monthly: 'com.spondylus.boltexponativewind',
+    yearly: 'com.spondylus.boltexponativewind',
   },
+};
+
+/**
+ * Android Play Billing v5+: Base Plan ID'leri
+ * Play Console > Abonelik > Temel planlar'daki kimlik degerlerini buraya yazin.
+ */
+export const ANDROID_BASE_PLAN_IDS: Record<'monthly' | 'yearly', string> = {
+  monthly: 'monthly',
+  yearly: 'yearly',
 };
 
 /**
@@ -29,6 +40,7 @@ export const SUBSCRIPTION_PRODUCTS = {
 export const SUBSCRIPTION_ENDPOINTS = {
   verify: '/subscriptions/verify',
   status: '/subscriptions/status',
+  refresh: '/subscriptions/refresh',
   prices: '/subscriptions/prices',
 };
 

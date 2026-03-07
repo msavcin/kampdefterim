@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import { Check, CheckSquare, Square, Map } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import { Check, CheckSquare, Square, Map, Crown } from 'lucide-react-native';
 import { campingTypes } from '../lib/categories';
 import type { CampingArea } from '../lib/database';
 
@@ -24,6 +25,7 @@ interface Props {
   turkeyWideFilters?: string[];
   onTurkeyWideToggle?: (key: string) => void;
   isOffline?: boolean;
+  isPremium?: boolean;
 }
 
 // Modern Checkbox Component
@@ -55,7 +57,9 @@ export default function CampingAreaFilters({
   turkeyWideFilters = [],
   onTurkeyWideToggle,
   isOffline = false,
+  isPremium = false,
 }: Props & { userId?: string | number }) {
+  const router = useRouter();
   // Türkiye geneli checkbox gösterilecek filtre anahtarları
   const TURKEY_WIDE_KEYS = ['own', 'community', 'friend'];
   // Her kamp türü için alan sayısını hesapla
@@ -134,23 +138,44 @@ export default function CampingAreaFilters({
                     {filter.label} ({count})
                   </Text>
                 </TouchableOpacity>
-                {TURKEY_WIDE_KEYS.includes(filter.key) && onTurkeyWideToggle && (
-                  <TouchableOpacity
-                    style={[
-                      styles.turkeyCheckbox,
-                      turkeyWideFilters.includes(filter.key) && styles.turkeyCheckboxActive,
-                      (disabled || isOffline) && { opacity: 0.35 },
-                    ]}
-                    onPress={() => !disabled && !isOffline && onTurkeyWideToggle(filter.key)}
-                    disabled={disabled || isOffline}
-                    activeOpacity={0.7}
-                  >
-                    <ModernCheckbox
-                      checked={turkeyWideFilters.includes(filter.key)}
-                      disabled={disabled}
-                    />
-                  </TouchableOpacity>
-                )}
+                {TURKEY_WIDE_KEYS.includes(filter.key) && onTurkeyWideToggle && (() => {
+                  const premiumOnly = filter.key === 'own' || filter.key === 'friend' || filter.key === 'community';
+                  const lockedByPremium = premiumOnly && !isPremium;
+                  return (
+                    <View style={{ position: 'relative' }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.turkeyCheckbox,
+                          turkeyWideFilters.includes(filter.key) && !lockedByPremium && styles.turkeyCheckboxActive,
+                          (disabled || isOffline) && !lockedByPremium && { opacity: 0.35 },
+                          lockedByPremium && styles.turkeyCheckboxLocked,
+                        ]}
+                        onPress={() => {
+                          if (lockedByPremium) {
+                            router.push('/premium' as any);
+                          } else if (!disabled && !isOffline) {
+                            onTurkeyWideToggle(filter.key);
+                          }
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <ModernCheckbox
+                          checked={turkeyWideFilters.includes(filter.key) && !lockedByPremium}
+                          disabled={disabled || lockedByPremium}
+                        />
+                      </TouchableOpacity>
+                      {lockedByPremium && (
+                        <TouchableOpacity
+                          onPress={() => router.push('/premium' as any)}
+                          style={styles.premiumBadge}
+                          activeOpacity={0.8}
+                        >
+                          <Crown size={10} color="#fff" fill="#fff" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })()}
               </View>
             );
           })}
@@ -287,6 +312,22 @@ const styles = StyleSheet.create({
   turkeyCheckboxActive: {
     backgroundColor: '#fff7ed',
     borderColor: '#f97316',
+  },
+  turkeyCheckboxLocked: {
+    opacity: 0.5,
+  },
+  premiumBadge: {
+    position: 'absolute',
+    top: -10,
+    right: 0,
+    backgroundColor: '#059669',
+    borderRadius: 10,
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#fff',
   },
   turkeyHeaderHint: {
     flexDirection: 'row',

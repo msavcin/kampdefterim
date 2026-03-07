@@ -37,8 +37,8 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
       try {
         const { getMe } = require('../lib/userCommunityApi');
         const user = await getMe();
-        const premium = !!user?.offline_enabled;
-        console.log('[PERMISSION MODAL] Premium durumu:', premium, 'User:', user);
+        const premium = !!(user?.isPremium ?? user?.offline_enabled);
+        console.log('[PERMISSION MODAL] Premium durumu:', premium, 'isPremium:', user?.isPremium, 'offline_enabled:', user?.offline_enabled);
         if (isMounted.current && visible) {
           setIsPremium(premium);
         }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,12 @@ import {
   Alert,
   Platform,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Check, Star, MapPin, Search, Filter, List, Zap, RefreshCw } from 'lucide-react-native';
+import { on as onEvent, off as offEvent } from '@/lib/eventBus';
 import * as IAPManager from '@/lib/iapManager';
 import type { Subscription } from '@/lib/iapManager';
 
@@ -26,6 +28,7 @@ interface PremiumFeature {
 
 export default function PremiumScreen() {
   const router = useRouter();
+  const appStateRef = useRef(AppState.currentState);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly');
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -36,12 +39,47 @@ export default function PremiumScreen() {
     isActive: boolean;
     offlineRadiusKm?: number;
     expiresAt?: string;
+    autoRenewing?: boolean;
   } | null>(null);
 
   useEffect(() => {
     initializeIAP();
     checkCurrentSubscription();
+
+    const handleSubscribed = () => {
+      Alert.alert(
+        '✅ Başarılı!',
+        'Premium aboneliğiniz aktif edildi. Tüm özelliklere erişebilirsiniz.',
+        [{ text: 'Tamam', onPress: () => router.replace('/(tabs)' as any) }]
+      );
+    };
+    onEvent('premium:subscribed', handleSubscribed);
+
+    // index.tsx'in AppState/startup'ta emit ettiği abonelik güncellemelerini dinle
+    const handleSubStatusUpdated = (subStatus: any) => {
+      if (subStatus) {
+        setSubscriptionStatus({
+          isActive: subStatus.isActive,
+          offlineRadiusKm: subStatus.offlineRadiusKm,
+          expiresAt: subStatus.expiresAt,
+          autoRenewing: subStatus.autoRenewing,
+        });
+      }
+    };
+    onEvent('subscription:statusUpdated', handleSubStatusUpdated);
+
+    // AppState: uygulama ön plana geldiğinde (index.tsx'in yakalamadığı durum için güvenlik aği)
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
+        checkCurrentSubscription();
+      }
+      appStateRef.current = nextState;
+    });
+
     return () => {
+      offEvent('premium:subscribed', handleSubscribed);
+      offEvent('subscription:statusUpdated', handleSubStatusUpdated);
+      appStateSub.remove();
       IAPManager.endIAP();
     };
   }, []);
@@ -70,6 +108,7 @@ export default function PremiumScreen() {
           isActive: status.isActive,
           offlineRadiusKm: status.offlineRadiusKm,
           expiresAt: status.expiresAt,
+          autoRenewing: status.autoRenewing,
         });
       }
     } catch (error) {
@@ -125,9 +164,15 @@ export default function PremiumScreen() {
       // Satın alma başarılı oldu, status'u yenile
       await checkCurrentSubscription();
     } catch (error: any) {
-      console.error('[Premium] Purchase error:', error);
-      if (error.code !== 'E_USER_CANCELLED') {
-        Alert.alert('Hata', 'Satın alma işlemi başarısız oldu.');
+      // error bazen plain object, bazen Error instance olabilir
+      const code: string = error?.code ?? '';
+      const message: string =
+        error?.message ||
+        (typeof error === 'string' ? error : 'Satın alma işlemi başarısız oldu.');
+      console.error('[Premium] Purchase error code:', code, 'message:', message);
+      if (code !== 'E_USER_CANCELLED') {
+        const codeStr = code ? `\n(Kod: ${code})` : '';
+        Alert.alert('Satın Alma Hatası', message + codeStr);
       }
     } finally {
       setLoading(false);
@@ -191,10 +236,21 @@ export default function PremiumScreen() {
               <Text style={styles.activeBannerText}>
                 Offline radius: {subscriptionStatus.offlineRadiusKm} km
               </Text>
-              {subscriptionStatus.expiresAt && (
+              {subscriptionStatus.expiresAt && subscriptionStatus.autoRenewing !== false && (
                 <Text style={styles.activeBannerDate}>
                   Yenileme: {new Date(subscriptionStatus.expiresAt).toLocaleDateString('tr-TR')}
                 </Text>
+              )}
+              {/* Otomatik yenileme kapalı uyarısı */}
+              {subscriptionStatus.autoRenewing === false && subscriptionStatus.expiresAt && (
+                <View style={{ marginTop: 6, backgroundColor: '#fef3c7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+                  <Text style={{ fontSize: 12, color: '#92400e', fontWeight: '600' }}>
+                    ⚠️ Otomatik yenileme kapalı
+                  </Text>
+                  <Text style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>
+                    {new Date(subscriptionStatus.expiresAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })} tarihinde sona erecek
+                  </Text>
+                </View>
               )}
             </View>
           </View>
@@ -297,6 +353,13 @@ export default function PremiumScreen() {
             </>
           )}
         </TouchableOpacity>
+
+        {/* Hesap bağlama notu */}
+        <View style={{ marginHorizontal: 4, marginBottom: 12, backgroundColor: '#eff6ff', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#bfdbfe' }}>
+          <Text style={{ fontSize: 12, color: '#1e40af', lineHeight: 18 }}>
+            ℹ️ Her uygulama hesabı için ayrı bir {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} hesabıyla abonelik başlatılması gerekmektedir. Bir {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} hesabıyla yalnızca bir uygulama kullanıcısı premium olabilir.
+          </Text>
+        </View>
 
         {/* Terms */}
         <Text style={styles.termsText}>

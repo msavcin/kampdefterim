@@ -39,3 +39,6 @@ yarn-error.*
 *.tsbuildinfo
 
 .expo/
+
+android/app/release.keystore
+android/gradle.properties
