@@ -93,6 +93,7 @@ const styles = StyleSheet.create({
 import { API_URL } from '@/lib/config';
 import React, { useState, useEffect, useRef } from 'react';
 import * as ImagePicker from 'expo-image-picker';
+import { optimizeImageForWeb } from '../lib/imageOptimizer';
 import { Image } from 'react-native';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 // DatePicker kaldırıldı
@@ -121,13 +122,14 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
       allowsEditing: true,
-      quality: 0.7,
+      quality: 1,
     });
     if (!result.canceled && result.assets && result.assets.length > 0) {
       setUploadingPhoto(true);
       try {
-        const localUri = result.assets[0].uri;
-        const mimeType = result.assets[0].mimeType || 'image/jpeg';
+        const rawUri = result.assets[0].uri;
+        const localUri = await optimizeImageForWeb(rawUri);
+        const mimeType = 'image/jpeg';
         const formData = new FormData();
         let cid = user?.community_id;
         if (user?.role === 'superadmin') cid = 0;

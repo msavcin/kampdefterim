@@ -75,6 +75,7 @@ import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView,
 import { X, Save, Camera, Trash2, ChevronUp, ChevronDown } from 'lucide-react-native';
 import { Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { optimizeImageForWeb } from '@/lib/imageOptimizer';
 import { getDatabase, CampingArea } from '@/lib/database';
 import * as SecureStore from 'expo-secure-store';
 import { updateCampingAreaOnServer, sanitizeCampingAreaData } from '@/lib/campingAreaApi';
@@ -363,29 +364,31 @@ useEffect(() => {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.8,
+        allowsMultipleSelection: true,
+        quality: 1,
       });
-      if (!result.canceled && result.assets && result.assets.length > 0 && result.assets[0].uri) {
-        const imageUri = result.assets[0].uri;
-        // Dosya erişilebilir mi kontrolü (Android/iOS)
-        try {
-          // react-native-fs veya fetch ile erişim kontrolü
-          const response = await fetch(imageUri);
-          if (response.status === 200 || response.ok) {
-            setFormData(prev => ({
-              ...prev,
-              images: [imageUri, ...prev.images.slice(0, 4)] // Max 5 images
-            }));
-          } else {
-            Alert.alert('Yetki Hatası', 'Seçtiğiniz fotoğrafa erişilemiyor. Lütfen farklı bir fotoğraf seçin.');
-            return;
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const optimizedUris: string[] = [];
+        for (const asset of result.assets) {
+          if (!asset.uri) continue;
+          try {
+            const response = await fetch(asset.uri);
+            if (response.status === 200 || response.ok) {
+              const optimizedUri = await optimizeImageForWeb(asset.uri);
+              optimizedUris.push(optimizedUri);
+            }
+          } catch {
+            // Erişilemeyen fotoğrafı atla
           }
-        } catch (err) {
-          Alert.alert('Yetki Hatası', 'Seçtiğiniz fotoğrafa erişilemiyor veya yetki kısıtlaması var. Farklı bir fotoğraf deneyin.');
+        }
+        if (optimizedUris.length === 0) {
+          Alert.alert('Yetki Hatası', 'Seçtiğiniz fotoğraflara erişilemiyor. Farklı fotoğraflar deneyin.');
           return;
         }
+        setFormData(prev => {
+          const combined = [...optimizedUris, ...prev.images];
+          return { ...prev, images: combined.slice(0, 5) }; // Max 5 images
+        });
       } else {
         // Kullanıcı iptal etti veya geçersiz sonuç
         return;
@@ -409,7 +412,7 @@ useEffect(() => {
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [16, 9],
-        quality: 0.8,
+        quality: 1,
       });
       if (!result.canceled && result.assets && result.assets.length > 0 && result.assets[0].uri) {
         const imageUri = result.assets[0].uri;
@@ -417,9 +420,10 @@ useEffect(() => {
         try {
           const response = await fetch(imageUri);
           if (response.status === 200 || response.ok) {
+            const optimizedUri = await optimizeImageForWeb(imageUri);
             setFormData(prev => ({
               ...prev,
-              images: [imageUri, ...prev.images.slice(0, 4)] // Max 5 images
+              images: [optimizedUri, ...prev.images.slice(0, 4)] // Max 5 images
             }));
           } else {
             Alert.alert('Yetki Hatası', 'Çektiğiniz fotoğrafa erişilemiyor. Lütfen farklı bir fotoğraf deneyin.');
@@ -588,28 +592,28 @@ useEffect(() => {
         longitude: (campingArea as any).longitude,
         type: formData.type,
         amenities: formData.amenities,
-        tags: JSON.stringify({ type: formData.type }),
+        tags: { type: formData.type },
         description: formData.description,
         website: formData.website,
         phone: formData.phone,
         opening_hours: openingHoursForDb,
         capacity: formData.capacity ? parseInt(formData.capacity) : undefined,
         fee: formData.fee,
-        images: JSON.stringify(allImages),
-        photo_links: JSON.stringify(allImages),
+        images: allImages,
+        photo_links: allImages,
         rating: campingArea.rating,
         review_count: campingArea.review_count,
         price_range: formData.price_range,
-        facilities: JSON.stringify(formData.facilities),
-        accessibility: JSON.stringify(formData.accessibility),
+        facilities: formData.facilities,
+        accessibility: formData.accessibility,
         booking_url: formData.booking_url,
         contact_email: formData.contact_email,
-        social_media: typeof campingArea.social_media === 'string' ? campingArea.social_media : JSON.stringify(campingArea.social_media ?? {}),
+        social_media: campingArea.social_media ?? {},
         status: 'active',
         visibility: finalVisibility,
         community_id: communityIdValue,
-        friends: JSON.stringify(friendsToUse),
-        friend_user_ids: JSON.stringify(friendsToUse),
+        friends: friendsToUse,
+        friend_user_ids: friendsToUse,
         external_id: resolvedExternalId,
         owner_id: String(resolvedOwnerId),
         source_id: sourceId,

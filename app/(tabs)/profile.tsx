@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { setLargeItemAsync, getLargeItemAsync } from '@/lib/largeStorage';
+import { setLargeItemAsync, getLargeItemAsync, removeLargeItemAsync } from '@/lib/largeStorage';
 import Constants from 'expo-constants';
 import { clearTileCache, getTileCacheStats } from '@/lib/mapTileCache';
 import OfflineRegionSelector from '@/components/OfflineRegionSelector';
@@ -57,10 +57,10 @@ import FriendAvatar from '../../components/FriendAvatar';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MapPin, ChevronRight, Download as DownloadIcon, Upload, RefreshCw, User, Shield, Mail, UserCheck, Building, Eye, CheckCircle, Clock, XCircle, Edit2, X } from 'lucide-react-native';
+import { MapPin, ChevronRight, Download as DownloadIcon, Upload, RefreshCw, User, Shield, Mail, UserCheck, Building, Eye, CheckCircle, Clock, XCircle, Edit2, X, BookOpen } from 'lucide-react-native';
 import { Search, Trash } from 'lucide-react-native';
 import * as Location from 'expo-location';
-import { getMe, listCommunityMembers, getCommunity as getCommunityById, listCommunities } from '../../lib/userCommunityApi';
+import { getMe, listCommunityMembers, getCommunity as getCommunityById, listCommunities, deleteAccount } from '../../lib/userCommunityApi';
 import { joinCommunity } from '../../lib/userCommunityApi';
 import { getUserById } from '../../lib/userMembership';
 import { updateMemberStatus } from '../../lib/updateMemberStatus';
@@ -119,6 +119,7 @@ export default function ProfileScreen(props: any) {
   );
 
   const [pendingLogout, setPendingLogout] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -488,6 +489,10 @@ export default function ProfileScreen(props: any) {
 
   // Kullanıcı adı güncelleme fonksiyonu
   const handleUpdateUsername = async () => {
+    if (user?.role === 'guest') {
+      Alert.alert('Kısıtlı Erişim', 'Misafir hesabıyla kullanıcı adı değiştirilemez.');
+      return;
+    }
     if (!editUsernameValue.trim()) {
       Alert.alert('Hata', 'Kullanıcı adı boş olamaz');
       return;
@@ -994,20 +999,22 @@ export default function ProfileScreen(props: any) {
                   <Edit2 size={16} color="#64748b" />
                 </TouchableOpacity>
               </View>
-              {/* Kullanıcı adı - düzenlenebilir */}
+              {/* Kullanıcı adı - düzenlenebilir (misafirde sadece göster) */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
                 <Text style={profileCardStyles.profileEmail}>{user.username ? `@${user.username}` : '@kullaniciadi'}</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    setEditUsernameValue(user.username || '');
-                    setEditUsernameModal(true);
-                  }}
-                  style={{ marginLeft: 6, padding: 6, backgroundColor: '#f1f5f9', borderRadius: 8 }}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Edit2 size={14} color="#64748b" />
-                </TouchableOpacity>
+                {!isGuest && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditUsernameValue(user.username || '');
+                      setEditUsernameModal(true);
+                    }}
+                    style={{ marginLeft: 6, padding: 6, backgroundColor: '#f1f5f9', borderRadius: 8 }}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Edit2 size={14} color="#64748b" />
+                  </TouchableOpacity>
+                )}
               </View>
               <Text style={profileCardStyles.profileEmail}>{user.email || ''}</Text>
               <View style={profileCardStyles.profileRoleRow}>
@@ -1069,6 +1076,102 @@ export default function ProfileScreen(props: any) {
                 ]);
               }}>
                 <Text style={profileCardStyles.profileLogoutBtnText}>Çıkış Yap</Text>
+              </TouchableOpacity>
+              {/* Delete Account Button */}
+              <TouchableOpacity
+                style={[profileCardStyles.profileLogoutBtn, { backgroundColor: '#fff1f2', marginTop: 10 }]}
+                disabled={isDeletingAccount}
+                onPress={async () => {
+                  // Aktif abonelik kontrolü
+                  let hasActiveAutoRenewingSub = false;
+                  try {
+                    const subStatus = await IAPManager.checkSubscriptionStatus();
+                    hasActiveAutoRenewingSub = !!(subStatus?.isActive && subStatus?.autoRenewing !== false);
+                  } catch (_) {}
+
+                  const subscriptionWarning = hasActiveAutoRenewingSub
+                    ? Platform.OS === 'ios'
+                      ? '\n\n⚠️ Aktif bir aboneliğiniz var. Hesabınızı silmeden önce aboneliğinizi App Store üzerinden iptal etmeniz gerekir; aksi hâlde ücretlendirilmeye devam edersiniz.'
+                      : '\n\n⚠️ Aktif bir aboneliğiniz var. Hesabınızı silmeden önce aboneliğinizi Google Play üzerinden iptal etmeniz gerekir; aksi hâlde ücretlendirilmeye devam edersiniz.'
+                    : '';
+
+                  const subscriptionButtons = hasActiveAutoRenewingSub
+                    ? [
+                        { text: 'İptal', style: 'cancel' as const },
+                        {
+                          text: Platform.OS === 'ios' ? 'Aboneliği Yönet (App Store)' : 'Aboneliği Yönet (Google Play)',
+                          onPress: () => {
+                            const url = Platform.OS === 'ios'
+                              ? 'itms-apps://apps.apple.com/account/subscriptions'
+                              : 'https://play.google.com/store/account/subscriptions';
+                            Linking.openURL(url).catch(() =>
+                              Alert.alert('Hata', 'Abonelik yönetim sayfası açılamadı.')
+                            );
+                          }
+                        },
+                        {
+                          text: 'Yine de Devam Et',
+                          style: 'destructive' as const,
+                          onPress: () => confirmDelete(),
+                        },
+                      ]
+                    : [
+                        { text: 'İptal', style: 'cancel' as const },
+                        { text: 'Evet, Sil', style: 'destructive' as const, onPress: () => confirmDelete() },
+                      ];
+
+                  const confirmDelete = () => {
+                    Alert.alert(
+                      'Son Onay',
+                      'Hesabınız ve tüm verileriniz kalıcı olarak silinecek. Onaylıyor musunuz?',
+                      [
+                        { text: 'İptal', style: 'cancel' },
+                        {
+                          text: 'Hesabımı Sil',
+                          style: 'destructive',
+                          onPress: async () => {
+                            setIsDeletingAccount(true);
+                            try {
+                              await deleteAccount();
+                              // Lokal SQLite cache'i temizle
+                              try {
+                                const db = require('../../lib/database').getDatabase();
+                                await db.dropAllTables();
+                              } catch (_) {}
+                              // Tile cache temizle
+                              try { await clearTileCache(); } catch (_) {}
+                              // SecureStore anahtarlarını temizle
+                              try {
+                                await SecureStore.deleteItemAsync('doNotShowLocationPermissionModal');
+                              } catch (_) {}
+                              // LargeStorage (AsyncStorage) anahtarlarını temizle
+                              try {
+                                await removeLargeItemAsync('shownFriendRequestIds');
+                              } catch (_) {}
+                              // Token'ı sil ve login'e yönlendir
+                              await removeToken();
+                              router.replace('/(auth)/login' as any);
+                            } catch (e: any) {
+                              Alert.alert('Hata', e?.message || 'Hesap silinemedi. Lütfen tekrar deneyin.');
+                            } finally {
+                              setIsDeletingAccount(false);
+                            }
+                          }
+                        }
+                      ]
+                    );
+                  };
+
+                  Alert.alert(
+                    'Hesabı Sil',
+                    `Hesabınızı kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve tüm verileriniz silinecektir.${subscriptionWarning}`,
+                    subscriptionButtons
+                  );
+                }}
+              >
+                <Text style={[profileCardStyles.profileLogoutBtnText, { color: '#dc2626' }]}>
+                  {isDeletingAccount ? 'Siliniyor...' : 'Hesabımı Sil'}
+                </Text>
               </TouchableOpacity>
             </View>
           ) : null}
@@ -1679,6 +1782,32 @@ export default function ProfileScreen(props: any) {
             <Text style={styles.infoLabel}>Versiyon</Text>
             <Text style={styles.infoValue}>{Constants.expoConfig?.version || '1.x'}</Text>
           </View>
+
+          {/* Uygulama Rehberi */}
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#f0fdf4',
+              borderRadius: 12,
+              padding: 14,
+              marginTop: 10,
+              borderWidth: 1,
+              borderColor: '#bbf7d0',
+              gap: 12,
+            }}
+            onPress={() => router.push('/guide' as any)}
+            activeOpacity={0.75}
+          >
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center' }}>
+              <BookOpen size={20} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#065f46' }}>Uygulama Rehberi</Text>
+              <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Ana ekrandaki tüm özellikleri öğren</Text>
+            </View>
+            <ChevronRight size={18} color="#059669" />
+          </TouchableOpacity>
         </View>
 
         {/* Development Tools */}

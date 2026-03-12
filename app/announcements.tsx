@@ -1,12 +1,9 @@
 import * as SecureStore from 'expo-secure-store';
 // Yardımcı fonksiyonlar en üste taşındı
-// Valilik adını id'den döndüren basit bir fonksiyon (geliştirilebilir)
+// Valilik id'den il adını döndürür
 function getValilik(valilikId: number) {
-  // Gelişmiş bir eşleme gerekiyorsa buraya ekleyin
   if (!valilikId) return '';
-  // Örnek: 1 => 'Adana', 2 => 'Adıyaman', ...
-  // Gerçek eşleme için bir map kullanılabilir
-  return `Valilik ID: ${valilikId}`;
+  return `İl: ${valilikIdToProvinceName[valilikId] || `${valilikId}`}`;
 }
 
 // fetchAnnouncements fonksiyonu en üste taşındı
@@ -59,7 +56,7 @@ import { TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import * as Location from 'expo-location';
-import { getValilikIdFromProvinceName, districtToProvinceMap, provinceNameToValilikId } from '@/lib/provinceMap';
+import { getValilikIdFromProvinceName, districtToProvinceMap, provinceNameToValilikId, valilikIdToProvinceName } from '@/lib/provinceMap';
 import { Shield, Tag, Info, AlertTriangle, Bell } from 'lucide-react-native';
 import { API_URL } from '@/lib/config';
 import { getDatabase } from '@/lib/database';
@@ -392,17 +389,23 @@ export default function AnnouncementsScreen() {
       if (__DEV__) console.warn('[ANNOUNCEMENTS_REFRESH] İlk açılış kontrolü hatası:', err);
     }
     
-    // Sıralama: Topluluk duyuruları önce, sonra valilik duyuruları (tarih sıralı)
+    // Sıralama: Superadmin duyuruları (community_id=0, valilik_id yok) en üstte,
+    // ardından topluluk duyuruları, en altta valilik duyuruları (tarih sıralı)
     const sortLeaderFirst = (arr: any[]) => {
+      const byDate = (a: any, b: any) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateB - dateA;
+      };
+      const superadminAnnouncements = arr
+        .filter(a => a.community_id === 0 && !a.valilik_id)
+        .sort(byDate);
       const communityAnnouncements = arr.filter(a => a.community_id !== 0);
       const valilikAnnouncements = arr
-        .filter(a => a.community_id === 0)
-        .sort((a, b) => {
-          const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-          const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-          return dateB - dateA;
-        });
+        .filter(a => a.community_id === 0 && !!a.valilik_id)
+        .sort(byDate);
       return [
+        ...superadminAnnouncements,
         ...communityAnnouncements,
         ...valilikAnnouncements
       ];
@@ -414,12 +417,6 @@ export default function AnnouncementsScreen() {
     setRefreshing(false);
     setLocalLoading(false);
     setApiLoading(false);
-    
-    // Başarılı yenileme bildirimi
-    if (Platform.OS === 'android') {
-      const message = isConnected ? 'Duyurular senkronize edildi ✓' : 'Duyurular güncellendi ✓';
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-    }
     } catch (error) {
       setAnnouncements([]);
       setAnnouncementsLoading(false);
@@ -728,10 +725,12 @@ export default function AnnouncementsScreen() {
                 valilikText = getValilik(a.valilik_id);
               }
               const isLeaderAnnouncement = parseInt(a.created_by) === parseInt(user?.id);
-              // Topluluk duyuruları için özel renkler
-              const isCommunityAnnouncement = a.community_id !== 0;
-              const cardBgColor = isCommunityAnnouncement ? '#f1f5f9' : '#fff';
-              const cardBorderColor = isCommunityAnnouncement ? '#f1f5f9' : '#fff';
+              // created_by > 0 olan duyurular (topluluk veya superadmin paylaşımları) topluluk özelliklerini kullanır
+              const isCommunityAnnouncement = a.community_id !== 0 || parseInt(a.created_by) > 0;
+              // Superadmin duyurusu: community_id = 0 ve created_by > 0
+              const isSuperadminAnnouncement = a.community_id === 0 && parseInt(a.created_by) > 0;
+              const cardBgColor = isSuperadminAnnouncement ? '#fef3c7' : isCommunityAnnouncement ? '#f1f5f9' : '#fff';
+              const cardBorderColor = isSuperadminAnnouncement ? '#fde68a' : isCommunityAnnouncement ? '#f1f5f9' : '#fff';
               // Sadece detaylı bilgi butonu ile açılabilen kart (valilik duyurusu ise kart tıklanamaz)
               const CardContent = (
                 <>
@@ -814,8 +813,8 @@ export default function AnnouncementsScreen() {
                       ))}
                     </View>
                   )}
-                  {/* Özet sadece topluluk duyurularında gösterilir (community_id !== 0) */}
-                  {a.community_id !== 0 && (a.content || a.message) && (() => {
+                  {/* Özet topluluk ve superadmin paylaşımlarında (created_by > 0) gösterilir */}
+                  {isCommunityAnnouncement && (a.content || a.message) && (() => {
                     let text = a.content || a.message;
                     text = text.replace(/<[^>]+>/g, ' ');
                     text = text.replace(/[#*_`~\[\]()\-!>]+/g, ' ');
@@ -866,8 +865,8 @@ export default function AnnouncementsScreen() {
                   )}
                 </>
               );
-              // Valilik duyurusu ise kart tıklanamaz, sadece detaylı bilgi butonu çalışır
-              if (a.community_id === 0) {
+              // created_by > 0 olmayan (sistem/valilik) duyurular tıklanamaz kart olarak gösterilir
+              if (!isCommunityAnnouncement) {
                 return (
                   <View
                     key={a.id || i}

@@ -108,6 +108,23 @@ export async function getMe() {
   return res.json();
 }
 
+export async function deleteAccount() {
+  const token = await getToken();
+  const res = await fetch(`${API_URL}/users/me`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) {
+    let errMsg = 'Hesap silinemedi';
+    try {
+      const body = await res.json();
+      if (body?.error) errMsg = body.error;
+    } catch (_) {}
+    throw new Error(errMsg);
+  }
+  return { success: true };
+}
+
 // --- Topluluk ---
 export async function listCommunities() {
   const res = await fetch(`${API_URL}/communities`);

@@ -109,7 +109,7 @@ export function sanitizeCampingAreaData(data: any) {
   if (data.accessibility !== undefined) sanitized.accessibility = toArray(data.accessibility);
   if (data.amenities     !== undefined) sanitized.amenities     = toArray(data.amenities);
   if (data.images        !== undefined) sanitized.images        = toArray(data.images);
-  // photo_links: backend "string violation" hatası — controller JSON-string bekliyor (spec: "kesinlikle string olarak saklar")
+  // photo_links: backend TEXT sütunu — JSON-encoded string olarak göndermek zorunlu
   if (data.photo_links   !== undefined) sanitized.photo_links   = JSON.stringify(toArray(data.photo_links));
 
   // ── Obje alanlar — gerçek object gönder ────────────────────────────────

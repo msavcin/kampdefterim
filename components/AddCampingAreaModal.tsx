@@ -7,6 +7,7 @@ import { Picker } from '@react-native-picker/picker';
 import { X, MapPin, Camera, Star, DollarSign, Wifi, Car, Utensils, ShowerHead as Shower, Zap, TreePine, Image as ImageIcon, Trash2, ChevronUp, ChevronDown } from 'lucide-react-native';
 import { Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { optimizeImageForWeb } from '@/lib/imageOptimizer';
 import { uploadCampgroundImage } from '@/lib/campgroundImageApi';
 
 // React Native ortamı için basit id üretici
@@ -506,35 +507,36 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.8,
+        allowsMultipleSelection: true,
+        quality: 1,
       });
-      if (!result.canceled && result.assets && result.assets.length > 0 && result.assets[0].uri) {
-        const imageUri = result.assets[0].uri;
-        // Dosya erişilebilir mi kontrolü (Android/iOS)
-        try {
-          // react-native-fs veya fetch ile erişim kontrolü
-          const response = await fetch(imageUri);
-          if (response.status === 200 || response.ok) {
-            const newImage = {
-              image_id: generateImageId(),
-              local_uri: imageUri,
-              image_url: null,
-              status: 'pending' as const,
-            };
-            setFormData(prev => ({
-              ...prev,
-              images: [newImage, ...prev.images.slice(0, 4)] // Max 5 images
-            }));
-          } else {
-            Alert.alert('Yetki Hatası', 'Seçtiğiniz fotoğrafa erişilemiyor. Lütfen farklı bir fotoğraf seçin.');
-            return;
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const newImages: { image_id: string; local_uri: string; image_url: null; status: 'pending' }[] = [];
+        for (const asset of result.assets) {
+          if (!asset.uri) continue;
+          try {
+            const response = await fetch(asset.uri);
+            if (response.status === 200 || response.ok) {
+              const optimizedUri = await optimizeImageForWeb(asset.uri);
+              newImages.push({
+                image_id: generateImageId(),
+                local_uri: optimizedUri,
+                image_url: null,
+                status: 'pending' as const,
+              });
+            }
+          } catch {
+            // Erişilemeyen fotoğrafı atla
           }
-        } catch (err) {
-          Alert.alert('Yetki Hatası', 'Seçtiğiniz fotoğrafa erişilemiyor veya yetki kısıtlaması var. Farklı bir fotoğraf deneyin.');
+        }
+        if (newImages.length === 0) {
+          Alert.alert('Yetki Hatası', 'Seçtiğiniz fotoğraflara erişilemiyor. Farklı fotoğraflar deneyin.');
           return;
         }
+        setFormData(prev => {
+          const combined = [...newImages, ...prev.images];
+          return { ...prev, images: combined.slice(0, 5) }; // Max 5 images
+        });
       } else {
         // Kullanıcı iptal etti veya geçersiz sonuç
         return;
@@ -558,7 +560,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [16, 9],
-        quality: 0.8,
+        quality: 1,
       });
       if (!result.canceled && result.assets && result.assets.length > 0 && result.assets[0].uri) {
         const imageUri = result.assets[0].uri;
@@ -566,9 +568,10 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
         try {
           const response = await fetch(imageUri);
           if (response.status === 200 || response.ok) {
+            const optimizedUri = await optimizeImageForWeb(imageUri);
             const newImage = {
               image_id: generateImageId(),
-              local_uri: imageUri,
+              local_uri: optimizedUri,
               image_url: null,
               status: 'pending' as const,
             };

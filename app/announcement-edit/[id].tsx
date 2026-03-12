@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import CustomDatePicker, { formatDateTR } from '../../components/CustomDatePicker';
 import * as ImagePicker from 'expo-image-picker';
+import { optimizeImageForWeb } from '@/lib/imageOptimizer';
 import { Image } from 'react-native';
 import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { X, Save } from 'lucide-react-native';
@@ -30,13 +31,14 @@ export default function AnnouncementEditScreen({ id, visible, onClose, onSuccess
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
       allowsEditing: true,
-      quality: 0.7,
+      quality: 1,
     });
     if (!result.canceled && result.assets && result.assets.length > 0) {
       setUploadingPhoto(true);
       try {
-        const localUri = result.assets[0].uri;
-        const mimeType = result.assets[0].mimeType || 'image/jpeg';
+        const rawUri = result.assets[0].uri;
+        const localUri = await optimizeImageForWeb(rawUri);
+        const mimeType = 'image/jpeg';
         const formData = new FormData();
         let cid = announcement?.community_id;
         if (announcement?.role === 'superadmin') cid = 0;

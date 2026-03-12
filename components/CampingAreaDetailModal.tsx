@@ -48,7 +48,7 @@ export function prepareCampingAreaPayload(area: any) {
 }
 
 // Local cache ile görsel gösteren yardımcı bileşen
-const GalleryImageWithCache = ({ img, source_id, setImageError, onPress, refreshKey }: { img: string, source_id?: any, setImageError: (v: boolean) => void, onPress?: () => void, refreshKey?: number }) => {
+const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: string, source_id?: any, onPress?: () => void, refreshKey?: number }) => {
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -61,6 +61,13 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress, refresh
       setLoading(true);
       setError(false);
       try {
+        // Yerel file:// URI'leri doğrudan kullan, cache'e indirmeye çalışma
+        if (img.startsWith('file://')) {
+          if (isMounted) setUri(img);
+          if (isMounted) setLoading(false);
+          return;
+        }
+
         let image_id = '';
         if (/photo_\d+_\d+/.test(img)) {
           image_id = img.match(/photo_\d+_\d+/)?.[0] || '';
@@ -92,7 +99,6 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress, refresh
       } catch (e) {
         console.log('[image-cache] ❌ HATA:', e);
         if (isMounted) setError(true);
-        setImageError(true);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -115,8 +121,8 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress, refresh
   }
   if (error || !uri) {
     return (
-      <View style={[styles.galleryImageWrapper, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb' }]}> 
-        <Text style={{ fontSize: 32, color: '#9ca3af' }}>🏕️</Text>
+      <View style={[styles.galleryImageWrapper, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb' }]}>
+        <Image source={require('../assets/images/image-placeholder.png')} style={{ width: '80%', height: '80%', resizeMode: 'contain' }} />
       </View>
     );
   }
@@ -125,7 +131,7 @@ const GalleryImageWithCache = ({ img, source_id, setImageError, onPress, refresh
       <Image
         source={{ uri }}
         style={styles.galleryImage}
-        onError={() => { setError(true); setImageError(true); }}
+        onError={() => { setError(true); }}
       />
       {(source_id === '1' || img.includes('googleusercontent')) && (
         <View style={styles.googleBadge}>
@@ -470,7 +476,6 @@ export default function CampingAreaDetailModal({
   isSuperAdmin = false,
   currentUserId
 }: CampingAreaDetailModalProps & { isSuperAdmin?: boolean; currentUserId?: string | number }) {
-  const [imageError, setImageError] = useState(false);
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
 
   // Modal açıldığında görselleri yeniden kontrol et
@@ -825,7 +830,7 @@ export default function CampingAreaDetailModal({
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* Fotoğraf Galerisi */}
-          {Array.isArray(campingArea.images) && campingArea.images.length > 0 && !imageError ? (
+          {Array.isArray(campingArea.images) && campingArea.images.length > 0 ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -838,7 +843,6 @@ export default function CampingAreaDetailModal({
                     key={idx}
                     img={img}
                     source_id={campingArea.source_id}
-                    setImageError={setImageError}
                     refreshKey={imageRefreshKey}
                     onPress={() => {
                       setLightboxIndex(idx);

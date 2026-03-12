@@ -154,7 +154,7 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
             <Text style={styles.featureItem}>📏 Mesafe hesaplamalarını yap</Text>
           </View>
           <TouchableOpacity style={styles.button} onPress={handleRequestPermission}>
-            <Text style={styles.buttonText}>Konum İzni Ver</Text>
+            <Text style={styles.buttonText}>{Platform.OS === 'ios' ? 'Devam Et' : 'Konum İzni Ver'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.closeButton} onPress={async () => {
             if (!isMounted.current) return;
