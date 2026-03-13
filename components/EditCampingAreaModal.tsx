@@ -474,6 +474,7 @@ useEffect(() => {
 
 // Güncel arkadaş listesini parametre olarak alabilen handleSubmit
   const handleSubmit = async (overrideFriends?: string[]) => {
+    if (loading || imagePickerLoading) return;
     console.log('[DEBUG][HANDLE_SUBMIT] tetiklendi');
     setLoading(true);
     const friendsToUse = overrideFriends ?? formData.friends;
@@ -1194,13 +1195,13 @@ useEffect(() => {
         </ScrollView>
         <View style={styles.footer}>
           <TouchableOpacity
-            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+            style={[styles.submitButton, (loading || imagePickerLoading) && styles.submitButtonDisabled]}
             onPress={() => handleSubmit()}
-            disabled={loading}
+            disabled={loading || imagePickerLoading}
           >
             <Save size={20} color="white" style={{ marginRight: 8 }} />
             <Text style={styles.submitButtonText}>
-              {loading ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
+              {imagePickerLoading ? 'Görseller yükleniyor...' : loading ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
             </Text>
           </TouchableOpacity>
         </View>

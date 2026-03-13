@@ -610,6 +610,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
 
 
   const handleSubmit = async () => {
+    if (loading || imagePickerLoading) return;
     console.log('[AddCampingArea] handleSubmit başladı');
     
     // Guest kullanıcı limit kontrolü
@@ -1262,7 +1263,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                     )}
                     {img.status === 'pending' && (
                       <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: '#f59e0b', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
-                        <Text style={{ color: 'white', fontSize: 10 }}>Yükleniyor...</Text>
+                        <Text style={{ color: 'white', fontSize: 10 }}>Hazır</Text>
                       </View>
                     )}
                     {img.status === 'failed' && (
@@ -1390,8 +1391,8 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                         const obj = val ? JSON.parse(val) : { open: '', close: '' };
                         setFormData(prev => ({ ...prev, opening_hours: { ...prev.opening_hours, weekday: obj } }));
                       }}
-                      style={Platform.OS === 'ios' ? {} : { height: 55 }}
-                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15 } : undefined}
+                      style={Platform.OS === 'ios' ? { color: '#64748b' } : { height: 55, color: '#64748b' }}
+                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15, color: '#64748b' } : undefined}
                     >
                       {timeOptions.map(opt => (
                         <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
@@ -1409,8 +1410,8 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                         const obj = val ? JSON.parse(val) : { open: '', close: '' };
                         setFormData(prev => ({ ...prev, opening_hours: { ...prev.opening_hours, weekend: obj } }));
                       }}
-                      style={Platform.OS === 'ios' ? {} : { height: 55 }}
-                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15 } : undefined}
+                      style={Platform.OS === 'ios' ? { color: '#64748b' } : { height: 55, color: '#64748b' }}
+                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15, color: '#64748b' } : undefined}
                     >
                       {timeOptions.map(opt => (
                         <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
@@ -1512,12 +1513,12 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
             </View>
           )}
           <TouchableOpacity
-            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+            style={[styles.submitButton, (loading || imagePickerLoading) && styles.submitButtonDisabled]}
             onPress={handleSubmit}
-            disabled={loading}
+            disabled={loading || imagePickerLoading}
           >
             <Text style={styles.submitButtonText}>
-              {loading ? 'Kaydediliyor...' : 'Kaydet'}
+              {imagePickerLoading ? 'Görseller yükleniyor...' : loading ? 'Kaydediliyor...' : 'Kaydet'}
             </Text>
           </TouchableOpacity>
         </View>

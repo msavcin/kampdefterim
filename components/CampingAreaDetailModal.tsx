@@ -92,10 +92,15 @@ const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: s
         const localPath = await getCachedImagePath(image_id, img, shouldForceRefresh, isConnected);
         if (localPath.startsWith('file://')) {
           console.log(`[image-cache] ✅ LOCAL gösteriliyor: ${image_id}`);
+          if (isMounted) setUri(localPath);
+        } else if (!isConnected) {
+          // Offline + cache yok: onError güvenilir tetiklenmez, direkt placeholder göster
+          console.log(`[image-cache] ⚠️ Offline & cache yok, placeholder gösteriliyor: ${image_id}`);
+          if (isMounted) setError(true);
         } else {
           console.log(`[image-cache] 🌐 REMOTE gösteriliyor: ${image_id}`);
+          if (isMounted) setUri(localPath);
         }
-        if (isMounted) setUri(localPath);
       } catch (e) {
         console.log('[image-cache] ❌ HATA:', e);
         if (isMounted) setError(true);
@@ -114,15 +119,15 @@ const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: s
 
   if (loading) {
     return (
-      <View style={[styles.galleryImageWrapper, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb' }]}> 
+      <View style={[styles.galleryImageWrapper, { width: 260, height: 180, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb', borderRadius: 12 }]}> 
         <ActivityIndicator size="large" color="#059669" />
       </View>
     );
   }
   if (error || !uri) {
     return (
-      <View style={[styles.galleryImageWrapper, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb' }]}>
-        <Image source={require('../assets/images/image-placeholder.png')} style={{ width: '80%', height: '80%', resizeMode: 'contain' }} />
+      <View style={[styles.galleryImageWrapper, { width: 260, height: 180, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb', borderRadius: 12 }]}>
+        <Image source={require('../assets/images/image-placeholder.png')} style={{ width: 180, height: 140, resizeMode: 'contain' }} />
       </View>
     );
   }

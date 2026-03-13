@@ -1079,7 +1079,7 @@ export default function ProfileScreen(props: any) {
               </TouchableOpacity>
               {/* Delete Account Button */}
               <TouchableOpacity
-                style={[profileCardStyles.profileLogoutBtn, { backgroundColor: '#fff1f2', marginTop: 10 }]}
+                style={{ marginTop: 14, alignItems: 'center', paddingVertical: 4 }}
                 disabled={isDeletingAccount}
                 onPress={async () => {
                   // Aktif abonelik kontrolü
@@ -1169,7 +1169,7 @@ export default function ProfileScreen(props: any) {
                   );
                 }}
               >
-                <Text style={[profileCardStyles.profileLogoutBtnText, { color: '#dc2626' }]}>
+                <Text style={{ color: '#9ca3af', fontSize: 13, textDecorationLine: 'underline' }}>
                   {isDeletingAccount ? 'Siliniyor...' : 'Hesabımı Sil'}
                 </Text>
               </TouchableOpacity>

@@ -7,7 +7,7 @@
       "ios",
       "web"
     ],
-    "version": "1.3.9",
+    "version": "1.3.10",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "kampdefterim",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.spondylus.kampdefterim",
-      "buildNumber": "1.3.9",
+      "buildNumber": "1.3.11",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Harita ve kamp alanlarını görmek için konum izni gereklidir.",
         "NSPhotoLibraryUsageDescription": "Yedek dosyalarını kaydetmek için izin gerekli.",
