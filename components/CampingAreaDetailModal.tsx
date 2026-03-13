@@ -154,10 +154,14 @@ const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: s
 };
 import { ActivityIndicator } from 'react-native';
 import { getCachedImagePath } from '@/lib/imageCache';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image, Alert, Linking, TextInput } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image, Alert, Linking, TextInput, Share } from 'react-native';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
+import * as Clipboard from 'expo-clipboard';
+import { LinearGradient } from 'expo-linear-gradient';
 const defaultImage = require('../assets/images/image-placeholder.png');
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle } from 'lucide-react-native';
+import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle, Share2 } from 'lucide-react-native';
 import { CampingArea, getDatabase } from '@/lib/database';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { deleteCampingAreaSmart } from '@/lib/syncManager';
@@ -525,6 +529,12 @@ export default function CampingAreaDetailModal({
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const isConnected = useNetworkStatus();
   const [showMapMenu, setShowMapMenu] = useState(false);
+
+  // Instagram paylaşım için state'ler
+  const [showInstagramModal, setShowInstagramModal] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareCaption, setShareCaption] = useState('');
+  const [captionCopied, setCaptionCopied] = useState(false);
   
   // Hata bildirimi için state'ler
   const [showErrorReport, setShowErrorReport] = useState(false);
@@ -731,6 +741,123 @@ export default function CampingAreaDetailModal({
     onEdit?.(campingArea);
   };
 
+  const handleOpenShareModal = () => {
+    if (!campingArea) return;
+
+    const title = campingArea.name || 'Kamp Alanı';
+    const lines: string[] = [`🏕️ ${title}`];
+
+    // Kamp türü
+    const typeLabel = getCampingTypeLabel(
+      (campingArea.tags && campingArea.tags.type) ? campingArea.tags.type : campingArea.type
+    );
+    if (typeLabel) lines.push(`📌 ${typeLabel}`);
+
+    // Açıklama
+    const desc =
+      typeof campingArea.description === 'string' && campingArea.description.trim()
+        ? campingArea.description.trim()
+        : '';
+    if (desc) { lines.push(''); lines.push(desc); }
+
+    // Olanaklar
+    if (Array.isArray(campingArea.amenities) && campingArea.amenities.length > 0) {
+      lines.push('');
+      const amenityEmojis = campingArea.amenities.map(a => `${getAmenityIcon(String(a))} ${String(a)}`);
+      lines.push(`✅ Olanaklar: ${amenityEmojis.join(' · ')}`);
+    }
+
+    // Konum (il/ilçe)
+    const city = (campingArea as any).city || (campingArea as any).province || '';
+    const district = (campingArea as any).district || '';
+    if (city || district) {
+      lines.push('');
+      lines.push(`📍 ${[district, city].filter(Boolean).join(', ')}`);
+    }
+
+    // Kapasite
+    const cap = Number(campingArea.capacity);
+    if (cap > 0) lines.push(`👥 Kapasite: ${cap} kişi`);
+
+    // Fiyat / Ücret
+    const priceLabel = campingArea.price_range ? getPriceRangeLabel(campingArea.price_range) : '';
+    if (priceLabel) lines.push(`💰 ${priceLabel}`);
+    if (campingArea.fee !== undefined && campingArea.fee !== null) {
+      lines.push(`💳 ${campingArea.fee ? 'Ücretli' : 'Ücretsiz'}`);
+    }
+
+    // Açılış saatleri
+    const ohList = parseOpeningHours(campingArea.opening_hours).filter(r => r.day || r.hours);
+    if (ohList.length > 0) {
+      lines.push('');
+      lines.push(`🕐 Açılış Saatleri:`);
+      ohList.forEach(r => {
+        lines.push(`   ${r.day ? r.day + ': ' : ''}${r.hours}`);
+      });
+    }
+
+    // Web sitesi / Telefon
+    if (campingArea.website) lines.push(`🌐 ${campingArea.website}`);
+    if (campingArea.phone) lines.push(`📞 ${campingArea.phone}`);
+
+    // Puanlama
+    if (typeof campingArea.rating === 'number' && campingArea.rating > 0) {
+      lines.push(`⭐ ${campingArea.rating.toFixed(1)}${campingArea.review_count ? ` (${campingArea.review_count} değerlendirme)` : ''}`);
+    }
+
+    lines.push('');
+    lines.push('@kamp.defterim');
+    lines.push('#kamp #kampyeri #doğa #türkiye');
+    setShareCaption(lines.join('\n'));
+    setShowInstagramModal(true);
+  };
+
+  const handleDoShare = async () => {
+    if (!campingArea) return;
+    setShareLoading(true);
+    try {
+      // ① Metni panoya kopyala
+      await Clipboard.setStringAsync(shareCaption);
+      setCaptionCopied(true);
+      setTimeout(() => setCaptionCopied(false), 3000);
+
+      const images = Array.isArray(campingArea.images)
+        ? (campingArea.images as string[]).filter(
+            (img): img is string => typeof img === 'string' && img.trim().length > 0
+          )
+        : [];
+      const coverImageUrl = images[0] || null;
+
+      if (coverImageUrl) {
+        let localUri = coverImageUrl;
+        if (!coverImageUrl.startsWith('file://')) {
+          const ext = coverImageUrl.toLowerCase().includes('.png') ? 'png' : 'jpg';
+          const localPath = `${FileSystem.cacheDirectory}kamp_share_${Date.now()}.${ext}`;
+          const result = await FileSystem.downloadAsync(coverImageUrl, localPath);
+          if (result.status === 200) localUri = result.uri;
+        }
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          // ② Fotoğrafı paylaşım sayfasıyla aç (Instagram seçilebilir)
+          await Sharing.shareAsync(localUri, {
+            mimeType: 'image/jpeg',
+            dialogTitle: "Instagram'da Paylaş",
+            UTI: 'public.jpeg',
+          });
+        } else {
+          await Share.share({ message: shareCaption, title: campingArea.name || '' });
+        }
+      } else {
+        // Fotoğraf yok — sadece metni paylaş
+        await Share.share({ message: shareCaption, title: campingArea.name || '' });
+      }
+    } catch (e) {
+      console.log('[InstagramShare] hata:', e);
+      Alert.alert('Hata', 'Paylaşım sırasında bir hata oluştu.');
+    } finally {
+      setShareLoading(false);
+    }
+  };
 
   const openWebsite = () => {
     if (campingArea.website) {
@@ -819,6 +946,13 @@ export default function CampingAreaDetailModal({
                 color={isFavorite ? "#ffffff" : "#ef4444"} 
                 fill={isFavorite ? "#ffffff" : "none"}
               />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleOpenShareModal}
+              accessibilityLabel="Instagram'da paylaş"
+            >
+              <Share2 size={20} color="#833ab4" />
             </TouchableOpacity>
             {canDelete && (
               <TouchableOpacity 
@@ -990,32 +1124,34 @@ export default function CampingAreaDetailModal({
           )}
 
           {/* Contact Info */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>İletişim Bilgileri</Text>
-            
-            {campingArea.phone && typeof campingArea.phone === 'string' && (
-              <TouchableOpacity style={styles.contactItem} onPress={callPhone}>
-                <Phone size={20} color="#059669" />
-                <Text style={styles.contactText}>{campingArea.phone ?? ''}</Text>
-                <Navigation size={16} color="#6b7280" />
-              </TouchableOpacity>
-            )}
-            
-            {campingArea.website && typeof campingArea.website === 'string' && (
-              <TouchableOpacity style={styles.contactItem} onPress={openWebsite}>
-                <Globe size={20} color="#059669" />
-                <Text style={styles.contactText}>{campingArea.website ?? ''}</Text>
-                <Navigation size={16} color="#6b7280" />
-              </TouchableOpacity>
-            )}
-            
-            {campingArea.contact_email && typeof campingArea.contact_email === 'string' && (
-              <TouchableOpacity style={styles.contactItem} onPress={sendEmail}>
-                <Text style={styles.contactLabel}>📧</Text>
-                <Text style={styles.contactText}>{campingArea.contact_email ?? ''}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          {(campingArea.phone || campingArea.website || campingArea.contact_email) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>İletişim Bilgileri</Text>
+              
+              {campingArea.phone && typeof campingArea.phone === 'string' && (
+                <TouchableOpacity style={styles.contactItem} onPress={callPhone}>
+                  <Phone size={20} color="#059669" />
+                  <Text style={styles.contactText}>{campingArea.phone ?? ''}</Text>
+                  <Navigation size={16} color="#6b7280" />
+                </TouchableOpacity>
+              )}
+              
+              {campingArea.website && typeof campingArea.website === 'string' && (
+                <TouchableOpacity style={styles.contactItem} onPress={openWebsite}>
+                  <Globe size={20} color="#059669" />
+                  <Text style={styles.contactText}>{campingArea.website ?? ''}</Text>
+                  <Navigation size={16} color="#6b7280" />
+                </TouchableOpacity>
+              )}
+              
+              {campingArea.contact_email && typeof campingArea.contact_email === 'string' && (
+                <TouchableOpacity style={styles.contactItem} onPress={sendEmail}>
+                  <Text style={styles.contactLabel}>📧</Text>
+                  <Text style={styles.contactText}>{campingArea.contact_email ?? ''}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           {/* Details */}
 
@@ -1110,17 +1246,26 @@ export default function CampingAreaDetailModal({
               </View>
             )}
 
-            {(campingArea.fee !== undefined && campingArea.fee !== null) && (
-              <View style={styles.detailItem}>
-                <DollarSign size={20} color="#6b7280" />
-                <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Ücret Durumu</Text>
-                  <Text style={[styles.detailValue, campingArea.fee ? styles.paidText : styles.freeText]}>
-                    {campingArea.fee ? 'Ücretli' : 'Ücretsiz'}
-                  </Text>
+            {(() => {
+              const pr = campingArea.price_range;
+              const isPaid = pr === 'budget' || pr === 'mid' || pr === 'premium'
+                ? true
+                : pr === 'free'
+                  ? false
+                  : campingArea.fee;
+              if (isPaid === undefined || isPaid === null) return null;
+              return (
+                <View style={styles.detailItem}>
+                  <DollarSign size={20} color="#6b7280" />
+                  <View style={styles.detailContent}>
+                    <Text style={styles.detailLabel}>Ücret Durumu</Text>
+                    <Text style={[styles.detailValue, isPaid ? styles.paidText : styles.freeText]}>
+                      {isPaid ? 'Ücretli' : 'Ücretsiz'}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            )}
+              );
+            })()}
           </View>
 
           {/* Edit Button: Sadece superadmin veya owner görebilir */}
@@ -1240,6 +1385,123 @@ export default function CampingAreaDetailModal({
               </View>
             </View>
           </View>
+        </Modal>
+
+        {/* Instagram Paylaşım Modalı */}
+        <Modal
+          visible={showInstagramModal}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setShowInstagramModal(false)}
+        >
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+            activeOpacity={1}
+            onPress={() => setShowInstagramModal(false)}
+          >
+            <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+              <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' }}>
+                {/* Instagram gradient header */}
+                <LinearGradient
+                  colors={['#405de6', '#833ab4', '#c13584', '#e1306c', '#fd1d1d', '#fcaf45']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={{ paddingVertical: 16, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <Share2 size={22} color="#fff" />
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>Instagram'da Paylaş</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setShowInstagramModal(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <X size={22} color="#fff" />
+                  </TouchableOpacity>
+                </LinearGradient>
+
+                <View style={{ padding: 20 }}>
+                  {/* Önizleme kartı */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, backgroundColor: '#f9fafb', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#e5e7eb' }}>
+                    {(() => {
+                      const imgs = Array.isArray(campingArea.images)
+                        ? (campingArea.images as string[]).filter((img): img is string => typeof img === 'string' && img.trim().length > 0)
+                        : [];
+                      const previewUrl = imgs[0] || null;
+                      return previewUrl ? (
+                        <Image
+                          source={{ uri: previewUrl }}
+                          style={{ width: 72, height: 72, borderRadius: 8, marginRight: 12 }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={{ width: 72, height: 72, borderRadius: 8, backgroundColor: '#d1fae5', marginRight: 12, justifyContent: 'center', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 32 }}>🏕️</Text>
+                        </View>
+                      );
+                    })()}
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '700', fontSize: 15, color: '#1f2937', marginBottom: 4 }} numberOfLines={2}>
+                        {campingArea.name}
+                      </Text>
+                      <Text style={{ color: '#833ab4', fontWeight: '600', fontSize: 13 }}>@kamp.defterim</Text>
+                    </View>
+                  </View>
+
+                  {/* Gönderi metni */}
+                  <Text style={{ color: '#374151', fontWeight: '600', fontSize: 13, marginBottom: 6 }}>Gönderi Metni:</Text>
+                  <TextInput
+                    value={shareCaption}
+                    onChangeText={setShareCaption}
+                    multiline
+                    style={{
+                      borderWidth: 1,
+                      borderColor: '#e5e7eb',
+                      borderRadius: 10,
+                      padding: 10,
+                      fontSize: 13,
+                      color: '#374151',
+                      backgroundColor: '#f9fafb',
+                      minHeight: 110,
+                      maxHeight: 160,
+                      textAlignVertical: 'top',
+                      lineHeight: 20,
+                    }}
+                  />
+                  {captionCopied ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, marginBottom: 14, backgroundColor: '#dcfce7', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
+                      <Text style={{ fontSize: 14 }}>✅</Text>
+                      <Text style={{ color: '#15803d', fontWeight: '600', fontSize: 13 }}>Metin panoya kopyalandı! Instagram'da yapıştırın.</Text>
+                    </View>
+                  ) : (
+                    <Text style={{ color: '#9ca3af', fontSize: 11, marginTop: 6, marginBottom: 18 }}>
+                      💡 "Paylaş"a basıldığında metin otomatik panoya kopyalanır.
+                    </Text>
+                  )}
+
+                  {/* Paylaş butonu */}
+                  <TouchableOpacity
+                    onPress={handleDoShare}
+                    disabled={shareLoading}
+                    style={{ borderRadius: 12, overflow: 'hidden', marginBottom: 8 }}
+                  >
+                    <LinearGradient
+                      colors={['#833ab4', '#c13584', '#e1306c', '#fd1d1d']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={{ paddingVertical: 15, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 }}
+                    >
+                      {shareLoading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Share2 size={18} color="#fff" />
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Paylaş</Text>
+                        </>
+                      )}
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
 
         {/* Fotoğraf Lightbox Modalı */}

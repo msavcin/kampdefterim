@@ -1170,7 +1170,11 @@ useEffect(() => {
                       styles.priceChip,
                       formData.price_range === price.id && styles.priceChipSelected
                     ]}
-                    onPress={() => setFormData(prev => ({ ...prev, price_range: price.id }))}
+                    onPress={() => setFormData(prev => ({
+                      ...prev,
+                      price_range: price.id,
+                      fee: price.id !== 'free' && price.id !== ''
+                    }))}
                   >
                     <Text style={[
                       styles.priceLabel,
@@ -1183,8 +1187,11 @@ useEffect(() => {
               </View>
             </View>
             <TouchableOpacity
-              style={styles.feeToggle}
-              onPress={() => setFormData(prev => ({ ...prev, fee: !prev.fee }))}
+              style={[styles.feeToggle, !!formData.price_range && { opacity: 0.55 }]}
+              onPress={() => {
+                if (!formData.price_range) setFormData(prev => ({ ...prev, fee: !prev.fee }));
+              }}
+              disabled={!!formData.price_range}
             >
               <View style={[styles.checkbox, formData.fee && styles.checkboxChecked]}>
                 {formData.fee && <Text style={styles.checkmark}>✓</Text>}
