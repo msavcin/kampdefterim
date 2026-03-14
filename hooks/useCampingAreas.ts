@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getDatabase, CampingArea as OriginalCampingArea } from '@/lib/database';
 
 type CampingArea = OriginalCampingArea & {
@@ -160,42 +160,98 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
     }
   };
 
-  const fetchCampingAreas = async (
+  // Debounce ve last-query guard için referanslar
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPromisesRef = useRef<Array<{ resolve: (v: any) => void; reject: (e: any) => void }>>([]);
+  const lastQueryRef = useRef<{
+    lat: number;
+    lng: number;
+    radius: number;
+    tagsKey: string;
+    time: number;
+  } | null>(null);
+
+  // Haversine distance (km)
+  const calcDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const toRad = (v: number) => (v * Math.PI) / 180;
+    const R = 6371; // km
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  // Gerçek fetch işlemini yapan fonksiyon (aynı önceki implementasyon)
+  const fetchCampingAreasInternal = async (
     lat: number,
     lng: number,
     searchRadius: number = radius,
-  searchTags: string[] = tags
+    searchTags: string[] = tags
   ) => {
     try {
       setLoading(true);
       setError(null);
 
-  // tags ile filtreleme
-  const normalizedTags = searchTags.map(t => t === 'camping' ? 'campground' : t);
-  // log kaldırıldı
-  // Superadmin kontrolü için user rolünü options üzerinden al
-  const isSuperAdmin = (options as any)?.isSuperAdmin === true;
-  const userId = options.currentUserId ? String(options.currentUserId) : undefined;
-  let areas = await getDatabase().searchCampingAreasByLocation(lat, lng, searchRadius, normalizedTags, true, userId, isSuperAdmin);
-      // --- friend_user_ids istemci filtresi kaldırıldı ---
-      // Backend, visibility='friends' kontrolünü sunucu tarafında yapıyor
-      // (campground_friend_access tablosu + friend_user_ids::jsonb kontrolü).
-      // İstemci tarafı filtre, backend friend_user_ids sütununu null/[] olarak
-      // döndürdüğü durumlarda arkadaşın alanı görememesine yol açıyordu.
-      console.log('Found camping areas:', areas.length);
-      // Debug: Kullanıcı alanlarını logla
+      const normalizedTags = searchTags.map(t => t === 'camping' ? 'campground' : t);
+      const isSuperAdmin = (options as any)?.isSuperAdmin === true;
+      const userId = options.currentUserId ? String(options.currentUserId) : undefined;
+      const areas = await getDatabase().searchCampingAreasByLocation(lat, lng, searchRadius, normalizedTags, true, userId, isSuperAdmin);
+      if (__DEV__) console.log('Found camping areas:', areas.length);
       const userAreas = areas.filter(area => 
         (typeof area.tags === 'object' && area.tags?.user_submitted === 'yes' && typeof area.tags.type === 'string' && area.tags.type.trim() !== '')
       );
-      console.log('User submitted areas:', userAreas.length, userAreas);
+      if (__DEV__) console.log('User submitted areas:', userAreas.length);
       setCampingAreas(areas);
+      return areas;
     } catch (err) {
       console.error('Error fetching camping areas:', err);
       setError(err instanceof Error ? err.message : 'Kamp alanları yüklenemedi');
       setCampingAreas([]);
+      throw err;
     } finally {
       setLoading(false);
     }
+  };
+
+  // Debounced, promise-returning wrapper with last-query guard
+  const fetchCampingAreas = (
+    lat: number,
+    lng: number,
+    searchRadius: number = radius,
+    searchTags: string[] = tags
+  ): Promise<any[]> => {
+    const tagsKey = (searchTags || []).join(',');
+
+    // Last-query guard: eğer yakın konuma (50m) ve kısa süre (5s) içindeysek atla
+    const last = lastQueryRef.current;
+    if (last) {
+      const distKm = calcDistanceKm(last.lat, last.lng, lat, lng);
+      const timeDiff = Date.now() - last.time;
+      if (distKm <= 0.05 && Math.abs(searchRadius - last.radius) < 0.1 && last.tagsKey === tagsKey && timeDiff < 5000) {
+        if (__DEV__) console.log('[useCampingAreas] Atlanan tekrarlı sorgu (guard)', { distKm, timeDiff });
+        return Promise.resolve([]);
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      pendingPromisesRef.current.push({ resolve, reject });
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current as ReturnType<typeof setTimeout>);
+      }
+      debounceTimerRef.current = setTimeout(async () => {
+        debounceTimerRef.current = null;
+        lastQueryRef.current = { lat, lng, radius: searchRadius, tagsKey, time: Date.now() };
+        try {
+          const res = await fetchCampingAreasInternal(lat, lng, searchRadius, searchTags);
+          pendingPromisesRef.current.forEach(p => p.resolve(res));
+          pendingPromisesRef.current = [];
+        } catch (e) {
+          pendingPromisesRef.current.forEach(p => p.reject(e));
+          pendingPromisesRef.current = [];
+        }
+      }, 500);
+    });
   };
 
   const refreshData = () => {

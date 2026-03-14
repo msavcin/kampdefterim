@@ -171,6 +171,33 @@ export default function MapScreen() {
   
   // Görünüm modu: 'map', 'list' veya 'search'
   const [viewMode, setViewMode] = useState<'map' | 'list' | 'search'>('map');
+  // Bildirim kaynaklı özel kamp alanları (ör. paylaşılanlar) - listede öncelikli gösterim için
+  const [notificationCampingAreas, setNotificationCampingAreas] = useState<any[] | null>(null);
+  // View mode preference yükle/kaydet helper'ları
+  useEffect(() => {
+    (async () => {
+      try {
+        const pref = await SecureStore.getItemAsync('camp_view_mode');
+        if (pref === 'map' || pref === 'list') {
+          if (isMounted.current) setViewMode(pref as 'map' | 'list');
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
+
+  const changeViewMode = async (mode: 'map' | 'list' | 'search') => {
+    if (!isMounted.current) return;
+    setViewMode(mode);
+    try {
+      if (mode === 'map' || mode === 'list') {
+        await SecureStore.setItemAsync('camp_view_mode', mode);
+      }
+    } catch (e) {
+      // ignore storage errors
+    }
+  };
   // Video reklam aç/kapa kontrolü
   // ...existing code...
   // useTokenAutoLogout kaldırıldı: Token login sonrası otomatik silinmeyecek
@@ -1050,6 +1077,51 @@ export default function MapScreen() {
       cancelled = true;
     };
   }, [isConnected]);
+
+  // Harici tetiklemeden (örn. Profil'den) ilk full sync başlatma
+  useEffect(() => {
+    const handler = async () => {
+      try {
+        if (!isConnected) {
+          if (__DEV__) console.log('[trigger:initialFullSync] Çevrimdışı, atlanıyor');
+          return;
+        }
+        if (isSyncingRef.current) {
+          if (__DEV__) console.log('[trigger:initialFullSync] Zaten sync çalışıyor, atlanıyor');
+          return;
+        }
+        isSyncingRef.current = true;
+        isFullSyncInProgressRef.current = true;
+        await SecureStore.setItemAsync('isInitialSyncComplete', 'false');
+        setSyncProgress({ current: 0, total: 0, isLoading: true });
+
+        const dbInst = getDatabase();
+        const count = await dbInst.fetchAndStoreCampingAreasFromAPI(undefined, {
+          forceFull: true,
+          userId: user?.id !== undefined ? String(user.id) : undefined,
+          onProgress: (current: number, total: number) => {
+            if (__DEV__) console.log('[trigger:initialFullSync] progress', current, total);
+            setSyncProgress({ current, total, isLoading: true });
+          }
+        });
+
+        await SecureStore.setItemAsync('hasInitialSync', 'true');
+        await SecureStore.setItemAsync('isInitialSyncComplete', 'true');
+        isFullSyncInProgressRef.current = false;
+        setSyncProgress({ current: 0, total: 0, isLoading: false });
+        flushPendingNotifications();
+        if (__DEV__) console.log('[trigger:initialFullSync] tamamlandı, kayıt sayısı:', count);
+      } catch (e) {
+        console.error('[trigger:initialFullSync] hata:', e);
+        isFullSyncInProgressRef.current = false;
+        setSyncProgress({ current: 0, total: 0, isLoading: false });
+      } finally {
+        isSyncingRef.current = false;
+      }
+    };
+    onEvent('trigger:initialFullSync', handler);
+    return () => offEvent('trigger:initialFullSync', handler);
+  }, [isConnected, user?.id]);
   
   // Akıllı offline cache sistemi (WiFi'da otomatik favorileri cache'ler)
   // Sadece bir kez başlatılır (izin verildiğinde)
@@ -1333,9 +1405,16 @@ export default function MapScreen() {
                   message: `${newSharedAreas.length} yeni kamp alanı seninle paylaşıldı!`,
                   areaData: firstArea,
                   goto: () => {
-                    // Haritaya geç
-                    if (isMounted.current) setViewMode('map');
-                    // Kamp alanının konumuna odaklan
+                    // Eğer birden fazla paylaşılan alan varsa, liste görünümünde sadece bu alanları göster
+                    if (newSharedAreas.length > 1) {
+                      if (isMounted.current) {
+                        setNotificationCampingAreas(newSharedAreas);
+                        changeViewMode('list');
+                      }
+                      return;
+                    }
+                    // Tek alan varsa mevcut davranışı koru: haritaya geç ve marker'a odaklan
+                    if (isMounted.current) changeViewMode('map');
                     const lat = (firstArea as any).latitude;
                     const lng = (firstArea as any).longitude;
                     if (lat && lng) {
@@ -1343,7 +1422,6 @@ export default function MapScreen() {
                         if (!isMounted.current) return;
                         setMapCenter({ latitude: lat, longitude: lng });
                         setMapMoveQuery({ latitude: lat, longitude: lng });
-                        // Marker popup'ını aç
                         const timeoutId2 = setTimeout(() => {
                           if (!isMounted.current) return;
                           safeInjectJavaScript(`
@@ -3474,8 +3552,8 @@ export default function MapScreen() {
                 );
                 return;
               }
-              if (isMounted.current) {
-                setViewMode(viewMode === 'map' ? 'list' : 'map');
+                if (isMounted.current) {
+                changeViewMode(viewMode === 'map' ? 'list' : 'map');
               }
             }}
             disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
@@ -3768,7 +3846,7 @@ export default function MapScreen() {
                   if (!isMounted.current) return;
                   setMapCenter({ latitude: lat, longitude: lng });
                   setMapMoveQuery({ latitude: lat, longitude: lng });
-                  setViewMode('map');
+                  changeViewMode('map');
                   // Haritaya geçtikten sonra popup'ı aç
                   const timeoutId2 = setTimeout(() => {
                     if (!isMounted.current) return;
@@ -3789,7 +3867,7 @@ export default function MapScreen() {
             isConnected={isConnected}
           />
           <TouchableOpacity onPress={() => {
-            if (isMounted.current) setViewMode('map');
+            if (isMounted.current) changeViewMode('map');
           }} style={{ alignSelf: 'center', marginTop: 16, backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 24, paddingVertical: 12 }}>
             <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Haritaya Dön</Text>
           </TouchableOpacity>
@@ -3975,10 +4053,12 @@ export default function MapScreen() {
         /* Liste Görünümü */
         <View style={{ flex: 1 }}>
           <CampingAreaListView
-            campingAreas={filteredCampingAreas}
+            campingAreas={notificationCampingAreas ?? filteredCampingAreas}
             onSelectArea={(area) => {
               if (!isMounted.current) return;
               if (syncProgress.isLoading) return;
+              // Bildirim kaynaklı özel liste açık ise kapat
+              if (notificationCampingAreas) setNotificationCampingAreas(null);
               setSelectedCampingArea(area);
               setShowDetailModal(true);
             }}

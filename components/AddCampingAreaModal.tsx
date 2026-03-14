@@ -16,6 +16,7 @@ function generateImageId() {
 }
 import { getDatabase } from '@/lib/database';
 import { generateUUID } from '@/lib/uuid';
+import { getDeviceId } from '@/lib/deviceId';
 import { addPendingChange } from '@/lib/pendingChanges';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { createCampingAreaOnServer, sanitizeCampingAreaData } from '@/lib/campingAreaApi';
@@ -875,6 +876,16 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       } else {
         imagesToSend = imagesForDb.map(img => img.local_uri).filter(uri => !!uri);
       }
+      // Prepare external_id using persistent device id + uuid to avoid collisions across devices
+      let externalIdToSend: string | undefined = undefined;
+      try {
+        const deviceId = await getDeviceId();
+        externalIdToSend = `${deviceId}:${generateUUID()}`;
+      } catch (e) {
+        // fallback to previous user_localId pattern if device id retrieval fails
+        externalIdToSend = localId ? `user_${userId}_${localId}` : undefined;
+      }
+
       const rawApiData = {
         ...campingAreaData,
         type: 'campground',
@@ -887,8 +898,8 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
         photo_links: imagesToSend,
         social_media: campingAreaData.social_media ? campingAreaData.social_media : {},
         tags: { type: formData.type },
-        // external_id: user_{userId}_{localId} formatı — farklı cihazlardaki aynı lokal ID'lerin çakışmasını önler
-        external_id: localId ? `user_${userId}_${localId}` : undefined,
+        // external_id: deviceId:uuid — cihazlar arası çakışmayı önlemek için kalıcı cihaz id'si + uuid
+        external_id: externalIdToSend,
         // created_at ve updated_at kesinlikle gönderilmesin!
       };
       const apiData = { ...sanitizeCampingAreaData(rawApiData), uuid: campingAreaUUID };

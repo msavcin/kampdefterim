@@ -48,10 +48,10 @@ export async function clearLastCampingAreaSync(): Promise<void> {
 
 const LAST_ANNOUNCEMENT_SYNC_KEY = 'lastAnnouncementSync';
 const ANNOUNCEMENT_SYNC_COUNTER_KEY = 'announcementSyncCounter';
-const FULL_SYNC_INTERVAL = 10; // Her 10 delta sync'de bir full check
+const FULL_SYNC_INTERVAL = 50; // Her 50 delta sync'de bir full check
 
 /**
- * Sync counter'ı arttırır ve her 10 sync'de true döner (full check için)
+ * Sync counter'ı arttırır ve her 50 sync'de true döner (full check için)
  * @returns Full check yapılmalı mı
  */
 export async function incrementAnnouncementSyncCounter(): Promise<boolean> {

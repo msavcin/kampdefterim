@@ -47,6 +47,7 @@ async function syncServerCampgroundsToLocal() {
 import { API_URL } from '@/lib/config';
 // Profil ekranı – modernizasyon öncesi kırık yapıyı toparlanmış sürüm
 import { syncPendingChanges } from '@/lib/syncPendingChanges';
+import { syncAll } from '@/lib/syncManager';
 import React, { useEffect, useState } from 'react';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { eventBus } from '@/lib/eventBus';
@@ -536,6 +537,7 @@ export default function ProfileScreen(props: any) {
     favoritesCount: number;
   }>({ userAreasCount: 0, favoritesCount: 0 });
   const [backupLoading, setBackupLoading] = useState(false);
+  const [fullSyncLoading, setFullSyncLoading] = useState(false);
   // Topluluk rolü ve durumu
   const [membership, setMembership] = useState<{ role: string; status: string } | null>(null);
   // Topluluk detayları
@@ -1808,6 +1810,71 @@ export default function ProfileScreen(props: any) {
             </View>
             <ChevronRight size={18} color="#059669" />
           </TouchableOpacity>
+
+          {user?.offline_enabled && (
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#fff',
+                borderRadius: 12,
+                padding: 14,
+                marginTop: 12,
+                borderWidth: 1,
+                borderColor: '#e6f4ea',
+                gap: 12,
+              }}
+              disabled={fullSyncLoading}
+              onPress={async () => {
+                if (!isConnected) {
+                  Alert.alert('Çevrimdışı', 'İnternet bağlantısı yok. Lütfen çevrimiçi iken tekrar deneyin.');
+                  return;
+                }
+                try {
+                  // Günlük limit kontrolü: son tetikleme SecureStore'da saklanır
+                  const lastStr = await SecureStore.getItemAsync('lastManualFullSyncAt');
+                  if (lastStr) {
+                    const lastDate = new Date(lastStr);
+                    const now = new Date();
+                    const diff = now.getTime() - lastDate.getTime();
+                    const dayMs = 24 * 60 * 60 * 1000;
+                    if (diff < dayMs) {
+                      const nextAllowed = new Date(lastDate.getTime() + dayMs);
+                      Alert.alert(
+                        'Sınır',
+                        `Tam eşitlemeyi günde sadece bir kez başlatabilirsiniz. Son: ${lastDate.toLocaleString('tr-TR')}. Bir sonraki deneme: ${nextAllowed.toLocaleString('tr-TR')}`
+                      );
+                      return;
+                    }
+                  }
+
+                  setFullSyncLoading(true);
+                  // Kayıt: şimdi tetikleme zamanını sakla
+                  await SecureStore.setItemAsync('lastManualFullSyncAt', new Date().toISOString());
+
+                  // Harita ekranına geç ve orada ilk full sync davranışını tetikle
+                  router.push('/' as any);
+                  setTimeout(() => {
+                    try { eventBus.emit('trigger:initialFullSync'); } catch (e) { console.warn('emit trigger:initialFullSync hata', e); }
+                  }, 250);
+                } catch (e: any) {
+                  console.error('[Profile] trigger full sync error', e);
+                  Alert.alert('Hata', e?.message || 'Eşitleme başlatılamadı');
+                } finally {
+                  setFullSyncLoading(false);
+                }
+              }}
+            >
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center' }}>
+                <RefreshCw size={20} color="#059669" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#065f46' }}>Tam Eşitlemeyi Başlat</Text>
+                <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Kamp alanları senkronizasyonunda sorun yaşadıysanız, tekrar eşitleme yapabilirsiniz.</Text>
+              </View>
+              {fullSyncLoading ? <ActivityIndicator color="#059669" /> : <ChevronRight size={18} color="#059669" />}
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Development Tools */}
