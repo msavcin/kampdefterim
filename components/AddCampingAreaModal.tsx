@@ -800,6 +800,16 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       }
     }
 
+    // Prepare external_id using persistent device id + uuid early so local DB and API use same value
+    let externalIdToSend: string | undefined = undefined;
+    try {
+      const deviceId = await getDeviceId();
+      externalIdToSend = `${deviceId}:${generateUUID()}`;
+    } catch (e) {
+      // fallback will be filled after local insert if needed
+      externalIdToSend = undefined;
+    }
+
     // Yeni kamp alanı verisi
     // uuid burada üretiliyor; hem lokal DB'ye hem apiData'ya ekleniyor.
     // Bu sayede syncPendingChanges, CREATE sonrası updateCampingAreaIdByUuid ile
@@ -809,6 +819,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     const campingAreaData = {
       uuid: campingAreaUUID,
       rentech_id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      external_id: externalIdToSend,
       name: formData.name,
       latitude: parseFloat(formData.latitude),
       longitude: parseFloat(formData.longitude),
@@ -876,16 +887,6 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       } else {
         imagesToSend = imagesForDb.map(img => img.local_uri).filter(uri => !!uri);
       }
-      // Prepare external_id using persistent device id + uuid to avoid collisions across devices
-      let externalIdToSend: string | undefined = undefined;
-      try {
-        const deviceId = await getDeviceId();
-        externalIdToSend = `${deviceId}:${generateUUID()}`;
-      } catch (e) {
-        // fallback to previous user_localId pattern if device id retrieval fails
-        externalIdToSend = localId ? `user_${userId}_${localId}` : undefined;
-      }
-
       const rawApiData = {
         ...campingAreaData,
         type: 'campground',
@@ -899,7 +900,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
         social_media: campingAreaData.social_media ? campingAreaData.social_media : {},
         tags: { type: formData.type },
         // external_id: deviceId:uuid — cihazlar arası çakışmayı önlemek için kalıcı cihaz id'si + uuid
-        external_id: externalIdToSend,
+        external_id: externalIdToSend || (localId ? `user_${userId}_${localId}` : undefined),
         // created_at ve updated_at kesinlikle gönderilmesin!
       };
       const apiData = { ...sanitizeCampingAreaData(rawApiData), uuid: campingAreaUUID };

@@ -1,0 +1,491 @@
+openapi: 3.0.3
+info:
+  title: Kamp Planla Modülü API
+  version: 1.0.0
+  description: |
+    Planner modülünün OpenAPI şeması. Mevcut backend endpoint'leri kullanılacak; eksik fonksiyonlar için planner adapter/ek endpoint'ler sağlanır.
+servers:
+  - url: /api/v1/planner
+    description: Local prefix (reverse-proxied in production)
+security:
+  - bearerAuth: []
+paths:
+  /plans:
+    post:
+      summary: Create a new camp plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampPlanCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampPlanResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      summary: List user's plans (or admin list)
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Plan list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CampPlanResponse'
+  /plans/{planId}:
+    parameters:
+      - in: path
+        name: planId
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get plan details
+      responses:
+        '200':
+          description: Plan details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampPlanFull'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Soft delete a plan
+      responses:
+        '204':
+          description: Deleted
+  /plans/{planId}/type:
+    post:
+      summary: Set camp type for a plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                camp_type_id:
+                  type: string
+      responses:
+        '200':
+          description: Updated
+  /plans/{planId}/location:
+    post:
+      summary: Set/add location for plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationCreate'
+      responses:
+        '200':
+          description: Location saved
+  /plans/{planId}/select-area:
+    post:
+      summary: User selects a camping area
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                area_id:
+                  type: string
+      responses:
+        '200':
+          description: Area selected and notification schedule returned
+  /plans/{planId}/checklist:
+    get:
+      summary: Get checklist items for plan
+      responses:
+        '200':
+          description: Checklist
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChecklistItem'
+  /plans/{planId}/checklist/{itemId}:
+    patch:
+      summary: Update checklist item (checked)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                checked:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated
+  /plans/{planId}/notifications/schedule:
+    post:
+      summary: Schedule a notification for a plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationScheduleRequest'
+      responses:
+        '201':
+          description: Scheduled
+  /user/plans:
+    get:
+      summary: List logged-in user's plans (client-side shortcut)
+      responses:
+        '200':
+          description: User plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CampPlanResponse'
+  /camp-types:
+    get:
+      summary: Get available camp types / tags
+      responses:
+        '200':
+          description: Types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    tags:
+                      type: array
+                      items:
+                        type: string
+  /suggestions:
+    get:
+      summary: Get area suggestions based on params
+      parameters:
+        - in: query
+          name: lat
+          schema:
+            type: number
+        - in: query
+          name: lng
+          schema:
+            type: number
+        - in: query
+          name: date
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: camp_type_id
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Suggestions list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Suggestion'
+  /suggestions/{areaId}/details:
+    get:
+      summary: Get full details for suggested area (pulls from existing camping_area endpoints)
+      parameters:
+        - in: path
+          name: areaId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Area details
+  /sponsored-areas:
+    get:
+      summary: List sponsored areas (admin view)
+      responses:
+        '200':
+          description: Sponsored list
+    post:
+      summary: Create sponsored area (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SponsoredArea'
+  /sponsored-areas/{id}:
+    put:
+      summary: Update sponsored area
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+    delete:
+      summary: Delete sponsored area
+  /weather/check:
+    get:
+      summary: Weather check for date/location
+      parameters:
+        - in: query
+          name: lat
+          schema:
+            type: number
+        - in: query
+          name: lng
+          schema:
+            type: number
+        - in: query
+          name: date
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Weather summary and warnings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WeatherCheckResponse'
+  /ai/warnings:
+    post:
+      summary: Generate AI warnings & suggestions for a plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIWarningRequest'
+      responses:
+        '200':
+          description: AI summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIWarningResponse'
+  /webhooks/notification-delivery:
+    post:
+      summary: Webhook for notification delivery status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                job_id:
+                  type: string
+                status:
+                  type: string
+      responses:
+        '200':
+          description: Ack
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    BadRequest:
+      description: Bad request
+    NotFound:
+      description: Not found
+  schemas:
+    CampPlanCreate:
+      type: object
+      properties:
+        title:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+    CampPlanResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        title:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        camp_type_id:
+          type: string
+        state:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CampPlanFull:
+      allOf:
+        - $ref: '#/components/schemas/CampPlanResponse'
+        - type: object
+          properties:
+            locations:
+              type: array
+              items:
+                $ref: '#/components/schemas/Location'
+            checklist:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChecklistItem'
+            suggestions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Suggestion'
+    LocationCreate:
+      type: object
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+        place_name:
+          type: string
+        region_code:
+          type: string
+    Location:
+      allOf:
+        - $ref: '#/components/schemas/LocationCreate'
+        - type: object
+          properties:
+            id:
+              type: string
+    ChecklistItem:
+      type: object
+      properties:
+        id:
+          type: string
+        item_key:
+          type: string
+        label:
+          type: string
+        required:
+          type: boolean
+        checked:
+          type: boolean
+        order:
+          type: integer
+    Suggestion:
+      type: object
+      properties:
+        area_id:
+          type: string
+        score:
+          type: number
+        distance_m:
+          type: number
+        reason:
+          type: string
+        sponsored:
+          type: boolean
+        meta:
+          type: object
+    WeatherCheckResponse:
+      type: object
+      properties:
+        summary:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              severity:
+                type: string
+              message:
+                type: string
+        recommended_alternatives:
+          type: array
+          items:
+            type: string
+            format: date
+    AIWarningRequest:
+      type: object
+      properties:
+        plan_id:
+          type: string
+        context:
+          type: object
+    AIWarningResponse:
+      type: object
+      properties:
+        ai_summary:
+          type: string
+        risk_level:
+          type: string
+        suggested_actions:
+          type: array
+          items:
+            type: string
+        alternative_dates:
+          type: array
+          items:
+            type: string
+            format: date
+    NotificationScheduleRequest:
+      type: object
+      properties:
+        notify_at:
+          type: string
+          format: date-time
+        type:
+          type: string
+    SponsoredArea:
+      type: object
+      properties:
+        camping_area_id:
+          type: string
+        sponsor_id:
+          type: string
+        priority:
+          type: integer
+        active_from:
+          type: string
+          format: date
+        active_to:
+          type: string
+          format: date
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+          example: 'Error message'

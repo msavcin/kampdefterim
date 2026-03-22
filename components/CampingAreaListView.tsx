@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { MapPin, Navigation, Info } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import type { CampingArea } from '@/lib/database';
 import { getCampingTypeLabel } from '@/lib/categories';
+import { getLocationNameFromOSM } from '@/lib/osmReverseGeocode';
 
 const { width } = Dimensions.get('window');
 
@@ -45,9 +46,77 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   const router = useRouter();
   const [loadingImages, setLoadingImages] = useState<Set<string | number>>(new Set());
 
+  // Visible kamp alanları için il/ilçe bilgisi
+  const [locationNames, setLocationNames] = useState<Record<string, string | null>>({});
+  const [loadingLocationIds, setLoadingLocationIds] = useState<Set<string | number>>(new Set());
+  const [visibleIds, setVisibleIds] = useState<Array<string | number>>([]);
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
   const getTypeLabel = (type: string) => {
     return getCampingTypeLabel(type);
   };
+
+  // Kamp alanlarını reverse geocode ederek il/ilçe için metin döndürür.
+  // Aynı lat/lon için cache kullanılır, ayrıca Nominatim isteğini dakikada 60'a sınırlayan
+  // rate-limiter ile 429 hatalarının önüne geçiyoruz.
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const idsToFetch = campingAreas
+      .map(area => {
+        const rawId = (area as any).id;
+        return {
+          id: rawId !== undefined && rawId !== null ? String(rawId) : null,
+          lat: area.latitude,
+          lon: area.longitude,
+        };
+      })
+      .filter(({ id, lat, lon }) => {
+        return (
+          id !== null &&
+          typeof lat === 'number' &&
+          typeof lon === 'number' &&
+          !(id in locationNames) &&
+          !loadingLocationIds.has(id) &&
+          visibleIds.includes(id)
+        );
+      })
+      .slice(0, 10); // çok fazla isteğe girmemek için sınırlama
+
+    idsToFetch.forEach(({ id, lat, lon }) => {
+      setLoadingLocationIds(prev => new Set(prev).add(id));
+      getLocationNameFromOSM(lat, lon)
+        .then((name) => {
+          if (!isMounted.current) return;
+          setLocationNames(prev => ({ ...prev, [id]: name ?? null }));
+        })
+        .catch((err) => {
+          console.warn('[CampingAreaListView] Reverse geocode hatası:', err);
+          if (!isMounted.current) return;
+          setLocationNames(prev => ({ ...prev, [id]: null }));
+        })
+        .finally(() => {
+          if (!isMounted.current) return;
+          setLoadingLocationIds(prev => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        });
+    });
+  }, [campingAreas, visibleIds, isConnected, locationNames, loadingLocationIds]);
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item: CampingArea }> }) => {
+    const ids = viewableItems.map(v => String((v.item as any).id));
+    setVisibleIds(ids);
+  }).current;
 
   const getCoverImage = (area: CampingArea) => {
     if (Array.isArray(area.images) && area.images.length > 0) {
@@ -119,7 +188,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
     const areaType = getAreaType(item);
     const typeLabel = getTypeLabel(areaType);
     const ownerName = getOwnerName(item);
-    const distance = item.distance_km ? `${item.distance_km.toFixed(1)} km` : '';
+    const distance = item.distance_km ? `~ ${item.distance_km.toFixed(1)} km` : '';
     const areaId = (item as any).id;
     const isFavorite = favorites.has(areaId);
     const isImageLoading = loadingImages.has(areaId);
@@ -193,6 +262,24 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
             </View>
           )}
 
+          {/* İl / İlçe (reverse geocode) */}
+          {locationNames[areaId] !== undefined && locationNames[areaId] !== null ? (
+            <View style={styles.infoRow}>
+              <MapPin size={14} color="#6b7280" />
+              <Text style={styles.infoText}>{locationNames[areaId]}</Text>
+            </View>
+          ) : loadingLocationIds.has(areaId) ? (
+            <View style={styles.infoRow}>
+              <ActivityIndicator size="small" color="#6b7280" />
+              <Text style={styles.infoText}>Yükleniyor...</Text>
+            </View>
+          ) : (areaId in locationNames) ? (
+            <View style={styles.infoRow}>
+              <MapPin size={14} color="#6b7280" />
+              <Text style={styles.infoText}>Konum alınamıyor</Text>
+            </View>
+          ) : null}
+
           {/* Aksiyon Butonları */}
           <View style={styles.actionsContainer}>
             {/* Detaylı Bilgi */}
@@ -243,6 +330,8 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
         keyExtractor={(item) => String((item as any).id)}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={true}
+        viewabilityConfig={viewabilityConfig}
+        onViewableItemsChanged={onViewableItemsChanged}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={() => (
           <View style={styles.emptyContainer}>

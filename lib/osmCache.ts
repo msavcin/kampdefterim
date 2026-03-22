@@ -2,7 +2,7 @@
 import { setLargeItemAsync, getLargeItemAsync, removeLargeItemAsync } from './largeStorage';
 
 const CACHE_PREFIX = 'osm_cache_';
-const CACHE_TTL = 60 * 60 * 1000; // 1 saat (ms)
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 saat (ms)
 
 export async function getCachedOsmResult(key: string): Promise<any | null> {
   try {

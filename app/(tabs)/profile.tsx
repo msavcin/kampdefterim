@@ -1085,10 +1085,16 @@ export default function ProfileScreen(props: any) {
                 disabled={isDeletingAccount}
                 onPress={async () => {
                   // Aktif abonelik kontrolü
+                  // Manuel olarak tanımlanan premium hesaplarda subscription_expired_at (expiresAt) null gelir.
+                  // expiresAt null ise gerçek bir mağaza aboneliği yoktur — mağaza yönetim sayfasına yönlendirme yapılmaz.
                   let hasActiveAutoRenewingSub = false;
                   try {
                     const subStatus = await IAPManager.checkSubscriptionStatus();
-                    hasActiveAutoRenewingSub = !!(subStatus?.isActive && subStatus?.autoRenewing !== false);
+                    hasActiveAutoRenewingSub = !!(
+                      subStatus?.isActive &&
+                      subStatus?.autoRenewing !== false &&
+                      subStatus?.expiresAt != null
+                    );
                   } catch (_) {}
 
                   const subscriptionWarning = hasActiveAutoRenewingSub

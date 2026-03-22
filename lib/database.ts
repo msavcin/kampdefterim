@@ -1898,7 +1898,7 @@ export class DatabaseManager {
               friendUserIdsStr,
               area.community_id ?? null,
               // created_at ve updated_at için parametre yok!
-              '', // external_id
+              area.external_id ?? '', // external_id
               area.source_id ?? '',
               photoLinksStr,
               amenitiesStr,
@@ -1909,9 +1909,14 @@ export class DatabaseManager {
           // ...existing code...
           // INSERT sonrası external_id'yi local id ile güncelle
           if (insertResult && insertResult.lastInsertRowId) {
+            const newId = insertResult.lastInsertRowId;
+            // If caller provided an external_id, ensure it's persisted; otherwise fallback to local id
+            const extToSet = (area.external_id !== undefined && area.external_id !== null && area.external_id !== '')
+              ? String(area.external_id)
+              : String(newId);
             await this.db!.runAsync(
               'UPDATE camping_areas SET external_id = ? WHERE id = ?',
-              [String(insertResult.lastInsertRowId), insertResult.lastInsertRowId]
+              [extToSet, newId]
             );
           }
           return 'inserted';
@@ -1930,7 +1935,11 @@ export class DatabaseManager {
     types: string[] = ['camping', 'caravan_site', 'recreation', 'picnic'],
     includeUserAreas: boolean = true,
     currentUserId?: string | number,
-    isSuperAdmin?: boolean
+    isSuperAdmin?: boolean,
+    // distanceFrom* is used only for display purposes (e.g. showing "x km from you"),
+    // while latitude/longitude are used to filter by the currently viewed/queried region.
+    distanceFromLatitude?: number,
+    distanceFromLongitude?: number
   ): Promise<CampingArea[]> {
     if (!this.db) await this.init();
 
@@ -1999,14 +2008,22 @@ export class DatabaseManager {
         return tagsObj && tagsObj.user_submitted === 'yes';
       });
       console.log('[DB][searchCampingAreasByLocation] User submitted count:', userSubmitted.length, userSubmitted.map(r => r.id || r.name));
+
+      const distanceRefLat = typeof distanceFromLatitude === 'number' ? distanceFromLatitude : latitude;
+      const distanceRefLng = typeof distanceFromLongitude === 'number' ? distanceFromLongitude : longitude;
+
       // Calculate distance in JavaScript using Haversine formula
       const areasWithDistance = (result as any[]).map(row => {
-        const distance = this.calculateDistance(latitude, longitude, row.latitude, row.longitude);
+        const searchDistance = this.calculateDistance(latitude, longitude, row.latitude, row.longitude);
+        const displayDistance = this.calculateDistance(distanceRefLat, distanceRefLng, row.latitude, row.longitude);
+        // Display distance is intentionally scaled (e.g., route or actual driving distance estimation)
+        const scaledDistance = displayDistance * 1.25;
         return {
           ...row,
           owner_id: row.owner_id !== undefined && row.owner_id !== null ? String(row.owner_id) : '',
           community_id: row.community_id !== undefined && row.community_id !== null ? row.community_id : undefined,
-          distance_km: distance,
+          distance_km: scaledDistance,
+          _search_distance_km: searchDistance,
           amenities: (() => {
             if (typeof row.amenities === 'string') {
               try { return JSON.parse(row.amenities || '[]'); } catch { return []; }
@@ -2077,11 +2094,16 @@ export class DatabaseManager {
         };
       });
 
-      // Filter by radius and sort by distance
+      // Filter by radius and sort by distance (use search distance for filtering/sorting)
       const filteredAreas = areasWithDistance
-        .filter(area => area.distance_km <= radiusKm)
-        .sort((a, b) => a.distance_km - b.distance_km)
-        .slice(0, 250) as CampingArea[];
+        .filter(area => (area as any)._search_distance_km <= radiusKm)
+        .sort((a, b) => ((a as any)._search_distance_km - (b as any)._search_distance_km))
+        .slice(0, 250)
+        .map(area => {
+          // Remove internal search distance field before returning
+          const { _search_distance_km, ...rest } = area as any;
+          return rest as CampingArea;
+        }) as CampingArea[];
       
       // ...existing code...
       

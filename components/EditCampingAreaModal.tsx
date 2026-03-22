@@ -680,16 +680,41 @@ useEffect(() => {
           }
         ]);
       } else {
-        await updateCampingAreaOnServer(apiUpdateData.external_id, apiUpdateData);
-        Alert.alert('Başarılı', 'Kamp alanı başarıyla güncellendi.', [
-          {
-            text: 'Tamam',
-            onPress: () => {
-              if (onSuccess) onSuccess();
-              onClose();
+        try {
+          await updateCampingAreaOnServer(apiUpdateData.external_id, apiUpdateData);
+          Alert.alert('Başarılı', 'Kamp alanı başarıyla güncellendi.', [
+            {
+              text: 'Tamam',
+              onPress: () => {
+                if (onSuccess) onSuccess();
+                onClose();
+              }
             }
+          ]);
+        } catch (e: any) {
+          console.warn('[EditCampingAreaModal] update failed, falling back to pending:', e);
+          const errMsg = e && e.message ? e.message : String(e);
+          if (errMsg.includes('Kamp alanı bulunamadı')) {
+            try {
+              await getDatabase().insertPendingChange('update', String(localUpdateData.id), apiUpdateData);
+              Alert.alert('Bilgi', 'Kamp alanı sunucuda bulunamadı — değişiklik cihazda pending olarak saklandı.', [
+                {
+                  text: 'Tamam',
+                  onPress: () => {
+                    if (onSuccess) onSuccess();
+                    onClose();
+                  }
+                }
+              ]);
+            } catch (pdErr) {
+              console.error('[EditCampingAreaModal] pending fallback failed:', pdErr);
+              Alert.alert('Hata', 'Güncelleme yapılamadı ve pending olarak kaydedilemedi.');
+            }
+          } else {
+            console.error('[EditCampingAreaModal] update error:', e);
+            Alert.alert('Hata', 'Kamp alanı güncellenirken sunucu hatası oluştu.');
           }
-        ]);
+        }
       }
     } catch (error) {
       console.error('Error updating camping area:', error);

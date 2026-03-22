@@ -196,7 +196,19 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
       const normalizedTags = searchTags.map(t => t === 'camping' ? 'campground' : t);
       const isSuperAdmin = (options as any)?.isSuperAdmin === true;
       const userId = options.currentUserId ? String(options.currentUserId) : undefined;
-      const areas = await getDatabase().searchCampingAreasByLocation(lat, lng, searchRadius, normalizedTags, true, userId, isSuperAdmin);
+      const distanceFromLat = location?.coords.latitude ?? lat;
+      const distanceFromLng = location?.coords.longitude ?? lng;
+      const areas = await getDatabase().searchCampingAreasByLocation(
+        lat,
+        lng,
+        searchRadius,
+        normalizedTags,
+        true,
+        userId,
+        isSuperAdmin,
+        distanceFromLat,
+        distanceFromLng
+      );
       if (__DEV__) console.log('Found camping areas:', areas.length);
       const userAreas = areas.filter(area => 
         (typeof area.tags === 'object' && area.tags?.user_submitted === 'yes' && typeof area.tags.type === 'string' && area.tags.type.trim() !== '')

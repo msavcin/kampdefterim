@@ -535,6 +535,9 @@ export default function CampingAreaDetailModal({
   const [shareLoading, setShareLoading] = useState(false);
   const [shareCaption, setShareCaption] = useState('');
   const [captionCopied, setCaptionCopied] = useState(false);
+  const [isStoryMode, setIsStoryMode] = useState(false);
+  const shareCaptionFull = React.useRef('');
+  const shareCaptionStory = React.useRef('');
   
   // Hata bildirimi için state'ler
   const [showErrorReport, setShowErrorReport] = useState(false);
@@ -808,7 +811,23 @@ export default function CampingAreaDetailModal({
     lines.push('');
     lines.push('@kamp.defterim');
     lines.push('#kamp #kampyeri #doğa #türkiye');
-    setShareCaption(lines.join('\n'));
+    const fullText = lines.join('\n');
+
+    // Story için 120 karakterlik kısa metin: Başlık + @kamp.defterim
+    const tag = '@kamp.defterim';
+    const prefix = '🏕️ ';
+    const separator = '\n';
+    const maxLen = 120;
+    const reserved = prefix.length + separator.length + tag.length;
+    const maxTitleLen = maxLen - reserved;
+    const truncatedTitle =
+      title.length > maxTitleLen ? title.slice(0, maxTitleLen - 1) + '…' : title;
+    const storyText = `${prefix}${truncatedTitle}${separator}${tag}`;
+
+    shareCaptionFull.current = fullText;
+    shareCaptionStory.current = storyText;
+    setIsStoryMode(false);
+    setShareCaption(fullText);
     setShowInstagramModal(true);
   };
 
@@ -1029,7 +1048,7 @@ export default function CampingAreaDetailModal({
                     : ''}
                 </Text>
                 {typeof campingArea.distance_km === 'number' ? (
-                  <Text style={styles.distanceText}>• {campingArea.distance_km.toFixed(1)} km</Text>
+                  <Text style={styles.distanceText}>• ~ {campingArea.distance_km.toFixed(1)} km</Text>
                 ) : null}
                 <View style={{ flex: 1 }} />
                 {/* Sağda navigasyon ikonu */}
@@ -1446,7 +1465,9 @@ export default function CampingAreaDetailModal({
                   </View>
 
                   {/* Gönderi metni */}
-                  <Text style={{ color: '#374151', fontWeight: '600', fontSize: 13, marginBottom: 6 }}>Gönderi Metni:</Text>
+                  <Text style={{ color: '#374151', fontWeight: '600', fontSize: 13, marginBottom: 6 }}>
+                    {isStoryMode ? 'Story Metni (120 karakter):' : 'Gönderi Metni:'}
+                  </Text>
                   <TextInput
                     value={shareCaption}
                     onChangeText={setShareCaption}
@@ -1465,6 +1486,44 @@ export default function CampingAreaDetailModal({
                       lineHeight: 20,
                     }}
                   />
+
+                  {/* Story modu checkbox */}
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 }}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      const next = !isStoryMode;
+                      setIsStoryMode(next);
+                      setShareCaption(next ? shareCaptionStory.current : shareCaptionFull.current);
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 5,
+                        borderWidth: 2,
+                        borderColor: isStoryMode ? '#833ab4' : '#d1d5db',
+                        backgroundColor: isStoryMode ? '#833ab4' : '#fff',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {isStoryMode && (
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, lineHeight: 16 }}>✓</Text>
+                      )}
+                    </View>
+                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>
+                      Story için kısalt (max 120 karakter)
+                    </Text>
+                    {isStoryMode && (
+                      <View style={{ backgroundColor: '#f3e8ff', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 }}>
+                        <Text style={{ color: '#833ab4', fontWeight: '700', fontSize: 11 }}>
+                          {shareCaption.length}/120
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
                   {captionCopied ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, marginBottom: 14, backgroundColor: '#dcfce7', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
                       <Text style={{ fontSize: 14 }}>✅</Text>

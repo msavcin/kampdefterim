@@ -31,22 +31,22 @@ export async function getCachedImagePath(
     }
     
     const fileInfo = await FileSystem.getInfoAsync(localPath);
-    
+    let fileExists = fileInfo.exists;
+
     // Debug log
     if (forceRefresh) {
-      console.log(`[imageCache] 🔄 forceRefresh aktif - ${image_id}, online:${isOnline}, mevcut:${fileInfo.exists}`);
+      console.log(`[imageCache] 🔄 forceRefresh aktif - ${image_id}, online:${isOnline}, mevcut:${fileExists}`);
     }
-    
+
     // Online ve forceRefresh true ise cache'i sil ve yeniden indir
-    if (isOnline && forceRefresh && fileInfo.exists) {
+    if (isOnline && forceRefresh && fileExists) {
       console.log(`[imageCache] 🗑️ Cache siliniyor: ${image_id}`);
       await FileSystem.deleteAsync(localPath, { idempotent: true });
-      // fileInfo'yu güncelle
-      fileInfo.exists = false;
+      fileExists = false;
     }
-    
+
     // Dosya yoksa veya yenilenmesi talep edildiyse indir
-    const shouldDownload = !fileInfo.exists || (isOnline && forceRefresh);
+    const shouldDownload = !fileExists || (isOnline && forceRefresh);
     
     if (shouldDownload && isOnline) {
       console.log(`[imageCache] 📥 İndiriliyor: ${image_id}`);
