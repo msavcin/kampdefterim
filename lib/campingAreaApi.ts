@@ -156,6 +156,11 @@ export async function deleteCampingAreaOnServer(id: string | number, by?: 'exter
   let json = {};
   try { json = JSON.parse(text); } catch {}
   if (!res.ok) {
+    // Eğer kaynak zaten sunucuda yoksa (404), silme işlemi idempotent kabul edilir — hata yerine success say.
+    if (res.status === 404) {
+      console.warn('[API][DELETE][NOT_FOUND] Kaynak bulunamadı, idempotent başarı sayılıyor', { id, by, status: res.status, text });
+      return { status: res.status, notFound: true, json };
+    }
     console.error('[API][DELETE][ERROR]', { id, by, status: res.status, text });
     throw new Error('API Hatası: ' + text);
   }

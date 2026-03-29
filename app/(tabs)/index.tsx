@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { setLargeItemAsync, getLargeItemAsync } from '../../lib/largeStorage';
+import { setLargeItemAsync, getLargeItemAsync, setLastKnownLocationAsync, getLastKnownLocationAsync } from '../../lib/largeStorage';
 // İki koordinat arası mesafe (metre cinsinden) hesaplama
 function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
   const toRad = (value: number) => (value * Math.PI) / 180;
@@ -889,11 +889,15 @@ export default function MapScreen() {
             const freshLng = freshLocation.coords.longitude;
             
             // Cache'i güncelle
-            lastKnownLocationRef.current = {
+            const cacheValue = {
               latitude: freshLat,
               longitude: freshLng,
               timestamp: Date.now(),
             };
+            lastKnownLocationRef.current = cacheValue;
+            setLastKnownLocationAsync(freshLat, freshLng).catch((err) => {
+              if (__DEV__) console.warn('[LOCATION] lastKnownLocation kaydedilemedi:', err);
+            });
             
             // Eğer konum önemli ölçüde değiştiyse (>50m) haritayı güncelle
             const distance = getDistanceMeters(latitude, longitude, freshLat, freshLng);
@@ -938,11 +942,15 @@ export default function MapScreen() {
         console.log('[DEBUG] Güncel konum:', latitude, longitude);
         
         // Cache'i güncelle
-        lastKnownLocationRef.current = {
+        const cacheValue = {
           latitude,
           longitude,
           timestamp: Date.now(),
         };
+        lastKnownLocationRef.current = cacheValue;
+        setLastKnownLocationAsync(latitude, longitude).catch((err) => {
+          if (__DEV__) console.warn('[LOCATION] lastKnownLocation kaydedilemedi:', err);
+        });
         
         // Haritayı kullanıcının konumuna döndür
         setMapMoveQuery(null);
@@ -1612,11 +1620,15 @@ export default function MapScreen() {
   // İlk açılışta veya konum değiştiğinde cache'i güncelle
   useEffect(() => {
     if (location?.coords && hasLocationPermission) {
-      lastKnownLocationRef.current = {
+      const nextLocation = {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         timestamp: Date.now(),
       };
+      lastKnownLocationRef.current = nextLocation;
+      setLastKnownLocationAsync(nextLocation.latitude, nextLocation.longitude).catch((err) => {
+        if (__DEV__) console.warn('[LOCATION] lastKnownLocation kaydedilemedi:', err);
+      });
       if (__DEV__) console.log('[Location] Konum cache\'lendi:', location.coords.latitude, location.coords.longitude);
     }
   }, [location?.coords.latitude, location?.coords.longitude, hasLocationPermission]);
@@ -3553,6 +3565,10 @@ export default function MapScreen() {
                 return;
               }
                 if (isMounted.current) {
+                // Liste → Harita geçişinde paylaşılan kamp alanı listesini sıfırla
+                if (viewMode === 'list' && notificationCampingAreas) {
+                  setNotificationCampingAreas(null);
+                }
                 changeViewMode(viewMode === 'map' ? 'list' : 'map');
               }
             }}

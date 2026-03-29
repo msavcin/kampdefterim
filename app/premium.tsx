@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
   AppState,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -362,9 +363,43 @@ export default function PremiumScreen() {
         </View>
 
         {/* Terms */}
-        <Text style={styles.termsText}>
-          Abonelik otomatik olarak yenilenir. İstediğiniz zaman {Platform.OS === 'ios' ? 'App Store' : 'Google Play'} ayarlarından iptal edebilirsiniz.
-        </Text>
+        <View style={styles.termsContainerCard}>
+          <View style={styles.termRow}>
+            <View style={styles.termBullet} />
+            <Text style={styles.termTextLeft}>Abonelikler otomatik olarak yenilenir.</Text>
+          </View>
+
+          <View style={styles.termRow}>
+            <View style={styles.termBullet} />
+            <Text style={styles.termTextLeft}>Ödeme, satın alma onayında {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} hesabınızdan tahsil edilir.</Text>
+          </View>
+
+          <View style={styles.termRow}>
+            <View style={styles.termBullet} />
+            <Text style={styles.termTextLeft}>Abonelikler, mevcut dönemin bitimine 24 saat kala iptal edilmezse otomatik olarak yenilenir.</Text>
+          </View>
+
+          <View style={styles.termRow}>
+            <View style={styles.termBullet} />
+            <Text style={styles.termTextLeft}>Aboneliklerinizi {Platform.OS === 'ios' ? 'App Store' : 'Google Play'} Ayarları üzerinden yönetebilir ve iptal edebilirsiniz.</Text>
+          </View>
+
+          <View style={styles.policyLinksContainer}>
+            <TouchableOpacity
+              accessibilityRole="link"
+              onPress={() => Linking.openURL('https://www.kampdefterim.com/kullanim-kosullari.html')}
+            >
+              <Text style={styles.policyLink}>Kullanım Koşulları</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="link"
+              onPress={() => Linking.openURL('https://www.kampdefterim.com/gizlilik-politikasi.html')}
+            >
+              <Text style={styles.policyLink}>Gizlilik Politikası</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -623,6 +658,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
+  termsContainer: {
+    marginTop: 12,
+    paddingHorizontal: 0,
+  },
   termsText: {
     fontSize: 12,
     color: '#9ca3af',
@@ -630,5 +669,51 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 40,
     lineHeight: 18,
+  },
+
+  policyLinksContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 10,
+  },
+  policyLink: {
+    color: '#059669',
+    fontSize: 13,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  termsContainerCard: {
+    backgroundColor: '#ffffff',
+    marginHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e6f4ed',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  termRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 6,
+  },
+  termBullet: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#d1fae5',
+    marginTop: 6,
+    marginRight: 10,
+  },
+  termTextLeft: {
+    flex: 1,
+    fontSize: 13,
+    color: '#374151',
+    lineHeight: 20,
   },
 });

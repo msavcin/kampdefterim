@@ -126,15 +126,15 @@ export async function deleteCampingAreaSmart({ campingArea, isConnected }) {
           byParam = 'id';
         }
         console.log(`[deleteCampingAreaSmart] extId=${extId}, byParam=${byParam}, raw external_id=${campingArea.external_id}`);
-        await deleteCampingAreaOnServer(extId, byParam);
+        const delRes: any = await deleteCampingAreaOnServer(extId, byParam);
+        // Eğer sunucu 404 döndüyse, idempotent olarak kabul et ve devam et
+        if (delRes && delRes.notFound) {
+          console.warn('[deleteCampingAreaSmart] Sunucu kaynak bulunamadı (404), lokal silme korunuyor.');
+        }
       } catch (apiErr) {
-        // API hatası olursa pending'e ekle (owner_id de dahil)
-        console.warn('[deleteCampingAreaSmart] ❌ Server delete failed, adding to pending:', apiErr);
-        await addPendingChange({
-          type: 'delete',
-          campground_id: campingArea.id?.toString() ?? undefined,
-          data: { id: campingArea.id, external_id: campingArea.external_id, owner_id: campingArea.owner_id }
-        });
+        // API hatası olursa: DB.deleteCampingArea zaten pending değişiklik ekliyor,
+        // bu yüzden burada duplicate pending eklemeyelim. Sadece logla.
+        console.warn('[deleteCampingAreaSmart] ❌ Server delete failed (will remain pending):', apiErr);
       }
     } else {
       // Offline ise pending'e ekle (owner_id de dahil)

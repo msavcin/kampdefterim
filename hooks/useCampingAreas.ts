@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getDatabase, CampingArea as OriginalCampingArea } from '@/lib/database';
+import { setLastKnownLocationAsync, getLastKnownLocationAsync } from '@/lib/largeStorage';
 
 type CampingArea = OriginalCampingArea & {
   rentech_id?: string;
@@ -34,12 +35,48 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
     hasLocationPermission = null, // Varsayılan null (izin durumu bilinmiyor)
   } = options;
 
-  // Initialize database
+  // Initialize database and load cached data (fast startup)
   useEffect(() => {
-    getDatabase().init().catch(err => {
-      console.error('Database initialization error:', err);
-      setError('Veritabanı başlatılamadı');
-    });
+    let isCancelled = false;
+
+    const init = async () => {
+      try {
+        await getDatabase().init();
+
+        // 1) Localdeki son konumu kullanarak hızlıca liste göstermeye çalış
+        const cachedLocation = await getLastKnownLocationAsync();
+        if (cachedLocation && !isCancelled) {
+          setLocation({
+            coords: {
+              latitude: cachedLocation.latitude,
+              longitude: cachedLocation.longitude,
+              altitude: null,
+              accuracy: null,
+              altitudeAccuracy: null,
+              heading: null,
+              speed: null,
+            },
+            timestamp: cachedLocation.timestamp || Date.now(),
+          } as Location.LocationObject);
+        }
+
+        // 2) En son DB'de bulunan kamp alanlarını çek (hızlı gösterim için ilk 250 kayıt)
+        const cachedAreas = await getDatabase().listCampingAreas();
+        if (!isCancelled && Array.isArray(cachedAreas) && cachedAreas.length > 0) {
+          if (__DEV__) console.log('[useCampingAreas] Cached camping areas yüklendi:', cachedAreas.length);
+          setCampingAreas((cachedAreas as CampingArea[]).slice(0, 250));
+        }
+      } catch (err) {
+        console.error('Database initialization error:', err);
+        if (!isCancelled) setError('Veritabanı başlatılamadı');
+      }
+    };
+
+    init();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   // Get user location and start watching position
@@ -76,6 +113,9 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
                     });
                   }
                   setLocation(newLocation);
+                  setLastKnownLocationAsync(newLocation.coords.latitude, newLocation.coords.longitude).catch((err) => {
+                    if (__DEV__) console.warn('[useCampingAreas] last location cache kaydetme başarısız:', err);
+                  });
                 }
               );
             } catch (err) {
@@ -139,6 +179,11 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
       });
       
       setLocation(currentLocation);
+      try {
+        await setLastKnownLocationAsync(currentLocation.coords.latitude, currentLocation.coords.longitude);
+      } catch (storageError) {
+        if (__DEV__) console.warn('[useCampingAreas] last known konum kaydedilemedi:', storageError);
+      }
     } catch (err) {
       // Hata durumunda da varsayılan konumu ayarla
       const defaultLocation: Location.LocationObject = {

@@ -70,7 +70,7 @@ export default function ResetPasswordScreen() {
       const data = await res.json();
       if (res.ok) {
         Alert.alert('Başarılı', 'Şifreniz başarıyla güncellendi. Giriş ekranına yönlendiriliyorsunuz.');
-        router.replace('/(auth)/login');
+        router.replace('/login');
       } else {
         Alert.alert('Hata', data?.error || 'Şifre sıfırlama başarısız.');
       }
