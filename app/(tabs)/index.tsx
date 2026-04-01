@@ -59,6 +59,7 @@ import { getProvinceFromOSM } from '../../lib/osmReverseGeocode';
 import { getMe, listCommunityMembers } from '@/lib/userCommunityApi';
 import { API_URL } from '@/lib/config';
 import { UserPlus } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { on as onEvent, off as offEvent, emit as emitEvent } from '@/lib/eventBus';
 import { eventBus } from '@/lib/eventBus';
@@ -66,7 +67,7 @@ import { Animated, Easing, AppState } from 'react-native';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { MapPin, Filter, Navigation, Plus, Calendar, RefreshCw, Loader2, Binoculars, LocateFixed, List, Map } from 'lucide-react-native';
+import { MapPin, Filter, Navigation, Plus, Calendar, RefreshCw, Loader2, Binoculars, LocateFixed, List, Map, X, ArrowLeft, ArrowRight, CheckCircle } from 'lucide-react-native';
 import { Feather } from '@expo/vector-icons';
 import { Linking } from 'react-native';
 import { useCampingAreas } from '@/hooks/useCampingAreas';
@@ -211,6 +212,11 @@ export default function MapScreen() {
   const [user, setUser] = useState<any>(null);
   const [communityMember, setCommunityMember] = useState<any>(null);
   
+  // Kamp planı taslağı gösterge
+  const [hasDraftPlan, setHasDraftPlan] = useState(false);
+  // Kaydedilmiş plan sayısı (rozet için)
+  const [planCount, setPlanCount] = useState<number>(0);
+
   // Konum izni uyarı modalı ve durumu (ilk kez true olduğunda işlemleri başlat)
   const [locationPermissionModalVisible, setLocationPermissionModalVisible] = useState(false);
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
@@ -234,6 +240,91 @@ export default function MapScreen() {
     checkInitialPermission();
   }, []);
   
+  // Kamp planı taslağı kontrolü ve geri bildirim
+  useEffect(() => {
+    const loadDraftAndSaved = async () => {
+      try {
+        const draftRaw = await AsyncStorage.getItem('campPlannerDraft');
+        setHasDraftPlan(!!draftRaw);
+      } catch {
+        setHasDraftPlan(false);
+      }
+
+      try {
+        const savedRaw = await AsyncStorage.getItem('campPlannerSavedPlans');
+        if (savedRaw) {
+          const parsed = JSON.parse(savedRaw);
+          setPlanCount(Array.isArray(parsed) ? parsed.length : 0);
+        } else {
+          setPlanCount(0);
+        }
+      } catch {
+        setPlanCount(0);
+      }
+    };
+
+    const handleUpdate = () => {
+      loadDraftAndSaved();
+    };
+
+    loadDraftAndSaved();
+    eventBus.on('camp-planner:updated', handleUpdate);
+
+    // Camp-plan'dan gelen açma isteği: kamp türü filtresi ve lokasyon ile haritayı aç
+    const handleOpenFromCampPlan = (payload: any) => {
+      try {
+        const campType = payload?.campType;
+        const location = payload?.location;
+        // Save previous state so we can restore when user closes plan mode
+        prevSelectedTagsRef.current = selectedTags;
+        prevMapMoveQueryRef.current = mapMoveQuery;
+        if (campType) {
+          setSelectedTags([campType]);
+        }
+        if (location && location.latitude && location.longitude) {
+          setMapMoveQuery({ latitude: location.latitude, longitude: location.longitude });
+        }
+        // Harita plan görüntüleme için location picker banner kapat, fakat seçme modu aktif et
+        setIsLocationPickerMode(false);
+        setSelectForPlanMode(true);
+        try { eventBus.emit('camp-plan:modeActive', { active: true, campType }); } catch {}
+        setViewMode('map');
+        // Hemen filtreleri ve veriyi yenile (selectedTags güncellemesi sonrası)
+        try {
+          if (refreshDataRef.current && typeof refreshDataRef.current === 'function') {
+            refreshDataRef.current();
+          }
+        } catch (e) {
+          // ignore
+        }
+      } catch (e) {
+        console.warn('[MapScreen] camp-plan open handler hata', e);
+      }
+    };
+    eventBus.on('camp-plan:openMap', handleOpenFromCampPlan);
+
+    // Eğer camp-plan tarafından pending payload yazıldıysa (event kaçırıldıysa) onu oku
+    (async () => {
+      try {
+        const pending = await AsyncStorage.getItem('campPlanPendingOpen');
+        if (pending) {
+          const parsed = JSON.parse(pending);
+          if (parsed) {
+            handleOpenFromCampPlan(parsed);
+            await AsyncStorage.removeItem('campPlanPendingOpen');
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+
+    return () => {
+      eventBus.off('camp-planner:updated', handleUpdate);
+      eventBus.off('camp-plan:openMap', handleOpenFromCampPlan);
+    };
+  }, []);
+
   // Konum izni verilmediyse modal sadece ilk açılışta ve gerekli durumlarda açılsın
   useEffect(() => {
     (async () => {
@@ -1487,11 +1578,16 @@ export default function MapScreen() {
   const [showFilters, setShowFilters] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [isLocationPickerMode, setIsLocationPickerMode] = useState(false);
+  const [selectForPlanMode, setSelectForPlanMode] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{latitude: number, longitude: number} | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   // Artık filtreler merkezi kategori yönetiminden geliyor
   const [selectedTags, setSelectedTags] = useState(campingTypes.map(t => t.id));
+
+  // Refs to store previous filter/map state when entering camp-plan select mode
+  const prevSelectedTagsRef = useRef<any[] | null>(null);
+  const prevMapMoveQueryRef = useRef<any | null>(null);
 
   // Yeni filtreler - useMemo ile user state'ine bağlı olarak dinamik oluşturulur
   const FILTERS = useMemo(() => [
@@ -2626,6 +2722,7 @@ export default function MapScreen() {
       }
     }
     return {
+      id: areaId,
       name: area.name ?? '', // Add name property for marker
       amenities: area.amenities,
       distance: area.distance_km ? `${area.distance_km.toFixed(1)} km` : '',
@@ -2691,6 +2788,7 @@ export default function MapScreen() {
           
           var map = L.map('map', mapOptions).setView([${mapMoveQuery ? mapMoveQuery.latitude : currentLocation.coords.latitude}, ${mapMoveQuery ? mapMoveQuery.longitude : currentLocation.coords.longitude}], isOffline ? 12 : 14);
           var isLocationPickerMode = ${isLocationPickerMode};
+          var selectForPlanMode = ${selectForPlanMode};
           var selectedLocationMarker = null;
           
           // Offline-aware tile layer
@@ -2815,6 +2913,21 @@ export default function MapScreen() {
           }
           
           tileLayer.addTo(map);
+
+          // If opened from camp-plan selection mode, move zoom controls lower to avoid overlap 
+          if (selectForPlanMode) {
+            setTimeout(function() {
+              try {
+                var z = document.querySelector('.leaflet-control-zoom');
+                if (z && z.style) {
+                  z.style.top = '65px';
+                  z.style.bottom = '0';
+                  z.style.left = '0';
+                  z.style.right = '12px';
+                }
+              } catch (e) { console.warn('zoom reposition error', e); }
+            }, 300);
+          }
 
           // Offline modda harita yüklendikten sonra tile'ları yenile
           if (isOffline) {
@@ -2996,7 +3109,15 @@ export default function MapScreen() {
                       <span style="font-size: 13px; color: #222;">Yandex Haritalar</span>
                     </div>
                   </div>
+                  
+              </div>
                 </div>
+                <!-- Kamp Planla Seçim Butonu -->
+                ${(selectForPlanMode || isLocationPickerMode) ? `
+                <div style="margin-top:6px; padding: 0 10px 6px 10px;">
+                  <button class="select-for-plan-btn" data-payload="${encodeURIComponent(JSON.stringify({ type: 'selectCampingAreaForPlan', id: marker.id ? marker.id : null, latitude: marker.lat, longitude: marker.lng, name: (marker.name || ''), areaType: (marker.typeLabel || '') }))}" style="width:100%; padding:8px 10px; background:#059669; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Bu kampı seç</button>
+                </div>
+              ` : ''}
               </div>
             </div>
             </div>
@@ -3092,6 +3213,28 @@ export default function MapScreen() {
             var menu = child.closest('.map-menu');
             if (menu) menu.style.display = 'none';
           };
+
+          // Delegated click handler for select-for-plan buttons (avoid inline onclick parsing issues)
+          document.addEventListener('click', function(e) {
+            try {
+              var btn = (e.target && e.target.closest) ? e.target.closest('.select-for-plan-btn') : null;
+              if (!btn) return;
+              var payload = btn.getAttribute('data-payload');
+              if (!payload) return;
+              try {
+                var decoded = decodeURIComponent(payload);
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(decoded);
+                } else {
+                  console.log('select-for-plan payload:', decoded);
+                }
+              } catch (err) {
+                console.warn('select-for-plan decode error', err);
+              }
+            } catch (err) {
+              console.warn('select-for-plan click handler error', err);
+            }
+          });
         </script>
       </body>
       </html>
@@ -3101,11 +3244,42 @@ export default function MapScreen() {
   // HTML çıktısını memoize et - gereksiz re-render'ları önle
   const mapHTML = useMemo(() => {
     return generateMapHTML();
-  }, [location, filteredCampingAreas, mapMoveQuery, isLocationPickerMode, isConnected, favorites]);
+  }, [location, filteredCampingAreas, mapMoveQuery, isLocationPickerMode, selectForPlanMode, isConnected, favorites]);
 
   const handleWebViewMessage = (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
+      if (data?.type === 'selectCampingAreaForPlan') {
+        try {
+          // bulabiliyorsak detaylı area bilgisini al
+          const area = filteredCampingAreas.find((a: any) => String(a.id) === String(data.id));
+          const raw = {
+            id: data.id,
+            latitude: data.latitude,
+            longitude: data.longitude,
+            name: data.name || (area ? area.name : undefined),
+            areaType: data.areaType || (area ? (area.tags?.type || area.type) : undefined),
+            gotoStep: 3,
+          };
+          // Normalize for event consumers: ensure `type` holds area type (camp-plan expects payload.type)
+          const eventPayload = { ...raw, type: raw.areaType };
+          // Persist pending selection so camp-plan reads it if event is missed
+          (async () => {
+            try {
+              await AsyncStorage.setItem('campPlanPendingSelected', JSON.stringify(eventPayload));
+            } catch (e) {}
+            try { eventBus.emit('camp-plan:selectedArea', eventPayload); } catch (e) {}
+            // seçim modu kapat
+            setSelectForPlanMode(false);
+            try { eventBus.emit('camp-plan:modeActive', { active: false }); } catch {}
+            // Haritadan camp-plan sayfasına geri dön
+            try { router.push('/camp-plan'); } catch (e) {}
+          })();
+        } catch (e) {
+          console.warn('[MapScreen] selectCampingAreaForPlan hata', e);
+        }
+        return;
+      }
       if (data.type === 'locationSelected') {
         // Guest kullanıcı için limit kontrolü
         if (isGuest && !canAddMoreAreas) {
@@ -3260,6 +3434,8 @@ export default function MapScreen() {
     if (!isMounted.current) return;
     setIsLocationPickerMode(false);
     setSelectedLocation(null);
+    setSelectForPlanMode(false);
+    try { eventBus.emit('camp-plan:modeActive', { active: false }); } catch {}
   };
 
   const addCampingAreaAtCurrentLocation = () => {
@@ -3348,9 +3524,7 @@ export default function MapScreen() {
   };
 
   const handlePlanCamp = () => {
-    // TODO: Navigate to camp planning screen or open planning modal
-    console.log('Kamp Planla button pressed');
-    Alert.alert('Kamp Planla', 'Kamp planlama özelliği yakında eklenecek!');
+    router.push('/camp-plan');
   };
 
   const openGoogleMapsNavigation = (latitude: number, longitude: number) => {
@@ -3849,6 +4023,7 @@ export default function MapScreen() {
         <View style={{ flex: 1, backgroundColor: '#f8fafc' }}>
           <CampingAreaSearchBar
             campingAreas={searchAllAreas}
+            campTypeFilter={selectForPlanMode ? (selectedTags?.[0] ?? null) : null}
             onSelect={area => {
               setSearchSelectedArea(area);
               setShowDetailModal(true);
@@ -4001,6 +4176,78 @@ export default function MapScreen() {
             </View>
           )}
 
+            {/* Camp Plan compact overlay: small back/next/close and step title under header */}
+            {selectForPlanMode && (
+              <View style={styles.planOverlayCompact} pointerEvents="box-none">
+                <TouchableOpacity
+                  style={styles.compactBtn}
+                  onPress={() => {
+                    (async () => {
+                      try { await AsyncStorage.setItem('campPlanPendingStep', JSON.stringify({ step: 1 })); } catch (e) {}
+                      try { eventBus.emit('camp-plan:mapBack'); } catch {}
+                      setSelectForPlanMode(false);
+                      try { router.push('/camp-plan'); } catch (e) {}
+                    })();
+                  }}
+                >
+                  <ArrowLeft size={18} color="#374151" />
+                </TouchableOpacity>
+
+                <Text style={styles.compactTitle}>Adım 3 / 5 — Kamp Alanı Seçimi</Text>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <TouchableOpacity
+                    style={styles.compactBtn}
+                    onPress={() => {
+                      (async () => {
+                        try { await AsyncStorage.setItem('campPlanPendingStep', JSON.stringify({ step: 3 })); } catch (e) {}
+                        try { eventBus.emit('camp-plan:mapNext'); } catch {}
+                        setSelectForPlanMode(false);
+                        try { eventBus.emit('camp-plan:modeActive', { active: false }); } catch {}
+                        try { router.push('/camp-plan'); } catch (e) {}
+                      })();
+                    }}
+                  >
+                    <ArrowRight size={18} color="#374151" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.compactBtn}
+                    onPress={() => {
+                        (async () => {
+                          try {
+                            await AsyncStorage.removeItem('campPlanPendingOpen');
+                            await AsyncStorage.removeItem('campPlanPendingStep');
+                            await AsyncStorage.removeItem('campPlanPendingSelected');
+                          } catch (e) {}
+                          // Restore previous filters/map if we saved them
+                          try {
+                            if (prevSelectedTagsRef.current) {
+                              if (prevSelectedTagsRef.current) {
+                                setSelectedTags(prevSelectedTagsRef.current as any[]);
+                              }
+                              prevSelectedTagsRef.current = null;
+                            }
+                            if (prevMapMoveQueryRef.current) {
+                              setMapMoveQuery(prevMapMoveQueryRef.current);
+                              prevMapMoveQueryRef.current = null;
+                            }
+                            // Refresh data to reflect restored filters
+                            if (refreshDataRef.current && typeof refreshDataRef.current === 'function') {
+                              refreshDataRef.current();
+                            }
+                          } catch (e) {}
+                          setSelectForPlanMode(false);
+                          try { eventBus.emit('camp-plan:modeActive', { active: false }); } catch {}
+                          try { router.replace('/'); } catch (e) {}
+                        })();
+                    }}
+                  >
+                    <X size={18} color="#374151" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
           {/* Konum İzni Butonu - Sadece izin verilmediğinde göster */}
           {(console.log('[DEBUG] Buton render koşulları:', {
             hasLocationPermission,
@@ -4045,8 +4292,14 @@ export default function MapScreen() {
                   onPress={handlePlanCamp}
                   disabled={isBusy || syncProgress.isLoading}
                 >
+                  {hasDraftPlan && <View style={styles.draftDot} />}
                   <Calendar size={14} color="#7c3aed" />
                   <Text style={styles.planCampButtonText}>Kamp Planla</Text>
+                  {planCount > 0 && (
+                    <View style={styles.planBadge}>
+                      <Text style={styles.planBadgeText}>{planCount > 99 ? '99+' : String(planCount)}</Text>
+                    </View>
+                  )}
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={[styles.currentLocationButton, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
@@ -4070,6 +4323,7 @@ export default function MapScreen() {
         <View style={{ flex: 1 }}>
           <CampingAreaListView
             campingAreas={notificationCampingAreas ?? filteredCampingAreas}
+            isCampPlanMode={selectForPlanMode}
             onSelectArea={(area) => {
               if (!isMounted.current) return;
               if (syncProgress.isLoading) return;
@@ -4303,6 +4557,105 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginHorizontal: 4,
   },
+  planOverlayHeader: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 12,
+    height: 56,
+    zIndex: 1200,
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'box-none',
+  },
+  planOverlayTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0f172a',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  planOverlayClose: {
+    position: 'absolute',
+    left: 12,
+    top: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1300,
+  },
+  planOverlayBottom: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 18,
+    zIndex: 1200,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  planOverlayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#64748b',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 10,
+    minWidth: 120,
+  },
+  planOverlayBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#059669',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 10,
+    minWidth: 120,
+  },
+  planOverlayBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  planOverlayCompact: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    top: 85,
+    zIndex: 1300,
+    height: 48,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+  },
+  compactBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  compactTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
   fabBinoculars: {
     backgroundColor: '#059669',
     width: 56,
@@ -4524,6 +4877,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#7c3aed',
     fontWeight: '600',
+  },
+  draftDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#dc2626',
+    marginRight: 4,
+  },
+  planBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+    paddingHorizontal: 4,
+  },
+  planBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   currentLocationButton: {
     flexDirection: 'row',

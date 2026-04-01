@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Slot, useRouter, useSegments } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import useTokenAutoLogout from '@/hooks/useTokenAutoLogout';
 import { View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import ThemeProvider from '../components/ThemeProvider';
 import { isLoggedIn } from '../lib/auth';
 
 export default function RootLayout() {
@@ -47,9 +46,8 @@ export default function RootLayout() {
   }, [checked, shouldRedirect]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
-      <StatusBar style="dark" />
+    <ThemeProvider>
       <Slot />
-    </SafeAreaView>
+    </ThemeProvider>
   );
 }

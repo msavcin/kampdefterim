@@ -14,6 +14,8 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { MapPin, Navigation, Info } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eventBus } from '@/lib/eventBus';
 import type { CampingArea } from '@/lib/database';
 import { getCampingTypeLabel } from '@/lib/categories';
 import { getLocationNameFromOSM } from '@/lib/osmReverseGeocode';
@@ -30,6 +32,7 @@ interface CampingAreaListViewProps {
   disabled?: boolean;
   isGuest?: boolean;
   isConnected?: boolean;
+  isCampPlanMode?: boolean;
 }
 
 const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
@@ -42,6 +45,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   disabled = false,
   isGuest = false,
   isConnected = true,
+  isCampPlanMode = false,
 }) => {
   const router = useRouter();
   const [loadingImages, setLoadingImages] = useState<Set<string | number>>(new Set());
@@ -50,6 +54,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   const [locationNames, setLocationNames] = useState<Record<string, string | null>>({});
   const [loadingLocationIds, setLoadingLocationIds] = useState<Set<string | number>>(new Set());
   const [visibleIds, setVisibleIds] = useState<Array<string | number>>([]);
+  const [showSelectMode, setShowSelectMode] = useState(false);
   const isMounted = useRef(true);
 
   useEffect(() => {
@@ -57,6 +62,45 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
       isMounted.current = false;
     };
   }, []);
+
+  // Camp Plan modunu dinle: sadece planlama sırasında "Bu kampı seç" butonunu göster
+  useEffect(() => {
+    const onOpen = (payload: any) => {
+      setShowSelectMode(true);
+    };
+    const onSelected = (payload: any) => {
+      setShowSelectMode(false);
+    };
+    const onModeActive = (payload: any) => {
+      try {
+        setShowSelectMode(!!payload && payload.active === true);
+      } catch (e) {}
+    };
+    eventBus.on('camp-plan:openMap', onOpen);
+    eventBus.on('camp-plan:selectedArea', onSelected);
+    eventBus.on('camp-plan:modeActive', onModeActive);
+    // Eğer event kaçırıldıysa pending payload'a bak ve mode'u aç
+    (async () => {
+      try {
+        const pending = await AsyncStorage.getItem('campPlanPendingOpen');
+        if (pending) {
+          setShowSelectMode(true);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => {
+      eventBus.off('camp-plan:openMap', onOpen);
+      eventBus.off('camp-plan:selectedArea', onSelected);
+      eventBus.off('camp-plan:modeActive', onModeActive);
+    };
+  }, []);
+
+  // Eğer parent prop olarak camp-plan modu geliyorsa öncelikle onu uygula
+  useEffect(() => {
+    setShowSelectMode(!!isCampPlanMode);
+  }, [isCampPlanMode]);
 
   const getTypeLabel = (type: string) => {
     return getCampingTypeLabel(type);
@@ -301,6 +345,36 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
               <Navigation size={16} color={disabled ? "#9ca3af" : "#3b82f6"} />
               <Text style={[styles.actionButtonText, styles.navigationButtonText, disabled && styles.actionButtonTextDisabled]}>Yol Tarifi</Text>
             </TouchableOpacity>
+
+            {/* Bu kampı seç (Camp Plan) - sadece camp-plan modunda görünür */}
+            {showSelectMode && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.selectButton, disabled && styles.actionButtonDisabled]}
+                onPress={() => {
+                  if (disabled) return;
+                  try {
+                    const payload = {
+                      id: (item as any).id,
+                      latitude: item.latitude,
+                      longitude: item.longitude,
+                      name: item.name,
+                      type: getAreaType(item) || undefined,
+                      gotoStep: 3,
+                    };
+                    // Persist pending selection so camp-plan reads it if event is missed
+                    AsyncStorage.setItem('campPlanPendingSelected', JSON.stringify(payload)).catch(() => {});
+                    eventBus.emit('camp-plan:selectedArea', payload);
+                    router.push('/camp-plan');
+                  } catch (e) {
+                    console.warn('[CampingAreaListView] selectForPlan hata', e);
+                  }
+                }}
+                disabled={disabled}
+              >
+                <Feather name="check-circle" size={16} color={disabled ? "#9ca3af" : "#059669"} />
+                <Text style={[styles.actionButtonText, disabled && styles.actionButtonTextDisabled]}>Bu kampı seç</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </TouchableOpacity>
@@ -510,6 +584,9 @@ const styles = StyleSheet.create({
   },
   navigationButtonText: {
     color: '#3b82f6',
+  },
+  selectButton: {
+    backgroundColor: '#ecfdf5',
   },
   separator: {
     height: 12,

@@ -1469,6 +1469,29 @@ export class DatabaseManager {
     }
   }
 
+  // Helper: run DB operation and retry once if native handle was released
+  private async _withDbRetry<T>(fn: () => Promise<T>, label?: string): Promise<T> {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const msg = (err && err.message) ? String(err.message) : String(err);
+      const needsRetry = msg.includes('Cannot use shared object') || msg.includes('cannot be cast to type expo.modules.sqlite.NativeDatabase') || msg.includes('prepareAsync') || msg.includes('already released');
+      if (needsRetry) {
+        console.warn(`[DB][${label || 'op'}] Native DB handle invalid, reopening and retrying once:`, msg);
+        try {
+          // Force re-open
+          this.db = null;
+          await this.init();
+          return await fn();
+        } catch (err2) {
+          console.error(`[DB][${label || 'op'}] Retry failed:`, err2);
+          throw err2;
+        }
+      }
+      throw err;
+    }
+  }
+
   private async createTables() {
   // Create pending_changes table if it doesn't exist
   if (!this.db) throw new Error('Database not initialized');
@@ -2245,67 +2268,69 @@ export class DatabaseManager {
   }
 
   async getAllCampingAreas(): Promise<CampingArea[]> {
-    if (!this.db) await this.init();
     try {
-      // Tablo yoksa boş dizi döndür
-      const tables = await this.db!.getAllAsync(`SELECT name FROM sqlite_master WHERE type='table' AND name='camping_areas';`);
-      if (!tables || tables.length === 0) return [];
-      const result = await this.db!.getAllAsync('SELECT * FROM camping_areas WHERE status = "active" AND deleted = 0 ORDER BY name');
-      // --- LOG: friend_user_ids içeren kayıtları göster ---
-      const friendAreas = result.filter((row: any) => {
-        if (!row.friend_user_ids) return false;
-        try {
-          const arr = typeof row.friend_user_ids === 'string' ? JSON.parse(row.friend_user_ids) : row.friend_user_ids;
-          return Array.isArray(arr) && arr.length > 0;
-        } catch { return false; }
-      });
-      if (friendAreas.length > 0) {
-        const friendAreasArr = friendAreas as any[];
-        console.log('[FRIEND_USER_IDS][LOCAL]', friendAreasArr.map(a => ({ id: a.id, name: a.name, friend_user_ids: a.friend_user_ids })));
-      } else {
-  // ...existing code...
-      }
-      // --- DEBUG: status/deleted filtresi olmadan friend_user_ids içeren kayıtları göster ---
-      try {
-        const allFriendAreas = await this.db!.getAllAsync('SELECT id, name, friend_user_ids, status, deleted FROM camping_areas');
-        const friendRows = allFriendAreas.filter((row: any) => {
+      return await this._withDbRetry(async () => {
+        if (!this.db) await this.init();
+        // Tablo yoksa boş dizi döndür
+        const tables = await this.db!.getAllAsync(`SELECT name FROM sqlite_master WHERE type='table' AND name='camping_areas';`);
+        if (!tables || tables.length === 0) return [];
+        const result = await this.db!.getAllAsync('SELECT * FROM camping_areas WHERE status = "active" AND deleted = 0 ORDER BY name');
+        // --- LOG: friend_user_ids içeren kayıtları göster ---
+        const friendAreas = result.filter((row: any) => {
           if (!row.friend_user_ids) return false;
           try {
             const arr = typeof row.friend_user_ids === 'string' ? JSON.parse(row.friend_user_ids) : row.friend_user_ids;
             return Array.isArray(arr) && arr.length > 0;
           } catch { return false; }
         });
-        if (friendRows.length > 0) {
-          // ...existing code...
+        if (friendAreas.length > 0) {
+          const friendAreasArr = friendAreas as any[];
+          console.log('[FRIEND_USER_IDS][LOCAL]', friendAreasArr.map(a => ({ id: a.id, name: a.name, friend_user_ids: a.friend_user_ids })));
         } else {
-          // ...existing code...
+  // ...existing code...
         }
-      } catch (e) {
-        console.error('[FRIEND_USER_IDS][ALL_LOCAL][ERROR]', e);
-      }
-      return (result as any[]).map((row: any) => {
-        const obj: any = { ...row };
-        try { obj.amenities = typeof row.amenities === 'string' ? JSON.parse(row.amenities || '[]') : row.amenities; } catch { obj.amenities = []; }
-        try { obj.tags = typeof row.tags === 'string' ? JSON.parse(row.tags || '{}') : row.tags; } catch { obj.tags = {}; }
-        try { obj.images = typeof row.images === 'string' ? JSON.parse(row.images || '[]') : (row.images || []); } catch { obj.images = []; }
-        try { obj.facilities = typeof row.facilities === 'string' ? JSON.parse(row.facilities || '[]') : (row.facilities || []); } catch { obj.facilities = []; }
-        try { obj.accessibility = typeof row.accessibility === 'string' ? JSON.parse(row.accessibility || '[]') : (row.accessibility || []); } catch { obj.accessibility = []; }
-        try { obj.social_media = typeof row.social_media === 'string' ? JSON.parse(row.social_media || '{}') : (row.social_media || {}); } catch { obj.social_media = {}; }
-        try { obj.photo_links = typeof row.photo_links === 'string' ? JSON.parse(row.photo_links || '[]') : (row.photo_links || []); } catch { obj.photo_links = []; }
-        try { obj.friend_user_ids = typeof row.friend_user_ids === 'string' ? JSON.parse(row.friend_user_ids || '[]') : row.friend_user_ids; } catch { obj.friend_user_ids = []; }
+        // --- DEBUG: status/deleted filtresi olmadan friend_user_ids içeren kayıtları göster ---
         try {
-          if (typeof row.opening_hours === 'string' && row.opening_hours.trim().length > 0 && (row.opening_hours.trim().startsWith('{') || row.opening_hours.trim().startsWith('['))) {
-            obj.opening_hours = JSON.parse(row.opening_hours);
+          const allFriendAreas = await this.db!.getAllAsync('SELECT id, name, friend_user_ids, status, deleted FROM camping_areas');
+          const friendRows = allFriendAreas.filter((row: any) => {
+            if (!row.friend_user_ids) return false;
+            try {
+              const arr = typeof row.friend_user_ids === 'string' ? JSON.parse(row.friend_user_ids) : row.friend_user_ids;
+              return Array.isArray(arr) && arr.length > 0;
+            } catch { return false; }
+          });
+          if (friendRows.length > 0) {
+            // ...existing code...
           } else {
-            obj.opening_hours = row.opening_hours;
+            // ...existing code...
           }
-        } catch { obj.opening_hours = row.opening_hours; }
-        obj.owner_id = row.owner_id !== undefined && row.owner_id !== null ? String(row.owner_id) : '';
-        obj.community_id = row.community_id !== undefined && row.community_id !== null ? row.community_id : undefined;
-        obj.fee = row.fee === null ? null : Boolean(row.fee);
-        obj.owner_username = row.owner_username ?? '';
-        return obj;
-      }) as CampingArea[];
+        } catch (e) {
+          console.error('[FRIEND_USER_IDS][ALL_LOCAL][ERROR]', e);
+        }
+        return (result as any[]).map((row: any) => {
+          const obj: any = { ...row };
+          try { obj.amenities = typeof row.amenities === 'string' ? JSON.parse(row.amenities || '[]') : row.amenities; } catch { obj.amenities = []; }
+          try { obj.tags = typeof row.tags === 'string' ? JSON.parse(row.tags || '{}') : row.tags; } catch { obj.tags = {}; }
+          try { obj.images = typeof row.images === 'string' ? JSON.parse(row.images || '[]') : (row.images || []); } catch { obj.images = []; }
+          try { obj.facilities = typeof row.facilities === 'string' ? JSON.parse(row.facilities || '[]') : (row.facilities || []); } catch { obj.facilities = []; }
+          try { obj.accessibility = typeof row.accessibility === 'string' ? JSON.parse(row.accessibility || '[]') : (row.accessibility || []); } catch { obj.accessibility = []; }
+          try { obj.social_media = typeof row.social_media === 'string' ? JSON.parse(row.social_media || '{}') : (row.social_media || {}); } catch { obj.social_media = {}; }
+          try { obj.photo_links = typeof row.photo_links === 'string' ? JSON.parse(row.photo_links || '[]') : (row.photo_links || []); } catch { obj.photo_links = []; }
+          try { obj.friend_user_ids = typeof row.friend_user_ids === 'string' ? JSON.parse(row.friend_user_ids || '[]') : row.friend_user_ids; } catch { obj.friend_user_ids = []; }
+          try {
+            if (typeof row.opening_hours === 'string' && row.opening_hours.trim().length > 0 && (row.opening_hours.trim().startsWith('{') || row.opening_hours.trim().startsWith('['))) {
+              obj.opening_hours = JSON.parse(row.opening_hours);
+            } else {
+              obj.opening_hours = row.opening_hours;
+            }
+          } catch { obj.opening_hours = row.opening_hours; }
+          obj.owner_id = row.owner_id !== undefined && row.owner_id !== null ? String(row.owner_id) : '';
+          obj.community_id = row.community_id !== undefined && row.community_id !== null ? row.community_id : undefined;
+          obj.fee = row.fee === null ? null : Boolean(row.fee);
+          obj.owner_username = row.owner_username ?? '';
+          return obj;
+        }) as CampingArea[];
+      }, 'getAllCampingAreas');
     } catch (error) {
       console.error('Error getting all camping areas:', error);
       return [];

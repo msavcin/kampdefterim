@@ -13,6 +13,7 @@ interface Props {
   user?: any;
   isGuest?: boolean;
   isConnected?: boolean;
+  campTypeFilter?: string | null;
 }
 
 // Merkezi kamp türü yönetiminden label çek
@@ -20,7 +21,7 @@ function getTypeLabel(type: string): string {
   return getCampingTypeLabel(type);
 }
 
-export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnMap, user, isGuest, isConnected = true }: Props) {
+export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnMap, user, isGuest, isConnected = true, campTypeFilter }: Props) {
   const router = useRouter();
   const isMountedRef = useRef(true);
   const [searchText, setSearchText] = useState('');
@@ -34,8 +35,21 @@ export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnM
   }, []);
 
   useEffect(() => {
-    const filteredAreas = filterCampingAreasByUser(campingAreas, user, isGuest);
-    
+    let filteredAreas = filterCampingAreasByUser(campingAreas, user, isGuest);
+
+    // Eğer campTypeFilter sağlandıysa, yalnızca o tipe uyan alanları bırak
+    if (campTypeFilter) {
+      try {
+        const ct = String(campTypeFilter);
+        filteredAreas = filteredAreas.filter(a => {
+          const areaType = (a as any).tags && (a as any).tags.type ? (a as any).tags.type : (a as any).type;
+          return areaType ? String(areaType) === ct : false;
+        });
+      } catch (e) {
+        // ignore
+      }
+    }
+
     // Arama metnine göre filtrele
     if (searchText.length >= 3) {
       const lower = searchText.toLowerCase();
