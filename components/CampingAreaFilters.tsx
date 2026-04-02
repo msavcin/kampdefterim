@@ -4,6 +4,8 @@ import { useRouter } from 'expo-router';
 import { Check, CheckSquare, Square, Map, Crown } from 'lucide-react-native';
 import { campingTypes } from '../lib/categories';
 import type { CampingArea } from '../lib/database';
+import { useTheme } from './ThemeProvider';
+import { createThemedStyles } from '../constants/theme/sharedStyles';
 
 interface FilterOption {
   key: string;
@@ -30,10 +32,12 @@ interface Props {
 
 // Modern Checkbox Component
 function ModernCheckbox({ checked, disabled }: { checked: boolean; disabled?: boolean }) {
+  const { colors } = useTheme();
   return (
     <View
       style={[
         styles.checkbox,
+        { backgroundColor: colors.surface, borderColor: colors.border },
         checked && styles.checkboxChecked,
         disabled && styles.checkboxDisabled,
       ]}
@@ -59,6 +63,8 @@ export default function CampingAreaFilters({
   isOffline = false,
   isPremium = false,
 }: Props & { userId?: string | number }) {
+  const { colors } = useTheme();
+  const themed = createThemedStyles(colors);
   const router = useRouter();
   // Türkiye geneli checkbox gösterilecek filtre anahtarları
   const TURKEY_WIDE_KEYS = ['own', 'community', 'friend'];
@@ -100,11 +106,11 @@ export default function CampingAreaFilters({
       {/* Kullanıcı Filtresi Bölümü */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Kullanıcı Filtresi</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Kullanıcı Filtresi</Text>
           {onTurkeyWideToggle && (
             <View style={styles.turkeyHeaderHint}>
-              <Map size={15} color={isOffline ? '#d1d5db' : '#f97316'} strokeWidth={2} />
-              <Text style={[styles.turkeyHeaderHintText, isOffline && { color: '#d1d5db' }]}>Tüm TR</Text>
+              <Map size={15} color={isOffline ? colors.border : '#f97316'} strokeWidth={2} />
+              <Text style={[styles.turkeyHeaderHintText, isOffline && { color: colors.border }]}>Tüm TR</Text>
             </View>
           )}
         </View>
@@ -119,6 +125,7 @@ export default function CampingAreaFilters({
                   style={[
                     styles.userFilterItem,
                     styles.userFilterItemFlex,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
                     (filter.disabled || disabledByTurkey) && styles.userFilterItemDisabled,
                   ]}
                   onPress={() => !filter.disabled && !disabled && !disabledByTurkey && onUserFilterToggle(filter.key)}
@@ -132,6 +139,7 @@ export default function CampingAreaFilters({
                   <Text
                     style={[
                       styles.userFilterLabel,
+                      { color: colors.text },
                       (filter.disabled || disabledByTurkey) && styles.userFilterLabelDisabled,
                     ]}
                   >
@@ -146,6 +154,7 @@ export default function CampingAreaFilters({
                       <TouchableOpacity
                         style={[
                           styles.turkeyCheckbox,
+                          { backgroundColor: colors.surface, borderColor: colors.border },
                           turkeyWideFilters.includes(filter.key) && !lockedByPremium && styles.turkeyCheckboxActive,
                           (disabled || isOffline) && !lockedByPremium && { opacity: 0.35 },
                           lockedByPremium && styles.turkeyCheckboxLocked,
@@ -185,7 +194,7 @@ export default function CampingAreaFilters({
       {/* Kamp Türleri Bölümü */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Kamp Türleri</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Kamp Türleri</Text>
           {onToggleAllCampingTypes && (
             <TouchableOpacity
               onPress={onToggleAllCampingTypes}
@@ -194,9 +203,9 @@ export default function CampingAreaFilters({
               activeOpacity={0.6}
             >
               {selectedCampingTypes.length === campingTypes.length ? (
-                <CheckSquare size={22} color="#059669" strokeWidth={2} />
+                <CheckSquare size={22} color={colors.primary} strokeWidth={2} />
               ) : (
-                <Square size={22} color="#9ca3af" strokeWidth={2} />
+                <Square size={22} color={colors.muted} strokeWidth={2} />
               )}
             </TouchableOpacity>
           )}
@@ -234,9 +243,9 @@ export default function CampingAreaFilters({
 
       {/* Uygula Butonu - her zaman altta sabit */}
       {onClose && (
-        <View style={styles.applyContainer}>
+        <View style={[styles.applyContainer, { backgroundColor: colors.background, borderTopColor: colors.border }]}>
           <TouchableOpacity
-            style={styles.applyButton}
+            style={[styles.applyButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
             onPress={onClose}
             activeOpacity={0.8}
           >
@@ -320,7 +329,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -10,
     right: 0,
-    backgroundColor: '#059669',
+    backgroundColor: '#059669', // semantic: premium badge green
     borderRadius: 10,
     width: 18,
     height: 18,
@@ -360,7 +369,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#059669',
+    backgroundColor: '#059669', // overridden by theme at runtime where needed
     borderColor: '#059669',
   },
   checkboxDisabled: {

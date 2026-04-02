@@ -56,6 +56,8 @@ export class DatabaseManager {
     // Singleton instance
     private static instance: DatabaseManager | null = null;
     private initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+    // Announcement sync mutex - eşzamanlı sync çağrılarını engeller
+    private static _isAnnouncementSyncing = false;
     
     // Singleton getter
     static getInstance(): DatabaseManager {
@@ -151,12 +153,14 @@ export class DatabaseManager {
    * Kamp alanı için local soft delete: deleted=1, status='deleted', updated_at güncelle
    */
   async deleteCampingAreaLocal(id: number) {
-    if (!this.db) await this.init();
-    const now = new Date().toISOString();
-    return this.db!.runAsync(
-      `UPDATE camping_areas SET deleted = 1, status = 'deleted', updated_at = ? WHERE id = ?`,
-      [now, id]
-    );
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      const now = new Date().toISOString();
+      return this.db!.runAsync(
+        `UPDATE camping_areas SET deleted = 1, status = 'deleted', updated_at = ? WHERE id = ?`,
+        [now, id]
+      );
+    });
   }
   /**
    * Duyurular için offline ekleme: Hem local tabloya ekler hem pending_changes'a yazar
@@ -260,116 +264,133 @@ export class DatabaseManager {
    * @returns Eklenen/güncellenen duyuru sayısı
    */
   async fetchAndStoreAnnouncementsFromAPI(apiUrl: string = API_URL + '/announcements/', useDeltaSync: boolean = true) {
+    // Eşzamanlı announcement sync'i engelle
+    if (DatabaseManager._isAnnouncementSyncing) {
+      if (__DEV__) console.log('[ANNOUNCEMENT][DELTA-SYNC] Zaten bir sync devam ediyor, atlanıyor.');
+      return 0;
+    }
+    DatabaseManager._isAnnouncementSyncing = true;
+    try {
+      return await this._fetchAndStoreAnnouncementsInternal(apiUrl, useDeltaSync);
+    } finally {
+      DatabaseManager._isAnnouncementSyncing = false;
+    }
+  }
+
+  /**
+   * Internal: Announcement sync işlemini enqueue ile çalıştırır.
+   * Doğrudan çağırmayın, fetchAndStoreAnnouncementsFromAPI kullanın.
+   */
+  private async _fetchAndStoreAnnouncementsInternal(apiUrl: string = API_URL + '/announcements/', useDeltaSync: boolean = true) {
+    // 1. ADIM: Network çağrısını enqueue DIŞINDA yap — queue'yu ağ gecikmesi boyunca bloklamaz
+    const headers: Record<string, string> = {};
+    const token = await getToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    let lastSync: string | null = null;
+    if (useDeltaSync) {
+      const { getLastAnnouncementSync } = await import('./deltaSyncStorage');
+      lastSync = await getLastAnnouncementSync();
+    }
+
+    let finalUrl = apiUrl;
+    const params = new URLSearchParams();
+    if (lastSync) {
+      params.append('updated_after', lastSync);
+      params.append('include_deleted', 'true');
+      console.log('[ANNOUNCEMENT][DELTA-SYNC] Son sync zamanı:', lastSync);
+    }
+    if (params.toString()) {
+      finalUrl += (finalUrl.includes('?') ? '&' : '?') + params.toString();
+    }
+
+    console.log('[ANNOUNCEMENT][DELTA-SYNC] ===== SYNC BAŞLADI =====');
+    console.log('[ANNOUNCEMENT][DELTA-SYNC] Request URL:', finalUrl);
+
+    let data: any[];
+    try {
+      const response = await apiFetch(finalUrl, { headers });
+      if (!response.ok) throw new Error('API yanıtı başarısız: ' + response.status);
+      const json = await response.json();
+      if (!Array.isArray(json)) throw new Error('API beklenen formatta veri döndürmedi');
+      data = json;
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('Network') || error.message.includes('fetch failed'))) {
+        console.warn('[fetchAndStoreAnnouncementsFromAPI] ⚠️ Network hatası (offline olabilir), API senkronizasyonu atlandı.');
+        return 0;
+      }
+      console.error('API duyuru veri çekme/ekleme hatası:', error);
+      throw error;
+    }
+
+    console.log('[ANNOUNCEMENT][DELTA-SYNC] API\'den gelen toplam kayıt sayısı:', data.length);
+
+    // 2. ADIM: Veriyi hazırla (pure JS, DB yok)
+    const toDelete: number[] = [];
+    const toUpsert: any[] = [];
+    for (const item of data) {
+      const isDeleted = item.deleted === true || item.deleted === 1 || item.deleted === '1';
+      const isInactive = item.aktif === false || item.aktif === 0 || item.aktif === '0' || item.aktif === null;
+      if (isDeleted || isInactive) {
+        toDelete.push(item.id);
+      } else {
+        toUpsert.push(item);
+      }
+    }
+
+    // 3. ADIM: DB yazma işlemlerini enqueue içinde yap (transaction olmadan — fetchAndStoreCampingAreasFromAPI ile aynı pattern)
     return DatabaseManager.enqueue(async () => {
       try {
-        const headers: Record<string, string> = {};
-        const token = await getToken();
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-
-        // Delta sync: Son sync zamanını al
-        let lastSync: string | null = null;
-        if (useDeltaSync) {
-          const { getLastAnnouncementSync } = await import('./deltaSyncStorage');
-          lastSync = await getLastAnnouncementSync();
-        }
-
-        // URL'yi parametrelerle hazırla
-        let finalUrl = apiUrl;
-        const params = new URLSearchParams();
-        
-        if (lastSync) {
-          params.append('updated_after', lastSync);
-          params.append('include_deleted', 'true'); // Silinenleri de çek
-          console.log('[ANNOUNCEMENT][DELTA-SYNC] Son sync zamanı:', lastSync);
-        }
-
-        if (params.toString()) {
-          finalUrl += (finalUrl.includes('?') ? '&' : '?') + params.toString();
-        }
-
-        console.log('[ANNOUNCEMENT][DELTA-SYNC] ===== SYNC BAŞLADI =====');
-        console.log('[ANNOUNCEMENT][DELTA-SYNC] Request URL:', finalUrl);
-        
-        const response = await apiFetch(finalUrl, { headers });
-        if (!response.ok) throw new Error('API yanıtı başarısız: ' + response.status);
-        const data = await response.json();
-        
-        if (!Array.isArray(data)) throw new Error('API beklenen formatta veri döndürmedi');
-
-        console.log('[ANNOUNCEMENT][DELTA-SYNC] API\'den gelen toplam kayıt sayısı:', data.length);
+        if (!this.db) await this.init();
 
         let insertCount = 0;
         let deleteCount = 0;
-        if (!this.db) await this.init();
 
-        // Transaction başlat - tüm operasyonları toplu yap
-        await this.db!.execAsync('BEGIN TRANSACTION');
-        
-        try {
-          // Önce silinecekleri topla
-          const toDelete: number[] = [];
-          const toUpsert: any[] = [];
-          
-          for (const item of data) {
-            const isDeleted = item.deleted === true || item.deleted === 1 || item.deleted === '1';
-            const isInactive = item.aktif === false || item.aktif === 0 || item.aktif === '0' || item.aktif === null;
-            
-            if (isDeleted || isInactive) {
-              toDelete.push(item.id);
-            } else {
-              toUpsert.push(item);
-            }
-          }
-          
-          // Batch delete - tek sorguda tüm silmeleri yap
-          if (toDelete.length > 0) {
-            const placeholders = toDelete.map(() => '?').join(',');
-            await this.db!.runAsync(
-              `DELETE FROM announcements WHERE id IN (${placeholders})`,
-              toDelete
-            );
-            deleteCount = toDelete.length;
-            if (__DEV__) console.log('[ANNOUNCEMENT][DELTA-SYNC] Toplu silme:', deleteCount, 'duyuru');
-          }
-          
-          // Batch upsert
-          for (const item of toUpsert) {
-            const keywordsStr = Array.isArray(item.keywords) ? JSON.stringify(item.keywords) : (item.keywords ?? '');
-            const aktifValue = (typeof item.aktif === 'boolean') ? (item.aktif ? 1 : 0) : (item.aktif === undefined ? 1 : Number(item.aktif));
-            
-            // Görselleri normalize et
-            let photoData: string[] = [];
-            const photoSources = [item.event_photos, item.images, item.photo_links];
-            
-            for (const source of photoSources) {
-              if (!source) continue;
-              
-              if (Array.isArray(source)) {
-                photoData = source.filter((p: any) => typeof p === 'string' && p.trim() !== '');
-                if (photoData.length > 0) break;
-              } else if (typeof source === 'string' && source.trim() !== '' && source !== '[]') {
-                try {
-                  const parsed = JSON.parse(source);
-                  if (Array.isArray(parsed)) {
-                    photoData = parsed.filter((p: any) => typeof p === 'string' && p.trim() !== '');
-                    if (photoData.length > 0) break;
-                  }
-                } catch (e) {
-                  // JSON parse hatası, devam et
+        // Batch delete
+        if (toDelete.length > 0) {
+          const placeholders = toDelete.map(() => '?').join(',');
+          await this.db!.runAsync(
+            `DELETE FROM announcements WHERE id IN (${placeholders})`,
+            toDelete
+          );
+          deleteCount = toDelete.length;
+          if (__DEV__) console.log('[ANNOUNCEMENT][DELTA-SYNC] Toplu silme:', deleteCount, 'duyuru');
+        }
+
+        // Batch upsert — tek prepareAsync + N executeAsync + tek finalizeAsync
+        // (Önceki yaklaşım: N×runAsync = N×prepare+execute+finalize → finalizeAsync kilidi)
+        if (toUpsert.length > 0) {
+          const upsertStmt = await this.db!.prepareAsync(
+            `INSERT OR REPLACE INTO announcements (id, community_id, title, message, created_by, created_at, valilik_id, keywords, source_url, islenme_tarihi, link, date, updated_at, status, synced, deleted, aktif, baslama_zamani, bitis_zamani, event_photos, images, photo_links, etkinlik_turu, zorluk_seviyesi, etkinlik_tarihi, etkinlik_suresi, etkinlik_yeri, etkinlik_yeri_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          );
+          try {
+            for (const item of toUpsert) {
+              const keywordsStr = Array.isArray(item.keywords) ? JSON.stringify(item.keywords) : (item.keywords ?? '');
+              const aktifValue = (typeof item.aktif === 'boolean') ? (item.aktif ? 1 : 0) : (item.aktif === undefined ? 1 : Number(item.aktif));
+
+              let photoData: string[] = [];
+              const photoSources = [item.event_photos, item.images, item.photo_links];
+              for (const source of photoSources) {
+                if (!source) continue;
+                if (Array.isArray(source)) {
+                  photoData = source.filter((p: any) => typeof p === 'string' && p.trim() !== '');
+                  if (photoData.length > 0) break;
+                } else if (typeof source === 'string' && source.trim() !== '' && source !== '[]') {
+                  try {
+                    const parsed = JSON.parse(source);
+                    if (Array.isArray(parsed)) {
+                      photoData = parsed.filter((p: any) => typeof p === 'string' && p.trim() !== '');
+                      if (photoData.length > 0) break;
+                    }
+                  } catch (e) { /* JSON parse hatası, devam et */ }
                 }
               }
-            }
-            
-            const photoString = photoData.length > 0 ? JSON.stringify(photoData) : '';
-            
-            // Orijinal alanları da sakla (backward compatibility için)
-            const imagesStr = item.images ? (Array.isArray(item.images) ? JSON.stringify(item.images) : item.images) : '';
-            const photoLinksStr = item.photo_links ? (Array.isArray(item.photo_links) ? JSON.stringify(item.photo_links) : item.photo_links) : '';
-            
-            await this.db!.runAsync(
-              `INSERT OR REPLACE INTO announcements (id, community_id, title, message, created_by, created_at, valilik_id, keywords, source_url, islenme_tarihi, link, date, updated_at, status, synced, deleted, aktif, baslama_zamani, bitis_zamani, event_photos, images, photo_links, etkinlik_turu, zorluk_seviyesi, etkinlik_tarihi, etkinlik_suresi, etkinlik_yeri, etkinlik_yeri_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
+              const photoString = photoData.length > 0 ? JSON.stringify(photoData) : '';
+              const imagesStr = item.images ? (Array.isArray(item.images) ? JSON.stringify(item.images) : item.images) : '';
+              const photoLinksStr = item.photo_links ? (Array.isArray(item.photo_links) ? JSON.stringify(item.photo_links) : item.photo_links) : '';
+
+              await upsertStmt.executeAsync([
                 item.id ?? null,
                 item.community_id ?? null,
                 item.title ?? '',
@@ -396,18 +417,12 @@ export class DatabaseManager {
                 item.etkinlik_suresi ?? '',
                 item.etkinlik_yeri ?? '',
                 item.etkinlik_yeri_id ?? null
-              ]
-            );
-            insertCount++;
+              ]);
+              insertCount++;
+            }
+          } finally {
+            await upsertStmt.finalizeAsync();
           }
-          
-          // Transaction commit
-          await this.db!.execAsync('COMMIT');
-        } catch (err) {
-          // Hata olursa rollback
-          await this.db!.execAsync('ROLLBACK');
-          console.error('[ANNOUNCEMENT][DELTA-SYNC] Transaction hatası, rollback yapıldı:', err);
-          throw err;
         }
 
         // Sync zamanını güncelle
@@ -419,142 +434,84 @@ export class DatabaseManager {
         }
 
         console.log(`[ANNOUNCEMENT][DELTA-SYNC] ${insertCount} eklendi/güncellendi, ${deleteCount} silindi`);
-        
+
         // Delta sync'te silinen kayıtları kontrol et
-        // API deleted: true ile işaretlenmiş kayıtları döndürmüyorsa, bu kontrol gerekli
         if (lastSync && data.length > 0) {
           console.log('[ANNOUNCEMENT][DELTA-SYNC] Delta Sync - silinen kayıtlar kontrol ediliyor...');
-          
-          // API'den gelen güncellenmiş kayıtların ID'leri
-          const updatedIds = new Set<number>();
-          for (const item of data) {
-            if (item.id) {
-              updatedIds.add(Number(item.id));
-            }
-          }
-          
-          // Son sync zamanından sonra güncellenen local kayıtları al
+          const updatedIds = new Set<number>(data.filter(i => i.id).map((i: any) => Number(i.id)));
           const localUpdated = await this.db!.getAllAsync(
             'SELECT id FROM announcements WHERE updated_at >= ?',
             [lastSync]
           ) as { id: number }[];
-          
-          // Local'de güncellenmişçe gözüken ama API'den gelmeyen kayıtlar silinmiş demektir
           let removedCount = 0;
           for (const local of localUpdated) {
             if (!updatedIds.has(local.id)) {
-              // Bu kayıt API'den gelmedi, silinmiş olabilir
               await this.db!.runAsync('DELETE FROM announcements WHERE id = ?', [local.id]);
               removedCount++;
-              console.log('[ANNOUNCEMENT][DELTA-SYNC] Sunucuda silinmiş kayıt local\'den kaldırıldı: id=', local.id);
             }
           }
-          
           if (removedCount > 0) {
             deleteCount += removedCount;
             console.log(`[ANNOUNCEMENT][DELTA-SYNC] ${removedCount} sunucuda silinmiş kayıt local'den kaldırıldı.`);
           }
         }
-        
-        // Periyodik Full ID Check: Her 10 delta sync'de bir sunucudan tüm ID'leri al ve local'i temizle
+
+        // Periyodik Full ID Check
         if (lastSync) {
           const { incrementAnnouncementSyncCounter } = await import('./deltaSyncStorage');
           const needsFullCheck = await incrementAnnouncementSyncCounter();
-          
           if (needsFullCheck) {
             console.log('[ANNOUNCEMENT][FULL-CHECK] ===== PERİYODİK FULL CHECK BAŞLADI =====');
-            
             try {
-              // Sunucudan sadece ID'leri çek (hafif istek)
               const idCheckUrl = API_URL + '/announcements/?fields=id';
               const idResponse = await apiFetch(idCheckUrl, { headers });
-              
               if (idResponse.ok) {
                 const allServerData = await idResponse.json();
-                
                 if (Array.isArray(allServerData)) {
-                  const serverIds = new Set<number>();
-                  for (const item of allServerData) {
-                    if (item.id) {
-                      serverIds.add(Number(item.id));
-                    }
-                  }
-                  
-                  console.log(`[ANNOUNCEMENT][FULL-CHECK] Sunucuda ${serverIds.size} duyuru var`);
-                  
-                  // Local'deki tüm ID'leri al
+                  const serverIds = new Set<number>(allServerData.filter((i: any) => i.id).map((i: any) => Number(i.id)));
                   const localAnnouncements = await this.db!.getAllAsync('SELECT id FROM announcements') as { id: number }[];
-                  console.log(`[ANNOUNCEMENT][FULL-CHECK] Local'de ${localAnnouncements.length} duyuru var`);
-                  
-                  // Sunucuda olmayan local kayıtları sil
                   let cleanedCount = 0;
                   for (const local of localAnnouncements) {
                     if (!serverIds.has(local.id)) {
                       await this.db!.runAsync('DELETE FROM announcements WHERE id = ?', [local.id]);
                       cleanedCount++;
-                      if (__DEV__) console.log('[ANNOUNCEMENT][FULL-CHECK] Sunucuda olmayan kayıt silindi: id=', local.id);
                     }
                   }
-                  
                   if (cleanedCount > 0) {
-                    deleteCount += cleanedCount;
                     console.log(`[ANNOUNCEMENT][FULL-CHECK] ✅ ${cleanedCount} eski kayıt temizlendi`);
                   } else {
                     console.log('[ANNOUNCEMENT][FULL-CHECK] ✅ Temizlenecek kayıt yok, local DB senkron');
                   }
-                } else {
-                  console.warn('[ANNOUNCEMENT][FULL-CHECK] ⚠️ API beklenen formatta veri döndürmedi');
                 }
-              } else {
-                console.warn('[ANNOUNCEMENT][FULL-CHECK] ⚠️ ID check API hatası:', idResponse.status);
               }
             } catch (fullCheckErr) {
               console.error('[ANNOUNCEMENT][FULL-CHECK] ❌ Full check hatası:', fullCheckErr);
             }
-            
             console.log('[ANNOUNCEMENT][FULL-CHECK] ===== PERİYODİK FULL CHECK TAMAMLANDI =====');
           }
         }
-        
-        // Full Sync ise: Sunucuda olmayan local kayıtları sil
+
+        // Full Sync: Sunucuda olmayan local kayıtları sil
         if (!lastSync) {
           console.log('[ANNOUNCEMENT][DELTA-SYNC] Full Sync - sunucuda olmayan local kayıtlar kontrol ediliyor...');
-          
-          // API'den gelen id listesi
-          const serverIds = new Set<number>();
-          for (const item of data) {
-            if (item.id) {
-              serverIds.add(Number(item.id));
-            }
-          }
-          
-          // Local'deki tüm announcement id'lerini al
+          const serverIds = new Set<number>(data.filter((i: any) => i.id).map((i: any) => Number(i.id)));
           const localAnnouncements = await this.db!.getAllAsync('SELECT id FROM announcements') as { id: number }[];
-          
           let removedCount = 0;
           for (const local of localAnnouncements) {
-            // Sunucuda yoksa local'den sil
             if (!serverIds.has(local.id)) {
               await this.db!.runAsync('DELETE FROM announcements WHERE id = ?', [local.id]);
               removedCount++;
-              console.log('[ANNOUNCEMENT][DELTA-SYNC] Sunucuda olmayan local kayıt silindi: id=', local.id);
             }
           }
-          
           if (removedCount > 0) {
             console.log(`[ANNOUNCEMENT][DELTA-SYNC] Toplam ${removedCount} sunucuda olmayan local kayıt silindi.`);
           }
         }
-        
+
         console.log('[ANNOUNCEMENT][DELTA-SYNC] ===== SYNC TAMAMLANDI =====');
-        
         return insertCount;
+
       } catch (error) {
-        // Network hatası durumunda sessizce pas geç
-        if (error instanceof Error && (error.message.includes('Network') || error.message.includes('fetch failed'))) {
-          console.warn('[fetchAndStoreAnnouncementsFromAPI] ⚠️ Network hatası (offline olabilir), API senkronizasyonu atlandı.');
-          return 0; // Offline mod, hata vermeden 0 döndür
-        }
         console.error('API duyuru veri çekme/ekleme hatası:', error);
         throw error;
       }
@@ -568,15 +525,18 @@ export class DatabaseManager {
    * @param data Duyuru verisi
    */
   async insertAnnouncementPendingChange(type: string, announcement_id: string | null, data: any) {
-    if (!this.db) await this.init();
-    const now = new Date().toISOString();
-    await this.db!.runAsync(
-      `INSERT INTO pending_changes (type, campground_id, data, created_at, status) VALUES (?, ?, ?, ?, 'pending')`,
-      [type, announcement_id, JSON.stringify(data), now]
-    );
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      const now = new Date().toISOString();
+      await this.db!.runAsync(
+        `INSERT INTO pending_changes (type, campground_id, data, created_at, status) VALUES (?, ?, ?, ?, 'pending')`,
+        [type, announcement_id, JSON.stringify(data), now]
+      );
+    });
   }
   // --- ANNOUNCEMENTS LOCAL CRUD ---
   async insertAnnouncement(announcement: any) {
+    return DatabaseManager.enqueue(async () => {
     if (!this.db) await this.init();
     const now = new Date().toISOString();
     const aktifValue = (typeof announcement.aktif === 'boolean') ? (announcement.aktif ? 1 : 0) : (announcement.aktif === undefined ? 1 : Number(announcement.aktif));
@@ -643,9 +603,11 @@ export class DatabaseManager {
       ]
     );
     return result;
+    });
   }
 
   async updateAnnouncementLocal(id: number, updates: any) {
+    return DatabaseManager.enqueue(async () => {
     if (!this.db) await this.init();
     const now = new Date().toISOString();
     
@@ -692,16 +654,19 @@ export class DatabaseManager {
     const sql = `UPDATE announcements SET ${fields.join(', ')} WHERE id = ?`;
     values.push(id);
     return this.db!.runAsync(sql, values);
+    });
   }
 
   async deleteAnnouncementLocal(id: number) {
-    if (!this.db) await this.init();
-    // Soft delete: deleted=1, status='deleted', updated_at güncelle
-    const now = new Date().toISOString();
-    return this.db!.runAsync(
-      `UPDATE announcements SET deleted = 1, status = 'deleted', updated_at = ? WHERE id = ?`,
-      [now, id]
-    );
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      // Soft delete: deleted=1, status='deleted', updated_at güncelle
+      const now = new Date().toISOString();
+      return this.db!.runAsync(
+        `UPDATE announcements SET deleted = 1, status = 'deleted', updated_at = ? WHERE id = ?`,
+        [now, id]
+      );
+    });
   }
 
   async getAnnouncementLocal(id: number) {
@@ -822,60 +787,66 @@ export class DatabaseManager {
   }
   // uuid ile local id (ve varsa external_id) güncelle
   async updateCampingAreaIdByUuid(uuid: string, newId: number, externalId?: string) {
-    if (!this.db) await this.init();
-    if (externalId) {
-      await this.db!.runAsync(
-        `UPDATE camping_areas SET id = ?, external_id = ? WHERE uuid = ?`,
-        [newId, externalId, uuid]
-      );
-    } else {
-      await this.db!.runAsync(
-        `UPDATE camping_areas SET id = ? WHERE uuid = ?`,
-        [newId, uuid]
-      );
-    }
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      if (externalId) {
+        await this.db!.runAsync(
+          `UPDATE camping_areas SET id = ?, external_id = ? WHERE uuid = ?`,
+          [newId, externalId, uuid]
+        );
+      } else {
+        await this.db!.runAsync(
+          `UPDATE camping_areas SET id = ? WHERE uuid = ?`,
+          [newId, uuid]
+        );
+      }
+    });
   }
   // local id ile external_id güncelle (create sonrası server yanıtından)
   async updateCampingAreaExternalIdByLocalId(localId: number, externalId: string) {
-    if (!this.db) await this.init();
-    await this.db!.runAsync(
-      `UPDATE camping_areas SET external_id = ? WHERE id = ?`,
-      [externalId, localId]
-    );
-    console.log(`[DB] external_id güncellendi: localId=${localId}, external_id=${externalId}`);
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      await this.db!.runAsync(
+        `UPDATE camping_areas SET external_id = ? WHERE id = ?`,
+        [externalId, localId]
+      );
+      console.log(`[DB] external_id güncellendi: localId=${localId}, external_id=${externalId}`);
+    });
   }
   // --- PENDING CHANGES ---
   async insertPendingChange(type: string, campground_id: string | null, data: any) {
-    if (!this.db) await this.init();
-    // Duplicate silme kaydını engelle
-    if (type === 'delete' && campground_id) {
-      const existing = await this.db!.getFirstAsync(
-        `SELECT id FROM pending_changes WHERE type = 'delete' AND campground_id = ? AND status = 'pending'`,
-        [campground_id]
-      );
-      if (existing) {
-        // ...existing code...
-        return;
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      // Duplicate silme kaydını engelle
+      if (type === 'delete' && campground_id) {
+        const existing = await this.db!.getFirstAsync(
+          `SELECT id FROM pending_changes WHERE type = 'delete' AND campground_id = ? AND status = 'pending'`,
+          [campground_id]
+        );
+        if (existing) {
+          // ...existing code...
+          return;
+        }
       }
-    }
-    const now = new Date().toISOString();
-    try {
-      const result = await this.db!.runAsync(
-        `INSERT INTO pending_changes (type, campground_id, data, created_at, status) VALUES (?, ?, ?, ?, 'pending')`,
-        [type, campground_id, JSON.stringify(data), now]
-      );
-      return result;
-    } catch (err) {
-      // [DEBUG] runAsync error log
-      console.error('[DB][insertPendingChange] runAsync error:', err, {
-        type,
-        campground_id,
-        data,
-        dataString: (() => { try { return JSON.stringify(data); } catch (e) { return '[stringify error]'; } })(),
-        now
-      });
-      throw err;
-    }
+      const now = new Date().toISOString();
+      try {
+        const result = await this.db!.runAsync(
+          `INSERT INTO pending_changes (type, campground_id, data, created_at, status) VALUES (?, ?, ?, ?, 'pending')`,
+          [type, campground_id, JSON.stringify(data), now]
+        );
+        return result;
+      } catch (err) {
+        // [DEBUG] runAsync error log
+        console.error('[DB][insertPendingChange] runAsync error:', err, {
+          type,
+          campground_id,
+          data,
+          dataString: (() => { try { return JSON.stringify(data); } catch (e) { return '[stringify error]'; } })(),
+          now
+        });
+        throw err;
+      }
+    });
   }
 
   async getPendingChanges() {
@@ -886,13 +857,17 @@ export class DatabaseManager {
   }
 
   async markPendingChangeSynced(id: number) {
-    if (!this.db) await this.init();
-    await this.db!.runAsync(`UPDATE pending_changes SET status = 'synced' WHERE id = ?`, [id]);
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      await this.db!.runAsync(`UPDATE pending_changes SET status = 'synced' WHERE id = ?`, [id]);
+    });
   }
 
   async markPendingChangeError(id: number) {
-    if (!this.db) await this.init();
-    await this.db!.runAsync(`UPDATE pending_changes SET status = 'error' WHERE id = ?`, [id]);
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      await this.db!.runAsync(`UPDATE pending_changes SET status = 'error' WHERE id = ?`, [id]);
+    });
   }
   // Merkezi async queue
   private static _queue: Promise<any> = Promise.resolve();
@@ -1456,6 +1431,10 @@ export class DatabaseManager {
     // Yeni init promise oluştur ve sakla
     this.initPromise = (async () => {
       this.db = await SQLite.openDatabaseAsync('camping_areas.db');
+      // WAL mode: concurrent read+write desteği, database lock hatalarını önler
+      await this.db.execAsync('PRAGMA journal_mode = WAL;');
+      // Busy timeout: kilitlenme durumunda 5 saniye bekle ve tekrar dene
+      await this.db.execAsync('PRAGMA busy_timeout = 5000;');
       await this.createTables();
       return this.db;
     })();
@@ -1723,6 +1702,7 @@ export class DatabaseManager {
   }
 
   async insertOrUpdateCampingArea(area: Omit<CampingArea, 'id' | 'created_at' | 'updated_at'>) {
+    return DatabaseManager.enqueue(async () => {
 
     if (!this.db) await this.init();
 
@@ -1949,6 +1929,7 @@ export class DatabaseManager {
         console.error('Error inserting/updating camping area:', { error, area });
         throw error;
       }
+    });
   }
 
   async searchCampingAreasByLocation(
@@ -2162,31 +2143,35 @@ export class DatabaseManager {
   }
 
   async addToFavorites(campingAreaId: number): Promise<boolean> {
-    if (!this.db) await this.init();
-    try {
-      await this.db!.runAsync(
-        'INSERT OR IGNORE INTO favorites (camping_area_id) VALUES (?)',
-        [campingAreaId]
-      );
-      return true;
-    } catch (error) {
-      console.error('Error adding to favorites:', error);
-      return false;
-    }
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      try {
+        await this.db!.runAsync(
+          'INSERT OR IGNORE INTO favorites (camping_area_id) VALUES (?)',
+          [campingAreaId]
+        );
+        return true;
+      } catch (error) {
+        console.error('Error adding to favorites:', error);
+        return false;
+      }
+    });
   }
 
   async removeFromFavorites(campingAreaId: number): Promise<boolean> {
-    if (!this.db) await this.init();
-    try {
-      await this.db!.runAsync(
-        'DELETE FROM favorites WHERE camping_area_id = ?',
-        [campingAreaId]
-      );
-      return true;
-    } catch (error) {
-      console.error('Error removing from favorites:', error);
-      return false;
-    }
+    return DatabaseManager.enqueue(async () => {
+      if (!this.db) await this.init();
+      try {
+        await this.db!.runAsync(
+          'DELETE FROM favorites WHERE camping_area_id = ?',
+          [campingAreaId]
+        );
+        return true;
+      } catch (error) {
+        console.error('Error removing from favorites:', error);
+        return false;
+      }
+    });
   }
 
   async isFavorite(campingAreaId: number): Promise<boolean> {

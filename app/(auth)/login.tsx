@@ -7,8 +7,13 @@ import { saveToken } from '../../lib/auth';
 import { API_URL } from '../../lib/config';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { useTheme } from '../../components/ThemeProvider';
+import { createThemedStyles } from '../../constants/theme/sharedStyles';
 
 export default function LoginScreen() {
+  const { colors } = useTheme();
+  const themed = createThemedStyles(colors);
+  const isDarkMode = colors.text === '#ffffff' || colors.text === '#f0f0f0'; // Dark mode tespiti
   const [identifier, setIdentifier] = useState(''); // email veya username
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -157,38 +162,38 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: colors.surface }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[styles.container, { backgroundColor: colors.surface }]}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.logoWrapper}>
+        <View style={[styles.logoWrapper, { backgroundColor: colors.background }]}>
           <Image
-            source={require('../../assets/images/login_screen.png')}
-            style={styles.logo}
+            source={isDarkMode ? require('../../assets/images/login_screen_B.png') : require('../../assets/images/login_screen.png')}
+            style={[styles.logo, { backgroundColor: colors.background }]}
             resizeMode="contain"
             accessibilityLabel="Logo"
           />
         </View>
-        <Text style={styles.title}>Giriş Yap</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Giriş Yap</Text>
         <TextInput
-          style={styles.input}
+          style={[themed.input, { marginBottom: 16 }]}
           placeholder="E-posta veya Kullanıcı Adı"
           autoCapitalize="none"
           value={identifier}
           onChangeText={setIdentifier}
-          placeholderTextColor="#64748b"
+          placeholderTextColor={colors.muted}
         />
-        <View style={styles.passwordRow}>
+        <View style={[styles.passwordRow, { borderColor: colors.border }]}>
           <TextInput
-            style={[styles.passwordInput, { color: '#222' }]}
+            style={[styles.passwordInput, { color: colors.text }]}
             placeholder="Şifre"
             secureTextEntry={!showPassword}
             value={password}
             onChangeText={setPassword}
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.muted}
             autoCapitalize="none"
           />
           <TouchableOpacity
@@ -197,20 +202,20 @@ export default function LoginScreen() {
             accessibilityLabel={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
             style={styles.passwordToggle}
           >
-            {showPassword ? <EyeOff size={20} color="#64748b" /> : <Eye size={20} color="#64748b" />}
+            {showPassword ? <EyeOff size={20} color={colors.muted} /> : <Eye size={20} color={colors.muted} />}
           </TouchableOpacity>
         </View>
         <Button title={loading ? 'Giriş Yapılıyor...' : 'Giriş Yap'} onPress={() => handleLogin()} disabled={loading} />
         <TouchableOpacity onPress={() => setForgotModalVisible(true)} style={styles.forgotContainer}>
-          <Text style={styles.forgotText}>Şifremi Unuttum</Text>
+          <Text style={[styles.forgotText, { color: colors.muted }]}>Şifremi Unuttum</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => router.replace('/(auth)/register')} style={styles.linkContainer}>
-          <Text style={styles.link}>Hesabınız yok mu? Kayıt olun</Text>
+          <Text style={[styles.link, { color: colors.info }]}>Hesabınız yok mu? Kayıt olun</Text>
         </TouchableOpacity>
 
         {/* Misafir olarak giriş */}
         <TouchableOpacity onPress={handleGuestLogin} style={[styles.linkContainer, { marginTop: 8 }]}> 
-          <Text style={[styles.link, { color: '#facc15' }]}>Misafir olarak oturum aç</Text>
+          <Text style={[styles.link, { color: colors.warning }]}>Misafir olarak oturum aç</Text>
         </TouchableOpacity>
 
         {/* Misafir bilgilendirme modalı */}
@@ -236,15 +241,15 @@ export default function LoginScreen() {
           onRequestClose={() => setForgotModalVisible(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Şifre Sıfırlama</Text>
+            <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.modalTitle, { color: colors.muted }]}>Şifre Sıfırlama</Text>
               <TextInput
-                style={styles.input}
+                style={[themed.input, { marginBottom: 16 }]}
                 placeholder="Kayıtlı E-posta adresiniz"
                 autoCapitalize="none"
                 value={forgotEmail}
                 onChangeText={setForgotEmail}
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 keyboardType="email-address"
               />
               <Button
@@ -253,7 +258,7 @@ export default function LoginScreen() {
                 disabled={forgotLoading || !forgotEmail}
               />
               <TouchableOpacity onPress={() => setForgotModalVisible(false)} style={{ marginTop: 12 }}>
-                <Text style={{ color: '#64748b', textAlign: 'center' }}>Kapat</Text>
+                <Text style={{ color: colors.muted, textAlign: 'center' }}>Kapat</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -264,15 +269,12 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
+  container: { flex: 1, justifyContent: 'center', padding: 24 },
   logoWrapper: {
     alignSelf: 'center',
     marginBottom: 16,
     padding: 20,
-    // borderWidth: 2,
-    // borderColor: '#facc15',
     borderRadius: 34,
-    backgroundColor: '#f8fafc',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -283,17 +285,15 @@ const styles = StyleSheet.create({
     width: 220,
     height: 220,
     borderRadius: 24,
-    backgroundColor: '#f8fafc',
   },
   title: { fontSize: 28, fontWeight: 'bold', marginBottom: 24, textAlign: 'center' },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 16 },
-  passwordRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 8, marginBottom: 16 },
+  passwordRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, marginBottom: 16 },
   passwordInput: { flex: 1, paddingVertical: 12 },
   passwordToggle: { padding: 8 },
   linkContainer: { marginTop: 16, alignItems: 'center' },
-  link: { color: '#007AFF', fontWeight: '500' },
+  link: { fontWeight: '500' },
   forgotContainer: { marginTop: 8, alignItems: 'center' },
-  forgotText: { color: '#64748b', fontWeight: '500', textDecorationLine: 'underline' },
+  forgotText: { fontWeight: '500', textDecorationLine: 'underline' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',
@@ -302,7 +302,6 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     width: '90%',
-    backgroundColor: '#fff',
     borderRadius: 16,
     padding: 24,
     shadowColor: '#000',
@@ -316,6 +315,5 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 16,
     textAlign: 'center',
-    color: '#64748b',
   },
 });

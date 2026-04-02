@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import { useTheme } from './ThemeProvider';
 
 interface HelpModalProps {
   visible: boolean;
@@ -7,6 +8,7 @@ interface HelpModalProps {
 }
 
 const HelpModal: React.FC<HelpModalProps> = ({ visible, onClose }) => {
+  const { colors } = useTheme();
   return (
     <Modal
       visible={visible}
@@ -17,9 +19,9 @@ const HelpModal: React.FC<HelpModalProps> = ({ visible, onClose }) => {
       statusBarTranslucent
     >
       <View style={styles.overlay}>
-        <View style={styles.container}>
-          <Text style={styles.title}>Hoş geldiniz!</Text>
-          <Text style={styles.text}>
+        <View style={[styles.container, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.title, { color: colors.primary }]}>Hoş geldiniz!</Text>
+          <Text style={[styles.text, { color: colors.text }]}>
             • Uygulama ilk açılışında, kamp alanları ve duyuru güncellemesi için sunucuyla senkronizasyon yapacaktır. Eşitleme bitene kadar duyuru ekranına erişim kısıtlanmıştır.{"\n"}
             • Tüm sürüm notlarına 
             <Text style={{color:'#2563eb'}} onPress={() => {require('react-native').Linking.openURL('https://kampdefterim.com/surum-notlari.html')}}> buradan</Text> ulaşabilirsin.{"\n"}
@@ -43,7 +45,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   container: {
-    backgroundColor: '#fff',
     borderRadius: 16,
     padding: 28,
     width: '85%',
@@ -53,12 +54,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#3730a3',
     marginBottom: 12,
   },
   text: {
     fontSize: 15,
-    color: '#334155',
     marginBottom: 18,
     textAlign: 'left',
   },

@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import { useTheme } from './ThemeProvider';
 
 interface GuestInfoModalProps {
   visible: boolean;
@@ -7,6 +8,7 @@ interface GuestInfoModalProps {
 }
 
 const GuestInfoModal: React.FC<GuestInfoModalProps> = ({ visible, onClose }) => {
+  const { colors } = useTheme();
   return (
     <Modal
       visible={visible}
@@ -17,9 +19,9 @@ const GuestInfoModal: React.FC<GuestInfoModalProps> = ({ visible, onClose }) => 
       statusBarTranslucent
     >
       <View style={styles.overlay}>
-        <View style={styles.container}>
-          <Text style={styles.title}>Hoşgeldiniz</Text>
-          <Text style={styles.text}>
+        <View style={[styles.container, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.title, { color: colors.primary }]}>Hoşgeldiniz</Text>
+          <Text style={[styles.text, { color: colors.text }]}>
             Misafir olarak giriş yapıyorsunuz. Uygulamamızdaki tüm özellikleri test edebilirsiniz.{"\n\n"}
             Uygulamayı beğendiğiniz takdirde, kendi hesabınızı oluşturup 1 ay ücretsiz üyeliğinizi başlatabilirsiniz.{"\n\n"} 
             Ücretsiz üyeliğinizin sonunda{' '}
@@ -57,7 +59,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   container: {
-    backgroundColor: '#fff',
     borderRadius: 16,
     padding: 28,
     width: '85%',
@@ -67,12 +68,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#3730a3',
     marginBottom: 12,
   },
   text: {
     fontSize: 15,
-    color: '#334155',
     marginBottom: 18,
     textAlign: 'left',
   },

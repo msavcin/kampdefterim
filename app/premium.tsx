@@ -18,6 +18,7 @@ import { ArrowLeft, Check, Star, MapPin, Search, Filter, List, Zap, RefreshCw } 
 import { on as onEvent, off as offEvent } from '@/lib/eventBus';
 import * as IAPManager from '@/lib/iapManager';
 import type { Subscription } from '@/lib/iapManager';
+import { useTheme } from '../components/ThemeProvider';
 
 const { width } = Dimensions.get('window');
 
@@ -28,6 +29,7 @@ interface PremiumFeature {
 }
 
 export default function PremiumScreen() {
+  const { colors } = useTheme();
   const router = useRouter();
   const appStateRef = useRef(AppState.currentState);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly');
@@ -119,32 +121,32 @@ export default function PremiumScreen() {
 
   const premiumFeatures: PremiumFeature[] = [
     {
-      icon: <MapPin size={24} color="#059669" />,
+      icon: <MapPin size={24} color={colors.primary} />,
       title: 'Offline Harita Erişimi',
       description: 'İnternet olmadan haritaları görüntüleyin ve kullanın',
     },
     {
-      icon: <Search size={24} color="#059669" />,
+      icon: <Search size={24} color={colors.primary} />,
       title: 'Gelişmiş Arama',
       description: 'Kamp alanlarını offline modda arayın ve bulun',
     },
     {
-      icon: <Filter size={24} color="#059669" />,
+      icon: <Filter size={24} color={colors.primary} />,
       title: 'Filtreleme Özellikleri',
       description: 'İnternet olmadan da filtreleme yapın',
     },
     {
-      icon: <List size={24} color="#059669" />,
+      icon: <List size={24} color={colors.primary} />,
       title: 'Liste Görünümü',
       description: 'Offline modda liste görünümünü kullanın',
     },
     {
-      icon: <Zap size={24} color="#059669" />,
+      icon: <Zap size={24} color={colors.primary} />,
       title: 'Öncelikli Destek',
       description: 'Premium kullanıcılara özel hızlı destek',
     },
     {
-      icon: <Star size={24} color="#059669" />,
+      icon: <Star size={24} color={colors.primary} />,
       title: 'Tüm Özelliklere Erişim',
       description: 'Gelecekteki tüm premium özelliklere erişim',
     },
@@ -204,31 +206,31 @@ export default function PremiumScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <ArrowLeft size={24} color="#1f2937" />
+          <ArrowLeft size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Premium</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Premium</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Hero Section */}
-        <View style={styles.heroSection}>
+        <View style={[styles.heroSection, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <View style={styles.starIconContainer}>
             <Star size={48} color="#FCD34D" fill="#FCD34D" />
           </View>
-          <Text style={styles.heroTitle}>Kampdefterim Premium</Text>
-          <Text style={styles.heroSubtitle}>
+          <Text style={[styles.heroTitle, { color: colors.text }]}>Kampdefterim Premium</Text>
+          <Text style={[styles.heroSubtitle, { color: colors.muted }]}>
             Offline mod ve tüm gelişmiş özelliklerin kilidini açın
           </Text>
         </View>
 
         {/* Active Subscription Banner */}
         {subscriptionStatus?.isActive && (
-          <View style={styles.activeSubscriptionBanner}>
+          <View style={[styles.activeSubscriptionBanner, { backgroundColor: colors.primary }]}>
             <View style={styles.activeBannerIcon}>
               <Check size={20} color="#fff" />
             </View>
@@ -244,11 +246,11 @@ export default function PremiumScreen() {
               )}
               {/* Otomatik yenileme kapalı uyarısı */}
               {subscriptionStatus.autoRenewing === false && subscriptionStatus.expiresAt && (
-                <View style={{ marginTop: 6, backgroundColor: '#fef3c7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
-                  <Text style={{ fontSize: 12, color: '#92400e', fontWeight: '600' }}>
+                <View style={{ marginTop: 6, backgroundColor: colors.warning + '20', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+                  <Text style={{ fontSize: 12, color: colors.warning, fontWeight: '600' }}>
                     ⚠️ Otomatik yenileme kapalı
                   </Text>
-                  <Text style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>
+                  <Text style={{ fontSize: 12, color: colors.warning, marginTop: 2 }}>
                     {new Date(subscriptionStatus.expiresAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })} tarihinde sona erecek
                   </Text>
                 </View>
@@ -258,44 +260,45 @@ export default function PremiumScreen() {
         )}
 
         {/* Features */}
-        <View style={styles.featuresContainer}>
+        <View style={[styles.featuresContainer, { backgroundColor: colors.surface }]}>
           {premiumFeatures.map((feature, index) => (
-            <View key={index} style={styles.featureItem}>
-              <View style={styles.featureIcon}>{feature.icon}</View>
+            <View key={index} style={[styles.featureItem, { borderBottomColor: colors.surfaceVariant }]}>
+              <View style={[styles.featureIcon, { backgroundColor: colors.primaryLight }]}>{feature.icon}</View>
               <View style={styles.featureContent}>
-                <Text style={styles.featureTitle}>{feature.title}</Text>
-                <Text style={styles.featureDescription}>{feature.description}</Text>
+                <Text style={[styles.featureTitle, { color: colors.text }]}>{feature.title}</Text>
+                <Text style={[styles.featureDescription, { color: colors.muted }]}>{feature.description}</Text>
               </View>
-              <Check size={20} color="#059669" />
+              <Check size={20} color={colors.primary} />
             </View>
           ))}
         </View>
 
         {/* Pricing Plans */}
         <View style={styles.pricingContainer}>
-          <Text style={styles.pricingTitle}>Planınızı Seçin</Text>
+          <Text style={[styles.pricingTitle, { color: colors.text }]}>Planınızı Seçin</Text>
 
           {/* Yearly Plan */}
           <TouchableOpacity
             style={[
               styles.pricingCard,
-              selectedPlan === 'yearly' && styles.pricingCardSelected,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+              selectedPlan === 'yearly' && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
             ]}
             onPress={() => setSelectedPlan('yearly')}
           >
             {selectedPlan === 'yearly' && (
-              <View style={styles.popularBadge}>
+              <View style={[styles.popularBadge, { backgroundColor: colors.primary }]}>
                 <Text style={styles.popularBadgeText}>EN POPÜLER</Text>
               </View>
             )}
             <View style={styles.pricingHeader}>
               <View>
-                <Text style={styles.pricingPlanName}>Yıllık</Text>
-                <Text style={styles.pricingDescription}>12 ay premium erişim</Text>
+                <Text style={[styles.pricingPlanName, { color: colors.text }]}>Yıllık</Text>
+                <Text style={[styles.pricingDescription, { color: colors.muted }]}>12 ay premium erişim</Text>
               </View>
               <View style={styles.pricingAmount}>
-                <Text style={styles.pricingPrice}>{getSubscriptionPrice('yearly')}</Text>
-                <Text style={styles.pricingPeriod}>/yıl</Text>
+                <Text style={[styles.pricingPrice, { color: colors.primary }]}>{getSubscriptionPrice('yearly')}</Text>
+                <Text style={[styles.pricingPeriod, { color: colors.muted }]}>/yıl</Text>
               </View>
             </View>
             <View style={styles.savingsBadge}>
@@ -307,18 +310,19 @@ export default function PremiumScreen() {
           <TouchableOpacity
             style={[
               styles.pricingCard,
-              selectedPlan === 'monthly' && styles.pricingCardSelected,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+              selectedPlan === 'monthly' && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
             ]}
             onPress={() => setSelectedPlan('monthly')}
           >
             <View style={styles.pricingHeader}>
               <View>
-                <Text style={styles.pricingPlanName}>Aylık</Text>
-                <Text style={styles.pricingDescription}>1 ay premium erişim</Text>
+                <Text style={[styles.pricingPlanName, { color: colors.text }]}>Aylık</Text>
+                <Text style={[styles.pricingDescription, { color: colors.muted }]}>1 ay premium erişim</Text>
               </View>
               <View style={styles.pricingAmount}>
-                <Text style={styles.pricingPrice}>{getSubscriptionPrice('monthly')}</Text>
-                <Text style={styles.pricingPeriod}>/ay</Text>
+                <Text style={[styles.pricingPrice, { color: colors.primary }]}>{getSubscriptionPrice('monthly')}</Text>
+                <Text style={[styles.pricingPeriod, { color: colors.muted }]}>/ay</Text>
               </View>
             </View>
           </TouchableOpacity>
@@ -326,7 +330,7 @@ export default function PremiumScreen() {
 
         {/* Subscribe Button */}
         <TouchableOpacity
-          style={[styles.subscribeButton, (loading || !iapReady) && styles.subscribeButtonDisabled]}
+          style={[styles.subscribeButton, { backgroundColor: colors.primary }, (loading || !iapReady) && styles.subscribeButtonDisabled]}
           onPress={() => handleSubscribe(selectedPlan)}
           disabled={loading || !iapReady}
         >
@@ -346,42 +350,42 @@ export default function PremiumScreen() {
           disabled={restoring || !iapReady}
         >
           {restoring ? (
-            <ActivityIndicator size="small" color="#059669" />
+            <ActivityIndicator size="small" color={colors.primary} />
           ) : (
             <>
-              <RefreshCw size={16} color="#059669" />
-              <Text style={styles.restoreButtonText}>Satın Alımları Geri Yükle</Text>
+              <RefreshCw size={16} color={colors.primary} />
+              <Text style={[styles.restoreButtonText, { color: colors.primary }]}>Satın Alımları Geri Yükle</Text>
             </>
           )}
         </TouchableOpacity>
 
         {/* Hesap bağlama notu */}
-        <View style={{ marginHorizontal: 4, marginBottom: 12, backgroundColor: '#eff6ff', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#bfdbfe' }}>
-          <Text style={{ fontSize: 12, color: '#1e40af', lineHeight: 18 }}>
+        <View style={{ marginHorizontal: 4, marginBottom: 12, backgroundColor: colors.info + '15', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: colors.info + '40' }}>
+          <Text style={{ fontSize: 12, color: colors.info, lineHeight: 18 }}>
             ℹ️ Her uygulama hesabı için ayrı bir {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} hesabıyla abonelik başlatılması gerekmektedir. Bir {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} hesabıyla yalnızca bir uygulama kullanıcısı premium olabilir.
           </Text>
         </View>
 
         {/* Terms */}
-        <View style={styles.termsContainerCard}>
+        <View style={[styles.termsContainerCard, { backgroundColor: colors.surface, borderColor: colors.primaryLight }]}>
           <View style={styles.termRow}>
-            <View style={styles.termBullet} />
-            <Text style={styles.termTextLeft}>Abonelikler otomatik olarak yenilenir.</Text>
+            <View style={[styles.termBullet, { backgroundColor: colors.primaryLight }]} />
+            <Text style={[styles.termTextLeft, { color: colors.textSecondary }]}>Abonelikler otomatik olarak yenilenir.</Text>
           </View>
 
           <View style={styles.termRow}>
-            <View style={styles.termBullet} />
-            <Text style={styles.termTextLeft}>Ödeme, satın alma onayında {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} hesabınızdan tahsil edilir.</Text>
+            <View style={[styles.termBullet, { backgroundColor: colors.primaryLight }]} />
+            <Text style={[styles.termTextLeft, { color: colors.textSecondary }]}>Ödeme, satın alma onayında {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} hesabınızdan tahsil edilir.</Text>
           </View>
 
           <View style={styles.termRow}>
-            <View style={styles.termBullet} />
-            <Text style={styles.termTextLeft}>Abonelikler, mevcut dönemin bitimine 24 saat kala iptal edilmezse otomatik olarak yenilenir.</Text>
+            <View style={[styles.termBullet, { backgroundColor: colors.primaryLight }]} />
+            <Text style={[styles.termTextLeft, { color: colors.textSecondary }]}>Abonelikler, mevcut dönemin bitimine 24 saat kala iptal edilmezse otomatik olarak yenilenir.</Text>
           </View>
 
           <View style={styles.termRow}>
-            <View style={styles.termBullet} />
-            <Text style={styles.termTextLeft}>Aboneliklerinizi {Platform.OS === 'ios' ? 'App Store' : 'Google Play'} Ayarları üzerinden yönetebilir ve iptal edebilirsiniz.</Text>
+            <View style={[styles.termBullet, { backgroundColor: colors.primaryLight }]} />
+            <Text style={[styles.termTextLeft, { color: colors.textSecondary }]}>Aboneliklerinizi {Platform.OS === 'ios' ? 'App Store' : 'Google Play'} ayarları üzerinden yönetebilir ve iptal edebilirsiniz.</Text>
           </View>
 
           <View style={styles.policyLinksContainer}>
@@ -389,14 +393,14 @@ export default function PremiumScreen() {
               accessibilityRole="link"
               onPress={() => Linking.openURL('https://www.kampdefterim.com/kullanim-kosullari.html')}
             >
-              <Text style={styles.policyLink}>Kullanım Koşulları</Text>
+              <Text style={[styles.policyLink, { color: colors.primary }]}>Kullanım Koşulları</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               accessibilityRole="link"
               onPress={() => Linking.openURL('https://www.kampdefterim.com/gizlilik-politikasi.html')}
             >
-              <Text style={styles.policyLink}>Gizlilik Politikası</Text>
+              <Text style={[styles.policyLink, { color: colors.primary }]}>Gizlilik Politikası</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -418,9 +422,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   backButton: {
     width: 40,
@@ -431,18 +433,15 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1f2937',
   },
   content: {
     flex: 1,
   },
   heroSection: {
-    backgroundColor: '#fff',
     paddingVertical: 32,
     paddingHorizontal: 24,
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   starIconContainer: {
     width: 80,
@@ -456,13 +455,11 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#1f2937',
     marginBottom: 8,
     textAlign: 'center',
   },
   heroSubtitle: {
     fontSize: 16,
-    color: '#6b7280',
     textAlign: 'center',
     lineHeight: 24,
   },
@@ -520,13 +517,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
   },
   featureIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#f0fdf4',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
@@ -537,12 +532,10 @@ const styles = StyleSheet.create({
   featureTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
     marginBottom: 4,
   },
   featureDescription: {
     fontSize: 14,
-    color: '#6b7280',
     lineHeight: 20,
   },
   pricingContainer: {
@@ -552,27 +545,21 @@ const styles = StyleSheet.create({
   pricingTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
     marginBottom: 16,
   },
   pricingCard: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 20,
     marginBottom: 12,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
     position: 'relative',
   },
   pricingCardSelected: {
-    borderColor: '#059669',
-    backgroundColor: '#f0fdf4',
   },
   popularBadge: {
     position: 'absolute',
     top: -10,
     right: 20,
-    backgroundColor: '#059669',
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
@@ -590,12 +577,10 @@ const styles = StyleSheet.create({
   pricingPlanName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1f2937',
     marginBottom: 4,
   },
   pricingDescription: {
     fontSize: 14,
-    color: '#6b7280',
   },
   pricingAmount: {
     alignItems: 'flex-end',
@@ -603,11 +588,9 @@ const styles = StyleSheet.create({
   pricingPrice: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#059669',
   },
   pricingPeriod: {
     fontSize: 14,
-    color: '#6b7280',
   },
   savingsBadge: {
     backgroundColor: '#FEF3C7',
@@ -623,7 +606,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   subscribeButton: {
-    backgroundColor: '#059669',
     marginHorizontal: 20,
     marginTop: 24,
     paddingVertical: 16,
@@ -636,8 +618,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   subscribeButtonDisabled: {
-    backgroundColor: '#9ca3af',
-    opacity: 0.7,
+    opacity: 0.5,
   },
   subscribeButtonText: {
     color: '#fff',
@@ -654,7 +635,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   restoreButtonText: {
-    color: '#059669',
     fontSize: 15,
     fontWeight: '600',
   },
@@ -664,7 +644,6 @@ const styles = StyleSheet.create({
   },
   termsText: {
     fontSize: 12,
-    color: '#9ca3af',
     textAlign: 'center',
     marginTop: 16,
     paddingHorizontal: 40,
@@ -678,7 +657,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   policyLink: {
-    color: '#059669',
     fontSize: 13,
     fontWeight: '600',
     textDecorationLine: 'underline',
@@ -713,7 +691,6 @@ const styles = StyleSheet.create({
   termTextLeft: {
     flex: 1,
     fontSize: 13,
-    color: '#374151',
     lineHeight: 20,
   },
 });

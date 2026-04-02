@@ -61,6 +61,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MapPin, ChevronRight, Download as DownloadIcon, Upload, RefreshCw, User, Shield, Mail, UserCheck, Building, Eye, CheckCircle, Clock, XCircle, Edit2, X, BookOpen } from 'lucide-react-native';
 import { Search, Trash } from 'lucide-react-native';
 import * as Location from 'expo-location';
+import { useTheme } from '../../components/ThemeProvider';
+import { createThemedStyles } from '../../constants/theme/sharedStyles';
 import { getMe, listCommunityMembers, getCommunity as getCommunityById, listCommunities, deleteAccount } from '../../lib/userCommunityApi';
 import { joinCommunity } from '../../lib/userCommunityApi';
 import { getUserById } from '../../lib/userMembership';
@@ -99,6 +101,8 @@ async function syncFromOverpass(bounds: string): Promise<{ success: boolean; sta
 }
 
 export default function ProfileScreen(props: any) {
+  const { colors } = useTheme();
+  const themed = createThemedStyles(colors);
   const navigation = useNavigation();
 
   // Swipe-back gesture ve geri tuşunu devre dışı bırak
@@ -586,9 +590,9 @@ export default function ProfileScreen(props: any) {
   // Üye durum modalı
   const [statusModal, setStatusModal] = useState<{ open: boolean; member: any | null }>({ open: false, member: null });
   const statusOptions = [
-    { label: 'Aktif', value: 'active', color: '#16a34a', icon: <CheckCircle size={16} color="#16a34a" /> },
-    { label: 'Onay Bekliyor', value: 'pending', color: '#f59e0b', icon: <Clock size={16} color="#f59e0b" /> },
-    { label: 'Reddedildi', value: 'rejected', color: '#dc2626', icon: <XCircle size={16} color="#dc2626" /> },
+    { label: 'Aktif', value: 'active', color: colors.success, icon: <CheckCircle size={16} color={colors.success} /> },
+    { label: 'Onay Bekliyor', value: 'pending', color: colors.warning, icon: <Clock size={16} color={colors.warning} /> },
+    { label: 'Reddedildi', value: 'rejected', color: colors.danger, icon: <XCircle size={16} color={colors.danger} /> },
   ];
 
   // Topluluk lideri veya üyesi ise üyeleri çek
@@ -938,10 +942,10 @@ export default function ProfileScreen(props: any) {
   }, [trialExpired]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Profile Card */}
-        <View style={profileCardStyles.profileCard}>
+        <View style={[profileCardStyles.profileCard, { backgroundColor: colors.surface }]}>
           <View style={{ alignItems: 'center', justifyContent: 'center', width: 140, height: 140, marginBottom: 8 }}>
               <Image
                 source={
@@ -959,7 +963,7 @@ export default function ProfileScreen(props: any) {
             <View style={{ position: 'absolute', bottom: 0, right: 0, flexDirection: 'row', gap: 4 }}>
               <TouchableOpacity
                 onPress={handlePickProfilePhoto}
-                style={styles.avatarEditFab}
+                style={[styles.avatarEditFab, { backgroundColor: colors.info }]}
                 activeOpacity={0.8}
               >
                 <Upload size={18} color="#fff" />
@@ -967,7 +971,7 @@ export default function ProfileScreen(props: any) {
               {(user?.avatar_url || localAvatar) && (
                 <TouchableOpacity
                   onPress={handleRemoveAvatar}
-                  style={[styles.avatarEditFab, { backgroundColor: '#ef4444' }]}
+                  style={[styles.avatarEditFab, { backgroundColor: colors.danger }]}
                   activeOpacity={0.8}
                 >
                   <X size={18} color="#fff" />
@@ -988,40 +992,40 @@ export default function ProfileScreen(props: any) {
             <View style={{ alignItems: 'center', width: '100%' }}>
               {/* İsim - düzenlenebilir */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                <Text style={profileCardStyles.profileName}>{user.name || 'Kullanıcı'}</Text>
+                <Text style={[profileCardStyles.profileName, { color: colors.primary }]}>{user.name || 'Kullanıcı'}</Text>
                 <TouchableOpacity
                   onPress={() => {
                     setEditNameValue(user.name || '');
                     setEditNameModal(true);
                   }}
-                  style={{ marginLeft: 8, padding: 6, backgroundColor: '#f1f5f9', borderRadius: 8 }}
+                  style={{ marginLeft: 8, padding: 6, backgroundColor: colors.surfaceVariant, borderRadius: 8 }}
                   activeOpacity={0.7}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Edit2 size={16} color="#64748b" />
+                  <Edit2 size={16} color={colors.muted} />
                 </TouchableOpacity>
               </View>
               {/* Kullanıcı adı - düzenlenebilir (misafirde sadece göster) */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                <Text style={profileCardStyles.profileEmail}>{user.username ? `@${user.username}` : '@kullaniciadi'}</Text>
+                <Text style={[profileCardStyles.profileEmail, { color: colors.muted }]}>{user.username ? `@${user.username}` : '@kullaniciadi'}</Text>
                 {!isGuest && (
                   <TouchableOpacity
                     onPress={() => {
                       setEditUsernameValue(user.username || '');
                       setEditUsernameModal(true);
                     }}
-                    style={{ marginLeft: 6, padding: 6, backgroundColor: '#f1f5f9', borderRadius: 8 }}
+                    style={{ marginLeft: 6, padding: 6, backgroundColor: colors.surfaceVariant, borderRadius: 8 }}
                     activeOpacity={0.7}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
-                    <Edit2 size={14} color="#64748b" />
+                    <Edit2 size={14} color={colors.muted} />
                   </TouchableOpacity>
                 )}
               </View>
-              <Text style={profileCardStyles.profileEmail}>{user.email || ''}</Text>
+              <Text style={[profileCardStyles.profileEmail, { color: colors.muted }]}>{user.email || ''}</Text>
               <View style={profileCardStyles.profileRoleRow}>
-                <Shield size={16} color="#2563eb" style={{ marginRight: 6 }} />
-                <Text style={profileCardStyles.profileRoleText}>
+                <Shield size={16} color={colors.info} style={{ marginRight: 6 }} />
+                <Text style={[profileCardStyles.profileRoleText, { color: colors.info }]}>
                   {user.role === 'admin' ? 'Yönetici'
                     : user.role === 'user' ? 'Kullanıcı'
                     : user.role === 'superadmin' ? 'Üst Yönetici'
@@ -1031,24 +1035,24 @@ export default function ProfileScreen(props: any) {
               </View>
               {/* Deneme süresi kalan gün/bilgi satırı (sadece user rolünde trial_user: true ve premium değilse) */}
               {isTrialUser && user?.created_at && !trialExpired && (
-                <View style={{ marginTop: 8, marginBottom: 2, backgroundColor: '#fef3c7', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}>
-                  <Text style={{ color: '#b45309', fontWeight: 'bold', fontSize: 14 }}>
+                <View style={{ marginTop: 8, marginBottom: 2, backgroundColor: colors.warning + '20', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}>
+                  <Text style={{ color: colors.warning, fontWeight: 'bold', fontSize: 14 }}>
                     Deneme süresi: {trialDaysLeft} gün kaldı
                   </Text>
                 </View>
               )}
               {/* Guest ise kısıtlı erişim mesajı */}
               {isGuest && (
-                <View style={{ marginTop: 8, marginBottom: 2, backgroundColor: '#fee2e2', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}>
-                  <Text style={{ color: '#dc2626', fontWeight: 'bold', fontSize: 14 }}>
+                <View style={{ marginTop: 8, marginBottom: 2, backgroundColor: colors.danger + '20', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' }}>
+                  <Text style={{ color: colors.danger, fontWeight: 'bold', fontSize: 14 }}>
                     Kısıtlı erişim: Sadece temel özellikleri kullanabilirsiniz.
                   </Text>
                 </View>
               )}
               {membership && (
                 <View style={profileCardStyles.profileRoleRow}>
-                  <UserCheck size={16} color="#059669" style={{ marginRight: 6 }} />
-                  <Text style={[profileCardStyles.profileRoleText, { color: '#059669' }] }>
+                  <UserCheck size={16} color={colors.primary} style={{ marginRight: 6 }} />
+                  <Text style={[profileCardStyles.profileRoleText, { color: colors.primary }] }>
                     {membership.role === 'leader' ? 'Topluluk Lideri'
                       : membership.role === 'member' ? 'Topluluk Üyesi'
                       : 'Bilinmiyor'}
@@ -1058,9 +1062,9 @@ export default function ProfileScreen(props: any) {
                     paddingVertical: 2,
                     borderRadius: 12,
                     marginLeft: 8,
-                    backgroundColor: membership.status === 'active' ? '#dcfce7' 
-                      : membership.status === 'pending' ? '#fef3c7' 
-                      : '#fee2e2'
+                    backgroundColor: membership.status === 'active' ? colors.success + '20' 
+                      : membership.status === 'pending' ? colors.warning + '20' 
+                      : colors.danger + '20'
                   }}>
                     <Text style={{ fontSize: 12, fontWeight: '500' }}>
                       {membership.status === 'active' ? 'Aktif' 
@@ -1071,13 +1075,13 @@ export default function ProfileScreen(props: any) {
                 </View>
               )}
               {/* Logout Button */}
-              <TouchableOpacity style={profileCardStyles.profileLogoutBtn} onPress={() => {
+              <TouchableOpacity style={[profileCardStyles.profileLogoutBtn, { backgroundColor: colors.surfaceVariant }]} onPress={() => {
                 Alert.alert('Çıkış', 'Çıkış yapmak istediğinize emin misiniz?', [
                   { text: 'İptal', style: 'cancel' },
                   { text: 'Çıkış Yap', style: 'destructive', onPress: () => setPendingLogout(true) }
                 ]);
               }}>
-                <Text style={profileCardStyles.profileLogoutBtnText}>Çıkış Yap</Text>
+                <Text style={[profileCardStyles.profileLogoutBtnText, { color: colors.danger }]}>Çıkış Yap</Text>
               </TouchableOpacity>
               {/* Delete Account Button */}
               <TouchableOpacity
@@ -1177,7 +1181,7 @@ export default function ProfileScreen(props: any) {
                   );
                 }}
               >
-                <Text style={{ color: '#9ca3af', fontSize: 13, textDecorationLine: 'underline' }}>
+                <Text style={{ color: colors.muted, fontSize: 13, textDecorationLine: 'underline' }}>
                   {isDeletingAccount ? 'Siliniyor...' : 'Hesabımı Sil'}
                 </Text>
               </TouchableOpacity>
@@ -1191,30 +1195,30 @@ export default function ProfileScreen(props: any) {
     <View style={{
       marginHorizontal: 16,
       marginTop: 16,
-      backgroundColor: '#fffbeb',
+      backgroundColor: colors.warning + '10',
       borderRadius: 16,
       padding: 16,
       borderWidth: 1.5,
-      borderColor: '#f59e0b',
+      borderColor: colors.warning,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
     }}>
       <Text style={{ fontSize: 28 }}>⏳</Text>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#92400e', marginBottom: 4 }}>
+        <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.warning, marginBottom: 4 }}>
           {cancelledSubDaysLeft > 0
             ? `Premium hesabının bitmesine ${cancelledSubDaysLeft} gün kaldı.`
             : 'Premium erişiminiz bugün sona eriyor.'}
         </Text>
-        <Text style={{ fontSize: 12, color: '#b45309' }}>
+        <Text style={{ fontSize: 12, color: colors.warning }}>
           Aboneliğiniz yenilenmeyecek.{cancelledSubExpiresAt ? ` ${cancelledSubExpiresAt} tarihinde sona erecek.` : ''}
         </Text>
       </View>
       <TouchableOpacity
         onPress={() => router.push('/premium' as any)}
         style={{
-          backgroundColor: '#f59e0b',
+          backgroundColor: colors.warning,
           paddingVertical: 8,
           paddingHorizontal: 14,
           borderRadius: 10,
@@ -1231,11 +1235,11 @@ export default function ProfileScreen(props: any) {
       style={{
         marginHorizontal: 16,
         marginTop: 16,
-        backgroundColor: '#f0fdf4',
+        backgroundColor: colors.primaryLight,
         borderRadius: 16,
         padding: 20,
         borderWidth: 2,
-        borderColor: '#059669',
+        borderColor: colors.primary,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
@@ -1250,7 +1254,7 @@ export default function ProfileScreen(props: any) {
           width: 40,
           height: 40,
           borderRadius: 20,
-          backgroundColor: '#FEF3C7',
+          backgroundColor: colors.warning + '30',
           alignItems: 'center',
           justifyContent: 'center',
           marginRight: 12,
@@ -1258,31 +1262,31 @@ export default function ProfileScreen(props: any) {
           <Text style={{ fontSize: 24 }}>⭐</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#059669', marginBottom: 2 }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.primary, marginBottom: 2 }}>
             Premium'a Yükseltin
           </Text>
-          <Text style={{ fontSize: 13, color: '#6b7280' }}>
+          <Text style={{ fontSize: 13, color: colors.muted }}>
             Tüm özelliklerin kilidini açın
           </Text>
         </View>
       </View>
       <View style={{ gap: 6 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ fontSize: 14, color: '#059669', marginRight: 6 }}>✓</Text>
-          <Text style={{ fontSize: 13, color: '#374151' }}>Offline harita erişimi</Text>
+          <Text style={{ fontSize: 14, color: colors.primary, marginRight: 6 }}>✓</Text>
+          <Text style={{ fontSize: 13, color: colors.textSecondary }}>Offline harita erişimi</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ fontSize: 14, color: '#059669', marginRight: 6 }}>✓</Text>
-          <Text style={{ fontSize: 13, color: '#374151' }}>Gelişmiş arama ve filtreleme</Text>
+          <Text style={{ fontSize: 14, color: colors.primary, marginRight: 6 }}>✓</Text>
+          <Text style={{ fontSize: 13, color: colors.textSecondary }}>Gelişmiş arama ve filtreleme</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ fontSize: 14, color: '#059669', marginRight: 6 }}>✓</Text>
-          <Text style={{ fontSize: 13, color: '#374151' }}>Tüm premium özelliklere erişim</Text>
+          <Text style={{ fontSize: 14, color: colors.primary, marginRight: 6 }}>✓</Text>
+          <Text style={{ fontSize: 13, color: colors.textSecondary }}>Tüm premium özelliklere erişim</Text>
         </View>
       </View>
       <View style={{
         marginTop: 16,
-        backgroundColor: '#059669',
+        backgroundColor: colors.primary,
         paddingVertical: 10,
         paddingHorizontal: 14,
         borderRadius: 12,
@@ -1301,28 +1305,29 @@ export default function ProfileScreen(props: any) {
   {isGuest ? null : (
   <>
   {/* Arkadaşlarım Alanı - Kart Tasarımı */}
-  <View style={profileCardStyles.profileCard}>
+  <View style={[profileCardStyles.profileCard, { backgroundColor: colors.surface }]}>
            <View style={{ 
              flexDirection: 'row', 
              alignItems: 'center', 
              marginBottom: 12,
              borderBottomWidth: 1,
-             borderBottomColor: '#e2e8f0',
+             borderBottomColor: colors.border,
              paddingBottom: 8
            }}>
-             <User size={16} color="#0e7490" />
-             <Text style={{ fontWeight: 'bold', fontSize: 16, marginLeft: 8, color: '#0e7490' }}>
+             <User size={16} color={colors.primary} />
+             <Text style={{ fontWeight: 'bold', fontSize: 16, marginLeft: 8, color: colors.primary }}>
                Arkadaşlarım
              </Text>
            </View>
-           {friendError && <Text style={{ color: 'red', marginBottom: 8 }}>{friendError}</Text>}
+           {friendError && <Text style={{ color: colors.danger, marginBottom: 8 }}>{friendError}</Text>}
            {friends.length === 0 ? (
-             <Text style={{ color: '#64748b' }}>Henüz arkadaşınız yok.</Text>
+             <Text style={{ color: colors.muted }}>Henüz arkadaşınız yok.</Text>
            ) : (
-             <View style={{ width: '100%', height: Math.min(friends.length * FRIEND_ITEM_HEIGHT, MAX_VISIBLE_FRIENDS * FRIEND_ITEM_HEIGHT), borderRadius: 8, backgroundColor: '#f1f5f9', overflow: 'hidden' }}>
+             <View style={{ width: '100%', height: Math.min(friends.length * FRIEND_ITEM_HEIGHT, MAX_VISIBLE_FRIENDS * FRIEND_ITEM_HEIGHT), borderRadius: 8, backgroundColor: colors.surfaceVariant, overflow: 'hidden' }}>
                <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }} contentContainerStyle={{ padding: 8 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
                  {friends.map((f, i) => (
-                   <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, backgroundColor: '#f1f5f9', borderRadius: 10, padding: 10 }}>
+                   <React.Fragment key={i}>
+                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 0, backgroundColor: colors.surfaceVariant, borderRadius: 10, padding: 10 }}>
                  <View style={{ marginRight: 12 }}>
                    <FriendAvatar
                      avatar_url={f.avatar_url && f.avatar_url.trim() !== '' ? f.avatar_url : undefined}
@@ -1331,19 +1336,19 @@ export default function ProfileScreen(props: any) {
                    />
                  </View>
                  <View style={{ flex: 1, justifyContent: 'center' }}>
-                   <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0e7490' }}>{f.name || f.username || 'Kullanıcı'}</Text>
+                   <Text style={{ fontWeight: 'bold', fontSize: 16, color: colors.primary }}>{f.name || f.username || 'Kullanıcı'}</Text>
                    {f.username ? (
-                     <Text style={{ color: '#64748b', fontSize: 14 }}>{`@${f.username}`}</Text>
+                     <Text style={{ color: colors.muted, fontSize: 14 }}>{`@${f.username}`}</Text>
                    ) : null}
                    {f.email ? (
-                     <Text style={{ color: '#64748b', fontSize: 14 }}>{f.email}</Text>
+                     <Text style={{ color: colors.muted, fontSize: 14 }}>{f.email}</Text>
                    ) : null}
                  </View>
                  {/* Sağda, alt alta sadece ikonlu butonlar */}
                  <View style={{ flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', gap: 8 }}>
                    <View style={{ marginBottom: 6 }}>
-                     <View style={{ backgroundColor: '#dcfce7', borderRadius: 16, padding: 8, borderWidth: 1, borderColor: '#22c55e', alignItems: 'center', justifyContent: 'center' }}>
-                       <CheckCircle size={12} color="#22c55e" />
+                     <View style={{ backgroundColor: colors.success + '20', borderRadius: 16, padding: 8, borderWidth: 1, borderColor: colors.success, alignItems: 'center', justifyContent: 'center' }}>
+                       <CheckCircle size={12} color={colors.success} />
                      </View>
                    </View>
                    <TouchableOpacity
@@ -1380,46 +1385,50 @@ export default function ProfileScreen(props: any) {
                      }}
                      style={{ padding: 0, borderRadius: 16 }}
                    >
-                     <View style={{ backgroundColor: '#fee2e2', borderRadius: 16, padding: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#ef4444' }}>
-                       <Trash size={12} color="#ef4444" />
+                     <View style={{ backgroundColor: colors.danger + '20', borderRadius: 16, padding: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.danger }}>
+                       <Trash size={12} color={colors.danger} />
                      </View>
                    </TouchableOpacity>
                  </View>
                </View>
+                   {i < friends.length - 1 && (
+                     <View style={{ height: 1, backgroundColor: colors.border, marginHorizontal: 6, marginVertical: 4 }} />
+                   )}
+                   </React.Fragment>
              ))}
              </ScrollView>
              </View>
            )}
            {/* Gelen Arkadaşlık İstekleri Alanı - Kart içinde */}
            {friendRequests.length > 0 && (
-             <View style={{ marginTop: 16, backgroundColor: '#e6e6e6ff', borderRadius: 10, padding: 12, width: '100%' }}>
-               <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 8, color: '#a16207' }}>Gelen Arkadaşlık İstekleri</Text>
-               {friendRequestsError && <Text style={{ color: 'red', marginBottom: 8 }}>{friendRequestsError}</Text>}
+             <View style={{ marginTop: 16, backgroundColor: colors.warning + '20', borderRadius: 10, padding: 12, width: '100%' }}>
+               <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 8, color: colors.warning }}>Gelen Arkadaşlık İstekleri</Text>
+               {friendRequestsError && <Text style={{ color: colors.danger, marginBottom: 8 }}>{friendRequestsError}</Text>}
                {friendRequestsLoading ? <ActivityIndicator /> : null}
                {friendRequests.map((req) => (
-                 <View key={req.id} style={{ marginBottom: 8, backgroundColor: '#f1f5f9', borderRadius: 10, padding: 10 }}>
+                 <View key={req.id} style={{ marginBottom: 8, backgroundColor: colors.surfaceVariant, borderRadius: 10, padding: 10 }}>
                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                      <View style={{ marginRight: 12 }}>
                        <FriendAvatar avatar_url={req.avatar_url} name={req.name || req.username || 'Kullanıcı'} size={48} />
                      </View>
                      <View style={{ flex: 1, justifyContent: 'center' }}>
-                       <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0e7490' }}>{req.name || req.username || 'Kullanıcı'}</Text>
+                       <Text style={{ fontWeight: 'bold', fontSize: 16, color: colors.primary }}>{req.name || req.username || 'Kullanıcı'}</Text>
                        {req.username ? (
-                         <Text style={{ color: '#64748b', fontSize: 14 }}>{`@${req.username}`}</Text>
+                         <Text style={{ color: colors.muted, fontSize: 14 }}>{`@${req.username}`}</Text>
                        ) : null}
                        {req.email ? (
-                         <Text style={{ color: '#64748b', fontSize: 14 }}>{req.email}</Text>
+                         <Text style={{ color: colors.muted, fontSize: 14 }}>{req.email}</Text>
                        ) : null}
                        {req.tag ? (
-                         <Text style={{ color: '#a16207', fontSize: 13 }}>{req.tag}</Text>
+                         <Text style={{ color: colors.warning, fontSize: 13 }}>{req.tag}</Text>
                        ) : null}
                      </View>
                    </View>
                    <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 10 }}>
-                     <TouchableOpacity onPress={() => respondFriendRequest(req.id, 'accepted')} style={{ backgroundColor: '#22c55e', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 8, marginRight: 10 }}>
+                     <TouchableOpacity onPress={() => respondFriendRequest(req.id, 'accepted')} style={{ backgroundColor: colors.success, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 8, marginRight: 10 }}>
                        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Kabul Et</Text>
                      </TouchableOpacity>
-                     <TouchableOpacity onPress={() => respondFriendRequest(req.id, 'rejected')} style={{ backgroundColor: '#ef4444', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 8 }}>
+                     <TouchableOpacity onPress={() => respondFriendRequest(req.id, 'rejected')} style={{ backgroundColor: colors.danger, borderRadius: 8, paddingHorizontal: 18, paddingVertical: 8 }}>
                        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Reddet</Text>
                      </TouchableOpacity>
                    </View>
@@ -1429,12 +1438,12 @@ export default function ProfileScreen(props: any) {
            )}
           {/* Kullanıcı adı ile arama ve istek gönderme */}
           <View style={{ marginTop: 16 }}>
-            <Text style={{ fontSize: 15, fontWeight: '500', marginBottom: 4, color: '#0e7490' }}>Arkadaş ekle</Text>
+            <Text style={{ fontSize: 15, fontWeight: '500', marginBottom: 4, color: colors.primary }}>Arkadaş ekle</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
               <View style={{ flex: 1 }}>
                 <TextInput 
                   placeholder="Kullanıcı adı ara..."
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor={colors.muted}
                   value={friendSearch}
                   onChangeText={async (text) => {
                     setFriendSearch(text);
@@ -1479,7 +1488,7 @@ export default function ProfileScreen(props: any) {
                       setSearchResults([]);
                     }
                   }}
-                  style={{ backgroundColor: '#fff', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#e5e7eb', width: '100%' }}
+                  style={{ backgroundColor: colors.surface, borderRadius: 8, padding: 8, borderWidth: 1, borderColor: colors.border, width: '100%', color: colors.text }}
                 />
               </View>
               {/* Arama butonu kaldırıldı, autocomplete ile çalışıyor */}
@@ -1487,7 +1496,7 @@ export default function ProfileScreen(props: any) {
             {friendSearchLoading && <ActivityIndicator style={{ marginTop: 8 }} />}
             {/* Autocomplete dropdown */}
             {searchResults.length > 0 && friendSearch.trim().length >= 3 && (
-              <View style={{ marginTop: 8, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', maxHeight: 240 }}>
+              <View style={{ marginTop: 8, backgroundColor: colors.surface, borderRadius: 8, borderWidth: 1, borderColor: colors.border, maxHeight: 240 }}>
                 {searchResults.map((u) => {
                   const isRequested = requestedUserIds.includes(u.id);
                   const displayName = u.name || u.username || 'Kullanıcı';
@@ -1496,7 +1505,7 @@ export default function ProfileScreen(props: any) {
                       key={u.id}
                       onPress={() => !isRequested && sendFriendRequest(u.id)}
                       disabled={isRequested}
-                      style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', opacity: isRequested ? 0.6 : 1 }}
+                      style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: colors.surfaceVariant, opacity: isRequested ? 0.6 : 1 }}
                     >
                       <View style={{ marginRight: 12 }}>
                         <FriendAvatar
@@ -1506,12 +1515,12 @@ export default function ProfileScreen(props: any) {
                         />
                       </View>
                       <View style={{ flex: 1, justifyContent: 'center' }}>
-                        <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0e7490', marginBottom: 2 }}>{displayName}</Text>
+                        <Text style={{ fontWeight: 'bold', fontSize: 16, color: colors.primary, marginBottom: 2 }}>{displayName}</Text>
                         {u.username && (
-                          <Text style={{ color: '#64748b', fontSize: 14 }}>{`@${u.username}`}</Text>
+                          <Text style={{ color: colors.muted, fontSize: 14 }}>{`@${u.username}`}</Text>
                         )}
                       </View>
-                      <View style={{ marginLeft: 12, backgroundColor: isRequested ? '#a3e635' : '#22c55e', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
+                      <View style={{ marginLeft: 12, backgroundColor: isRequested ? colors.success + '80' : colors.success, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
                         <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>{isRequested ? 'Gönderildi' : 'Ekle'}</Text>
                       </View>
                     </TouchableOpacity>
@@ -1521,21 +1530,21 @@ export default function ProfileScreen(props: any) {
             )}
           </View>
         </View>
-        <View style={profileCardStyles.profileCard}>
+        <View style={[profileCardStyles.profileCard, { backgroundColor: colors.surface }]}>
           {loading ? (
             <ActivityIndicator />
           ) : user ? (
             <>
               {/* Kullanıcı Bilgileri ve Topluluk Bilgisi */}
               <View style={{ marginTop: 8, alignItems: 'center', width: '100%' }}>
-                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#0e7490' }}>{user.name || 'Kullanıcı'}</Text>
-                <Text style={{ fontSize: 15, color: '#6b7280', marginBottom: 8 }}>{user.email || ''}</Text>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.primary }}>{user.name || 'Kullanıcı'}</Text>
+                <Text style={{ fontSize: 15, color: colors.muted, marginBottom: 8 }}>{user.email || ''}</Text>
                 
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 4 }}>
-                  <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
-                    <Shield size={16} color="#2563eb" />
+                  <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surfaceVariant, justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                    <Shield size={16} color={colors.info} />
                   </View>
-                  <Text style={{ fontSize: 14, color: '#2563eb', fontWeight: '600' }}>
+                  <Text style={{ fontSize: 14, color: colors.info, fontWeight: '600' }}>
                     {user.role === 'admin' ? 'Yönetici'
                       : user.role === 'user' ? 'Kullanıcı'
                       : user.role === 'superadmin' ? 'Üst Yönetici'
@@ -1546,10 +1555,10 @@ export default function ProfileScreen(props: any) {
                 {membership ? (
                   <>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 4 }}>
-                      <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
-                        <UserCheck size={16} color="#059669" />
+                      <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surfaceVariant, justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                        <UserCheck size={16} color={colors.primary} />
                       </View>
-                      <Text style={{ fontSize: 14, color: '#059669', fontWeight: '600' }}>
+                      <Text style={{ fontSize: 14, color: colors.primary, fontWeight: '600' }}>
                         {membership.role === 'leader' ? 'Topluluk Lideri'
                           : membership.role === 'member' ? 'Topluluk Üyesi'
                           : 'Bilinmiyor'}
@@ -1559,9 +1568,9 @@ export default function ProfileScreen(props: any) {
                         paddingVertical: 2,
                         borderRadius: 12,
                         marginLeft: 8,
-                        backgroundColor: membership.status === 'active' ? '#dcfce7' 
-                          : membership.status === 'pending' ? '#fef3c7' 
-                          : '#fee2e2'
+                        backgroundColor: membership.status === 'active' ? colors.success + '20' 
+                          : membership.status === 'pending' ? colors.warning + '20' 
+                          : colors.danger + '20'
                       }}>
                         <Text style={{ fontSize: 12, fontWeight: '500' }}>
                           {membership.status === 'active' ? 'Aktif' 
@@ -1573,24 +1582,24 @@ export default function ProfileScreen(props: any) {
                     {communityDetail && (
                       <View style={{ 
                         marginTop: 12,
-                        backgroundColor: '#f8fafc',
+                        backgroundColor: colors.surfaceVariant,
                         borderRadius: 12,
                         padding: 12,
                         width: '100%',
                         borderWidth: 1,
-                        borderColor: '#e2e8f0',
+                        borderColor: colors.border,
                       }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                          <Building size={16} color="#0e7490" />
-                          <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#0e7490', marginLeft: 8 }}>{communityDetail.name}</Text>
+                          <Building size={16} color={colors.primary} />
+                          <Text style={{ fontSize: 15, fontWeight: 'bold', color: colors.primary, marginLeft: 8 }}>{communityDetail.name}</Text>
                         </View>
                         {/* Açıklama başlığın hemen altında */}
                         {communityDetail.description ? (
-                          <Text style={{ fontSize: 13, color: '#6b7280', marginBottom: 8, marginTop: 2 }}>{communityDetail.description}</Text>
+                          <Text style={{ fontSize: 13, color: colors.muted, marginBottom: 8, marginTop: 2 }}>{communityDetail.description}</Text>
                         ) : null}
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Eye size={14} color="#9ca3af" />
-                          <Text style={{ fontSize: 12, color: '#9ca3af', marginLeft: 4 }}>{communityDetail.visibility}</Text>
+                          <Eye size={14} color={colors.muted} />
+                          <Text style={{ fontSize: 12, color: colors.muted, marginLeft: 4 }}>{communityDetail.visibility}</Text>
                         </View>
                       </View>
                     )}
@@ -1598,36 +1607,36 @@ export default function ProfileScreen(props: any) {
                 ) : (
                   <>
                   <View style={{ 
-                    backgroundColor: '#fef3c7',
+                    backgroundColor: colors.warning + '20',
                     paddingHorizontal: 12,
                     paddingVertical: 4,
                     borderRadius: 16,
                     marginTop: 8,
                     marginBottom: 8
                   }}>
-                    <Text style={{ fontSize: 13, color: '#b45309', fontWeight: '600' }}>
+                    <Text style={{ fontSize: 13, color: colors.warning, fontWeight: '600' }}>
                       Topluluk üyeliğiniz yok
                     </Text>
                   </View>
                   {/* Topluluk arama ve başvuru alanı, sadece guest ve trial_user olmayanlar için */}
                   {!(isGuest || isTrialUser) && (
                   <View style={{ width: '100%', marginTop: 8, marginBottom: 8 }}>
-                    <Text style={{ fontSize: 15, fontWeight: '500', marginBottom: 4, color: '#0e7490' }}>Topluluğa Katıl</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '500', marginBottom: 4, color: colors.info }}>Topluluğa Katıl</Text>
                     <TextInput
                       placeholder="Topluluk adı ara..."
-                      placeholderTextColor="#64748b"
+                      placeholderTextColor={colors.muted}
                       value={communitySearch}
                       onChangeText={text => {
                         setCommunitySearch(text);
                         setCommunityError(null);
                       }}
-                      style={{ backgroundColor: '#fff', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#e5e7eb', width: '100%' }}
+                      style={{ backgroundColor: colors.surface, borderRadius: 8, padding: 8, borderWidth: 1, borderColor: colors.border, width: '100%', color: colors.text }}
                     />
                     {loadingCommunities && <ActivityIndicator style={{ marginTop: 8 }} />}
-                    {communityError && <Text style={{ color: 'red', marginTop: 4 }}>{communityError}</Text>}
+                    {communityError && <Text style={{ color: colors.danger, marginTop: 4 }}>{communityError}</Text>}
                     {/* Autocomplete dropdown */}
                     {filteredCommunities.length > 0 && communitySearch.trim().length >= 2 && (
-                      <View style={{ marginTop: 8, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', maxHeight: 180 }}>
+                      <View style={{ marginTop: 8, backgroundColor: colors.surface, borderRadius: 8, borderWidth: 1, borderColor: colors.border, maxHeight: 180 }}>
                         {filteredCommunities.map((c) => (
                           <TouchableOpacity
                             key={c.id}
@@ -1647,14 +1656,14 @@ export default function ProfileScreen(props: any) {
                               }
                             }}
                             disabled={communityApplyLoading}
-                            style={{ flexDirection: 'row', alignItems: 'center', padding: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', opacity: communityApplyLoading ? 0.6 : 1 }}
+                            style={{ flexDirection: 'row', alignItems: 'center', padding: 10, borderBottomWidth: 1, borderBottomColor: colors.surfaceVariant, opacity: communityApplyLoading ? 0.6 : 1 }}
                           >
-                            <UserCheck size={20} color="#0ea5e9" style={{ marginRight: 10 }} />
-                            <Text style={{ fontWeight: '600', fontSize: 16, color: '#0e7490', marginRight: 8 }}>{c.name}</Text>
+                            <UserCheck size={20} color={colors.info} style={{ marginRight: 10 }} />
+                            <Text style={{ fontWeight: '600', fontSize: 16, color: colors.info, marginRight: 8 }}>{c.name}</Text>
                             <View style={{ flex: 1 }}>
-                              <Text style={{ color: '#64748b', fontSize: 13 }}>{c.description}</Text>
+                              <Text style={{ color: colors.muted, fontSize: 13 }}>{c.description}</Text>
                             </View>
-                            <View style={{ marginLeft: 12, backgroundColor: '#22c55e', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
+                            <View style={{ marginLeft: 12, backgroundColor: colors.success, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
                               <Text style={{ color: '#fff', fontWeight: '600' }}>Başvur</Text>
                             </View>
                           </TouchableOpacity>
@@ -1670,35 +1679,35 @@ export default function ProfileScreen(props: any) {
                   <View style={{ 
                     marginTop: 20, 
                     width: '100%', 
-                    backgroundColor: '#f8fafc', 
+                    backgroundColor: colors.surfaceVariant, 
                     borderRadius: 12, 
                     padding: 12,
                     borderWidth: 1,
-                    borderColor: '#e2e8f0'
+                    borderColor: colors.border
                   }}>
                     <View style={{ 
                       flexDirection: 'row', 
                       alignItems: 'center', 
                       marginBottom: 12,
                       borderBottomWidth: 1,
-                      borderBottomColor: '#e2e8f0',
+                      borderBottomColor: colors.border,
                       paddingBottom: 8
                     }}>
-                      <User size={16} color="#0e7490" />
-                      <Text style={{ fontWeight: 'bold', fontSize: 16, marginLeft: 8, color: '#0e7490' }}>
+                      <User size={16} color={colors.primary} />
+                      <Text style={{ fontWeight: 'bold', fontSize: 16, marginLeft: 8, color: colors.primary }}>
                         Topluluk Üyeleri
                       </Text>
                     </View>
                     {membersLoading ? (
-                      <ActivityIndicator color="#0e7490" style={{marginVertical: 20}} />
+                      <ActivityIndicator color={colors.primary} style={{marginVertical: 20}} />
                     ) : communityMembers.length === 0 ? (
-                      <Text style={{ fontSize: 14, color: '#6b7280', fontStyle: 'italic', textAlign: 'center', paddingVertical: 12 }}>
+                      <Text style={{ fontSize: 14, color: colors.muted, fontStyle: 'italic', textAlign: 'center', paddingVertical: 12 }}>
                         Üye bulunamadı.
                       </Text>
                     ) : (
-                      <View style={{ height: Math.min(communityMembers.length * COMMUNITY_ITEM_HEIGHT, MAX_VISIBLE_MEMBERS * COMMUNITY_ITEM_HEIGHT), borderRadius: 8, backgroundColor: '#f8fafc', overflow: 'hidden' }}>
+                      <View style={{ height: Math.min(communityMembers.length * COMMUNITY_ITEM_HEIGHT, MAX_VISIBLE_MEMBERS * COMMUNITY_ITEM_HEIGHT), borderRadius: 8, backgroundColor: colors.surfaceVariant, overflow: 'hidden' }}>
                         <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }} contentContainerStyle={{ padding: 8 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
-                          {communityMembers.map(member => {
+                          {communityMembers.map((member, memberIdx) => {
                         // Mevcut durumu başa al, diğerlerini sırala
                         const sortedOptions = [
                           ...statusOptions.filter(opt => opt.value === member.status),
@@ -1714,11 +1723,12 @@ export default function ProfileScreen(props: any) {
                         const memberAvatar = (member.user?.avatar_url && member.user.avatar_url.trim()) ? member.user.avatar_url :
                           (member.user?.dataValues?.avatar_url && member.user.dataValues.avatar_url.trim()) ? member.user.dataValues.avatar_url : undefined;
                         return (
-                          <View key={member.user_id} style={{ 
+                          <React.Fragment key={member.user_id}>
+                          <View style={{ 
                             flexDirection: 'row', 
                             alignItems: 'center', 
-                            marginBottom: 8, 
-                            backgroundColor: '#f1f5f9', 
+                            marginBottom: 0, 
+                            backgroundColor: colors.surfaceVariant, 
                             borderRadius: 10, 
                             padding: 10 
                           }}>
@@ -1732,30 +1742,30 @@ export default function ProfileScreen(props: any) {
                             <View style={{ flex: 1 }}>
                               {memberName && (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                                  <User size={13} color="#0e7490" style={{ marginRight: 4 }} />
-                                  <Text style={{ color: '#0e7490', fontWeight: '600', fontSize: 14 }}>{memberName}</Text>
+                                  <User size={13} color={colors.primary} style={{ marginRight: 4 }} />
+                                  <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 14 }}>{memberName}</Text>
                                 </View>
                               )}
                               {memberUsername && (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                                  <Shield size={12} color="#64748b" style={{ marginRight: 4 }} />
-                                  <Text style={{ color: '#64748b', fontSize: 13 }}>{memberUsername}</Text>
+                                  <Shield size={12} color={colors.muted} style={{ marginRight: 4 }} />
+                                  <Text style={{ color: colors.muted, fontSize: 13 }}>{memberUsername}</Text>
                                 </View>
                               )}
                               {memberEmail && (
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                  <Mail size={12} color="#64748b" style={{ marginRight: 4 }} />
-                                  <Text style={{ color: '#64748b', fontSize: 13 }}>{memberEmail}</Text>
+                                  <Mail size={12} color={colors.muted} style={{ marginRight: 4 }} />
+                                  <Text style={{ color: colors.muted, fontSize: 13 }}>{memberEmail}</Text>
                                 </View>
                               )}
                               {!(memberName || memberUsername || memberEmail) && (
-                                <Text style={{ color: '#64748b', fontSize: 13, fontStyle: 'italic' }}>İsimsiz Üye</Text>
+                                <Text style={{ color: colors.muted, fontSize: 13, fontStyle: 'italic' }}>İsimsiz Üye</Text>
                               )}
                             </View>
                             {/* Durum badge ve seçim butonu: sadece lider/admin için, üye rolünde hiç gösterme */}
                             {(membership.role === 'leader') && (
                               <TouchableOpacity
-                                style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: statusOptions.find(opt => opt.value === member.status)?.color + '22', borderWidth: 1, borderColor: statusOptions.find(opt => opt.value === member.status)?.color || '#e5e7eb' }}
+                                style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: statusOptions.find(opt => opt.value === member.status)?.color + '22', borderWidth: 1, borderColor: statusOptions.find(opt => opt.value === member.status)?.color || colors.border }}
                                 onPress={() => setStatusModal({ open: true, member })}
                                 activeOpacity={0.85}
                               >
@@ -1766,6 +1776,10 @@ export default function ProfileScreen(props: any) {
                               </TouchableOpacity>
                             )}
                           </View>
+                          {memberIdx < communityMembers.length - 1 && (
+                            <View style={{ height: 1, backgroundColor: colors.border, marginHorizontal: 6, marginVertical: 4 }} />
+                          )}
+                          </React.Fragment>
                         );
                           })}
                         </ScrollView>
@@ -1776,19 +1790,19 @@ export default function ProfileScreen(props: any) {
               </View>
             </>
           ) : (
-            <Text style={styles.error}>Kullanıcı bilgisi alınamadı</Text>
+            <Text style={[styles.error, { color: colors.danger }]}>Kullanıcı bilgisi alınamadı</Text>
           )}
         </View>
 
 
 
         {/* App Info */}
-        <View style={styles.appInfoContainer}>
-          <Text style={styles.sectionTitle}>Uygulama</Text>
+        <View style={[styles.appInfoContainer, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text, backgroundColor: colors.surfaceVariant }]}>Uygulama</Text>
           
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Versiyon</Text>
-            <Text style={styles.infoValue}>{Constants.expoConfig?.version || '1.x'}</Text>
+          <View style={[styles.infoRow, { borderBottomColor: colors.surfaceVariant }]}>
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Versiyon</Text>
+            <Text style={[styles.infoValue, { color: colors.muted }]}>{Constants.expoConfig?.version || '1.x'}</Text>
           </View>
 
           {/* Uygulama Rehberi */}
@@ -1796,25 +1810,25 @@ export default function ProfileScreen(props: any) {
             style={{
               flexDirection: 'row',
               alignItems: 'center',
-              backgroundColor: '#f0fdf4',
+              backgroundColor: colors.primaryLight,
               borderRadius: 12,
               padding: 14,
               marginTop: 10,
               borderWidth: 1,
-              borderColor: '#bbf7d0',
+              borderColor: colors.primaryLight,
               gap: 12,
             }}
             onPress={() => router.push('/guide' as any)}
             activeOpacity={0.75}
           >
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
               <BookOpen size={20} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: '#065f46' }}>Uygulama Rehberi</Text>
-              <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Ana ekrandaki tüm özellikleri öğren</Text>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: colors.primaryDark }}>Uygulama Rehberi</Text>
+              <Text style={{ fontSize: 12, color: colors.muted, marginTop: 2 }}>Ana ekrandaki tüm özellikleri öğren</Text>
             </View>
-            <ChevronRight size={18} color="#059669" />
+            <ChevronRight size={18} color={colors.primary} />
           </TouchableOpacity>
 
           {user?.offline_enabled && (
@@ -1822,12 +1836,12 @@ export default function ProfileScreen(props: any) {
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                backgroundColor: '#fff',
+                backgroundColor: colors.surface,
                 borderRadius: 12,
                 padding: 14,
                 marginTop: 12,
                 borderWidth: 1,
-                borderColor: '#e6f4ea',
+                borderColor: colors.border,
                 gap: 12,
               }}
               disabled={fullSyncLoading}
@@ -1871,24 +1885,24 @@ export default function ProfileScreen(props: any) {
                 }
               }}
             >
-              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center' }}>
-                <RefreshCw size={20} color="#059669" />
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' }}>
+                <RefreshCw size={20} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: '#065f46' }}>Tam Eşitlemeyi Başlat</Text>
-                <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Kamp alanları senkronizasyonunda sorun yaşadıysanız, tekrar eşitleme yapabilirsiniz.</Text>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: colors.primaryDark }}>Tam Eşitlemeyi Başlat</Text>
+                <Text style={{ fontSize: 12, color: colors.muted, marginTop: 2 }}>Kamp alanları senkronizasyonunda sorun yaşadıysanız, tekrar eşitleme yapabilirsiniz.</Text>
               </View>
-              {fullSyncLoading ? <ActivityIndicator color="#059669" /> : <ChevronRight size={18} color="#059669" />}
+              {fullSyncLoading ? <ActivityIndicator color={colors.primary} /> : <ChevronRight size={18} color={colors.primary} />}
             </TouchableOpacity>
           )}
         </View>
 
         {/* Development Tools */}
-        <View style={styles.menuContainer}>
+        <View style={[styles.menuContainer, { backgroundColor: colors.surface }]}>
           {/* Superadmin için sunucu eşleştirme butonu */}
           {user && user.role === 'superadmin' && (
             <TouchableOpacity
-              style={[styles.backupButton, { backgroundColor: '#f0fdf4', borderColor: '#059669', marginBottom: 12 }]}
+              style={[styles.backupButton, { backgroundColor: colors.primaryLight, borderColor: colors.primary, marginBottom: 12 }]}
               onPress={async () => {
                 try {
                   const res = await syncServerCampgroundsToLocal();
@@ -1903,10 +1917,10 @@ export default function ProfileScreen(props: any) {
               }}
             >
               <View style={styles.backupButtonContent}>
-                <RefreshCw size={20} color="#059669" />
+                <RefreshCw size={20} color={colors.primary} />
                 <View style={styles.backupButtonText}>
-                  <Text style={[styles.backupButtonTitle, { color: '#059669' }]}>Sunucu Eşleştirme</Text>
-                  <Text style={styles.backupButtonSubtitle}>Tüm sunucu kamp alanlarını lokal veritabanına kaydet</Text>
+                  <Text style={[styles.backupButtonTitle, { color: colors.primary }]}>Sunucu Eşleştirme</Text>
+                  <Text style={[styles.backupButtonSubtitle, { color: colors.muted }]}>Tüm sunucu kamp alanlarını lokal veritabanına kaydet</Text>
                 </View>
               </View>
             </TouchableOpacity>
@@ -1914,24 +1928,24 @@ export default function ProfileScreen(props: any) {
           
           
           {/* Konum İzni Yönetimi - Tüm kullanıcılar için */}
-          <View style={styles.menuContainer}>
-            <Text style={styles.sectionTitle}>Konum İzinleri</Text>
+          <View style={[styles.menuContainer, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text, backgroundColor: colors.surfaceVariant }]}>Konum İzinleri</Text>
             
-            <View style={{ backgroundColor: '#f0f9ff', borderTopWidth: 1, borderTopColor: '#e0f2fe', padding: 16 }}>
+            <View style={{ backgroundColor: colors.surfaceVariant, borderTopWidth: 1, borderTopColor: colors.border, padding: 16 }}>
               <View style={{ gap: 12 }}>
                 {/* Mevcut Durum */}
-                <View style={{ backgroundColor: '#fff', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#e0f2fe' }}>
-                  <Text style={{ fontSize: 13, color: '#64748b', marginBottom: 6 }}>Mevcut Durum:</Text>
+                <View style={{ backgroundColor: colors.surface, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
+                  <Text style={{ fontSize: 13, color: colors.muted, marginBottom: 6 }}>Mevcut Durum:</Text>
                   {/* Foreground ve Background başlıkları */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: user?.offline_enabled ? 4 : 0 }}>
-                    <Text style={{ fontWeight: 'bold', color: '#0ea5e9', fontSize: 14 }}>Foreground:</Text>
+                    <Text style={{ fontWeight: 'bold', color: colors.info, fontSize: 14 }}>Foreground:</Text>
                     <View style={{
                       width: 8,
                       height: 8,
                       borderRadius: 4,
-                      backgroundColor: locationPermissionStatus === 'granted' ? '#10b981' : '#ef4444'
+                      backgroundColor: locationPermissionStatus === 'granted' ? colors.success : colors.danger
                     }} />
-                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#1e293b' }}>
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: colors.text }}>
                       {locationPermissionStatus === 'granted' ? '✅ İzin Verildi' : 
                        locationPermissionStatus === 'denied' ? '❌ İzin Reddedildi' : '⚠️ İzin Bekleniyor'}
                     </Text>
@@ -1940,7 +1954,7 @@ export default function ProfileScreen(props: any) {
                 </View>
 
                 {/* Açıklama */}
-                <Text style={{ fontSize: 13, color: '#64748b', lineHeight: 18 }}>
+                <Text style={{ fontSize: 13, color: colors.muted, lineHeight: 18 }}>
                   {user?.offline_enabled ? 
                     'Offline mod için konum izninin "Her zaman izin ver" olarak ayarlanması gerekmektedir.' :
                     'Kamp alanlarını haritada görebilmek ve size en yakın noktaları sunabilmek için konum izni gereklidir.'}
@@ -1951,7 +1965,7 @@ export default function ProfileScreen(props: any) {
                   {locationPermissionStatus !== 'granted' && (
                     <TouchableOpacity
                       style={{
-                        backgroundColor: '#0ea5e9',
+                        backgroundColor: colors.info,
                         paddingVertical: 12,
                         paddingHorizontal: 16,
                         borderRadius: 8,
@@ -1967,13 +1981,13 @@ export default function ProfileScreen(props: any) {
 
                 <TouchableOpacity
                   style={{
-                    backgroundColor: '#fff',
+                    backgroundColor: colors.surface,
                     paddingVertical: 12,
                     paddingHorizontal: 16,
                     borderRadius: 8,
                     alignItems: 'center',
                     borderWidth: 1,
-                    borderColor: '#cbd5e1'
+                    borderColor: colors.border
                   }}
                   onPress={() => {
                     if (Platform.OS === 'ios') {
@@ -1983,12 +1997,12 @@ export default function ProfileScreen(props: any) {
                     }
                   }}
                 >
-                  <Text style={{ color: '#475569', fontWeight: '600', fontSize: 14 }}>Sistem Ayarlarını Aç</Text>
+                  <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 14 }}>Sistem Ayarlarını Aç</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={{
-                    backgroundColor: '#fff',
+                    backgroundColor: colors.surface,
                     paddingVertical: 10,
                     paddingHorizontal: 16,
                     borderRadius: 8,
@@ -2003,18 +2017,18 @@ export default function ProfileScreen(props: any) {
                     );
                   }}
                 >
-                  <Text style={{ color: '#64748b', fontSize: 13 }}>🔄 Durumu Yenile</Text>
+                  <Text style={{ color: colors.muted, fontSize: 13 }}>🔄 Durumu Yenile</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={{
-                    backgroundColor: '#fff',
+                    backgroundColor: colors.surface,
                     paddingVertical: 10,
                     paddingHorizontal: 16,
                     borderRadius: 8,
                     alignItems: 'center',
                     borderWidth: 1,
-                    borderColor: '#e0e7ff',
+                    borderColor: colors.border,
                     marginTop: 8
                   }}
                   onPress={async () => {
@@ -2026,7 +2040,7 @@ export default function ProfileScreen(props: any) {
                     );
                   }}
                 >
-                  <Text style={{ color: '#6366f1', fontSize: 13, fontWeight: '500' }}>🔔 Konum İzni Bildirimini Aktif Et</Text>
+                  <Text style={{ color: colors.info, fontSize: 13, fontWeight: '500' }}>🔔 Konum İzni Bildirimini Aktif Et</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -2045,7 +2059,7 @@ export default function ProfileScreen(props: any) {
           {/* Cache Temizleme Butonu sadece offline_enabled kullanıcılar için */}
           {user && user.offline_enabled && (
             <TouchableOpacity
-              style={[styles.backupButton, { backgroundColor: '#fef3c7', borderColor: '#f59e0b', marginTop: 16 }]}
+              style={[styles.backupButton, { backgroundColor: colors.warning + '20', borderColor: colors.warning, marginTop: 16 }]}
               onPress={async () => {
                 try {
                   const stats = await getTileCacheStats();
@@ -2071,10 +2085,10 @@ export default function ProfileScreen(props: any) {
               }}
             >
               <View style={styles.backupButtonContent}>
-                <Trash size={20} color="#f59e0b" />
+                <Trash size={20} color={colors.warning} />
                 <View style={styles.backupButtonText}>
-                  <Text style={[styles.backupButtonTitle, { color: '#f59e0b' }]}>Harita Cache Temizle</Text>
-                  <Text style={styles.backupButtonSubtitle}>Offline harita tile'ları temizlenir</Text>
+                  <Text style={[styles.backupButtonTitle, { color: colors.warning }]}>Harita Cache Temizle</Text>
+                  <Text style={[styles.backupButtonSubtitle, { color: colors.muted }]}>Offline harita tile'ları temizlenir</Text>
                 </View>
               </View>
             </TouchableOpacity>
@@ -2083,14 +2097,14 @@ export default function ProfileScreen(props: any) {
           {/* Superadmin için veritabanı silme butonu */}
           {user && user.role === 'superadmin' && (
             <TouchableOpacity
-              style={[styles.backupButton, { backgroundColor: '#fee2e2', borderColor: '#dc2626', marginTop: 16 }]}
+              style={[styles.backupButton, { backgroundColor: colors.danger + '20', borderColor: colors.danger, marginTop: 16 }]}
               onPress={handleDeleteDatabase}
             >
               <View style={styles.backupButtonContent}>
-                <XCircle size={20} color="#dc2626" />
+                <XCircle size={20} color={colors.danger} />
                 <View style={styles.backupButtonText}>
-                  <Text style={[styles.backupButtonTitle, { color: '#dc2626' }]}>Veritabanını Sıfırla (Sil)</Text>
-                  <Text style={styles.backupButtonSubtitle}>Tüm lokal veriler silinir. Geri alınamaz!</Text>
+                  <Text style={[styles.backupButtonTitle, { color: colors.danger }]}>Veritabanını Sıfırla (Sil)</Text>
+                  <Text style={[styles.backupButtonSubtitle, { color: colors.muted }]}>Tüm lokal veriler silinir. Geri alınamaz!</Text>
                 </View>
               </View>
             </TouchableOpacity>
@@ -2107,12 +2121,12 @@ export default function ProfileScreen(props: any) {
           onRequestClose={() => setStatusModal({ open: false, member: null })}
         >
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.18)', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, minWidth: 260, alignItems: 'center', elevation: 4 }}>
-              <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 18, color: '#0e7490' }}>Durum Seç</Text>
+            <View style={{ backgroundColor: colors.surface, borderRadius: 16, padding: 24, minWidth: 260, alignItems: 'center', elevation: 4 }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 18, color: colors.info }}>Durum Seç</Text>
               {statusOptions.map(opt => (
                 <TouchableOpacity
                   key={opt.value}
-                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginBottom: 6, backgroundColor: statusModal.member?.status === opt.value ? opt.color + '22' : '#f3f4f6', borderWidth: statusModal.member?.status === opt.value ? 2 : 1, borderColor: statusModal.member?.status === opt.value ? opt.color : '#e5e7eb' }}
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginBottom: 6, backgroundColor: statusModal.member?.status === opt.value ? opt.color + '22' : colors.surfaceVariant, borderWidth: statusModal.member?.status === opt.value ? 2 : 1, borderColor: statusModal.member?.status === opt.value ? opt.color : colors.border }}
                   onPress={async () => {
                     if (statusModal.member && statusModal.member.status !== opt.value) {
                       await handleStatusChange(statusModal.member, opt.value);
@@ -2128,7 +2142,7 @@ export default function ProfileScreen(props: any) {
                 </TouchableOpacity>
               ))}
               <TouchableOpacity onPress={() => setStatusModal({ open: false, member: null })} style={{ marginTop: 10, padding: 8 }}>
-                <Text style={{ color: '#64748b', fontWeight: 'bold' }}>Vazgeç</Text>
+                <Text style={{ color: colors.muted, fontWeight: 'bold' }}>Vazgeç</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2142,26 +2156,26 @@ export default function ProfileScreen(props: any) {
           onRequestClose={() => setEditNameModal(false)}
         >
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
-              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 16, color: '#0e7490' }}>İsminizi Düzenleyin</Text>
+            <View style={{ backgroundColor: colors.surface, borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 16, color: colors.info }}>İsminizi Düzenleyin</Text>
               <TextInput
                 value={editNameValue}
                 onChangeText={setEditNameValue}
                 placeholder="İsim Soyisim"
-                style={{ backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 16, borderWidth: 1, borderColor: '#e2e8f0' }}
+                style={{ backgroundColor: colors.surfaceVariant, borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 16, borderWidth: 1, borderColor: colors.border, color: colors.text }}
                 autoFocus
               />
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <TouchableOpacity
                   onPress={() => setEditNameModal(false)}
-                  style={{ flex: 1, backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                  style={{ flex: 1, backgroundColor: colors.surfaceVariant, borderRadius: 8, padding: 12, alignItems: 'center' }}
                   disabled={profileUpdateLoading}
                 >
-                  <Text style={{ color: '#64748b', fontWeight: '600', fontSize: 16 }}>İptal</Text>
+                  <Text style={{ color: colors.muted, fontWeight: '600', fontSize: 16 }}>İptal</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={handleUpdateName}
-                  style={{ flex: 1, backgroundColor: '#0ea5e9', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                  style={{ flex: 1, backgroundColor: colors.info, borderRadius: 8, padding: 12, alignItems: 'center' }}
                   disabled={profileUpdateLoading}
                 >
                   {profileUpdateLoading ? (
@@ -2183,28 +2197,28 @@ export default function ProfileScreen(props: any) {
           onRequestClose={() => setEditUsernameModal(false)}
         >
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
-              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 8, color: '#0e7490' }}>Kullanıcı Adınızı Düzenleyin</Text>
-              <Text style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>Sadece harf, rakam ve alt çizgi kullanabilirsiniz</Text>
+            <View style={{ backgroundColor: colors.surface, borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 8, color: colors.info }}>Kullanıcı Adınızı Düzenleyin</Text>
+              <Text style={{ fontSize: 13, color: colors.muted, marginBottom: 16 }}>Sadece harf, rakam ve alt çizgi kullanabilirsiniz</Text>
               <TextInput
                 value={editUsernameValue}
                 onChangeText={setEditUsernameValue}
                 placeholder="kullaniciadi"
                 autoCapitalize="none"
-                style={{ backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 16, borderWidth: 1, borderColor: '#e2e8f0' }}
+                style={{ backgroundColor: colors.surfaceVariant, borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 16, borderWidth: 1, borderColor: colors.border, color: colors.text }}
                 autoFocus
               />
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <TouchableOpacity
                   onPress={() => setEditUsernameModal(false)}
-                  style={{ flex: 1, backgroundColor: '#f1f5f9', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                  style={{ flex: 1, backgroundColor: colors.surfaceVariant, borderRadius: 8, padding: 12, alignItems: 'center' }}
                   disabled={profileUpdateLoading}
                 >
-                  <Text style={{ color: '#64748b', fontWeight: '600', fontSize: 16 }}>İptal</Text>
+                  <Text style={{ color: colors.muted, fontWeight: '600', fontSize: 16 }}>İptal</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={handleUpdateUsername}
-                  style={{ flex: 1, backgroundColor: '#0ea5e9', borderRadius: 8, padding: 12, alignItems: 'center' }}
+                  style={{ flex: 1, backgroundColor: colors.info, borderRadius: 8, padding: 12, alignItems: 'center' }}
                   disabled={profileUpdateLoading}
                 >
                   {profileUpdateLoading ? (
@@ -2227,7 +2241,6 @@ export default function ProfileScreen(props: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   scrollContent: { paddingBottom: 32 },
   gradientHeader: {
@@ -2239,7 +2252,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 28,
     marginBottom: 16,
   },
-  profileHeader: { alignItems: 'center', padding: 24, backgroundColor: '#f3f4f6' },
+  profileHeader: { alignItems: 'center', padding: 24 },
   avatarWrapper: {
     width: 140,
     height: 140,
@@ -2248,16 +2261,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    backgroundColor: '#e0e7ef',
     borderWidth: 2,
-    borderColor: '#cbd5e1',
   },
-  avatar: { width: 140, height: 140, borderRadius: 70, backgroundColor: '#e0e7ef' },
+  avatar: { width: 140, height: 140, borderRadius: 70 },
   avatarEditFab: {
     position: 'absolute',
     bottom: 8,
     right: 8,
-    backgroundColor: '#0284c7',
     borderRadius: 20,
     width: 40,
     height: 40,
@@ -2300,21 +2310,20 @@ const styles = StyleSheet.create({
   badgeText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   badgePrimary: { backgroundColor: 'rgba(255,255,255,0.25)' },
   badgeNeutral: { backgroundColor: 'rgba(255,255,255,0.15)' },
-  badgeSuccess: { backgroundColor: '#16a34a' },
-  badgeWarning: { backgroundColor: '#f59e0b' },
-  badgeDanger: { backgroundColor: '#dc2626' },
+  badgeSuccess: { },
+  badgeWarning: { },
+  badgeDanger: { },
   logoutChip: { marginTop: 16, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 24 },
   logoutChipText: { color: '#fff', fontWeight: '600' },
   communityMini: { marginTop: 20, alignItems: 'center', maxWidth: 320 },
   communityName: { color: '#fff', fontSize: 16, fontWeight: '600' },
   communityDesc: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4, textAlign: 'center' },
-  errorAlt: { color: '#fecaca' },
+  errorAlt: { },
   name: { fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
-  email: { fontSize: 16, color: '#666', marginBottom: 8 },
-  error: { color: '#d32f2f', marginBottom: 8 },
+  email: { fontSize: 16, marginBottom: 8 },
+  error: { marginBottom: 8 },
   statsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'white',
     paddingVertical: 24,
     marginBottom: 16,
   },
@@ -2325,32 +2334,26 @@ const styles = StyleSheet.create({
   statItemBorder: {
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: '#e5e7eb',
   },
   statNumber: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#059669',
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
-    color: '#6b7280',
     fontWeight: '500',
   },
   menuContainer: {
-    backgroundColor: 'white',
     marginBottom: 16,
     paddingVertical: 8,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
     textAlign: 'center',
   },
   menuItem: {
@@ -2359,13 +2362,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f9fafb',
   },
   menuIconContainer: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#f0fdf4',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
@@ -2376,15 +2377,12 @@ const styles = StyleSheet.create({
   menuTitle: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#1f2937',
     marginBottom: 2,
   },
   menuSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
   },
   appInfoContainer: {
-    backgroundColor: 'white',
     marginBottom: 16,
     paddingVertical: 8,
   },
@@ -2395,15 +2393,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f9fafb',
   },
   infoLabel: {
     fontSize: 16,
-    color: '#374151',
   },
   infoValue: {
     fontSize: 16,
-    color: '#6b7280',
   },
   devButton: {
     flexDirection: 'row',
@@ -2411,11 +2406,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f9fafb',
-    backgroundColor: '#f0fdf4',
   },
   devButtonDisabled: {
-    backgroundColor: '#f9fafb',
   },
   devButtonContent: {
     flexDirection: 'row',
@@ -2429,15 +2421,12 @@ const styles = StyleSheet.create({
   devButtonTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#059669',
     marginBottom: 2,
   },
   devButtonTitleDisabled: {
-    color: '#9ca3af',
   },
   devButtonSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
   },
   syncStatusContainer: {
     marginHorizontal: 20,
@@ -2447,30 +2436,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   syncStatusSuccess: {
-    backgroundColor: '#f0fdf4',
-    borderColor: '#bbf7d0',
   },
   syncStatusError: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#fecaca',
   },
   syncStatusText: {
     fontSize: 14,
-    color: '#374151',
     lineHeight: 20,
   },
   backupInfoContainer: {
-    backgroundColor: '#f0fdf4',
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#bbf7d0',
   },
   backupInfoTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#059669',
     marginBottom: 12,
   },
   backupStats: {
@@ -2483,12 +2464,10 @@ const styles = StyleSheet.create({
   backupStatNumber: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#059669',
     marginBottom: 4,
   },
   backupStatLabel: {
     fontSize: 12,
-    color: '#059669',
     fontWeight: '500',
   },
   backupButton: {
@@ -2501,20 +2480,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   exportButton: {
-    backgroundColor: '#f0fdf4',
-    borderColor: '#059669',
   },
   importButton: {
-    backgroundColor: '#faf5ff',
-    borderColor: '#7c3aed',
   },
   shareButton: {
-    backgroundColor: '#f0f9ff',
-    borderColor: '#0891b2',
   },
   backupButtonDisabled: {
-    backgroundColor: '#f9fafb',
-    borderColor: '#d1d5db',
   },
   backupButtonContent: {
     flexDirection: 'row',
@@ -2528,31 +2499,25 @@ const styles = StyleSheet.create({
   backupButtonTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#059669',
     marginBottom: 2,
   },
   importButtonTitle: {
-    color: '#7c3aed',
   },
   shareButtonTitle: {
-    color: '#0891b2',
   },
   backupButtonTitleDisabled: {
-    color: '#9ca3af',
   },
   backupButtonSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
   },
   spinning: {
     // Placeholder for potential Animated rotation
   },
 });
 
-// Modern tasarımda kullanılan ancak şu an kaldırılmış kart vs. stiller (ileride yeniden eklenebilir)
+// Modern tasarımda kullanılan kart stiller (runtime'da colors.* ile override edilir)
 const profileCardStyles = StyleSheet.create({
   profileCard: {
-    backgroundColor: '#fff',
     borderRadius: 20,
     padding: 24,
     margin: 16,
@@ -2563,13 +2528,12 @@ const profileCardStyles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  profileName: { fontSize: 20, fontWeight: '700', color: '#0e7490', marginTop: 8 },
-  profileEmail: { fontSize: 15, color: '#6b7280', marginBottom: 8 },
+  profileName: { fontSize: 20, fontWeight: '700', marginTop: 8 },
+  profileEmail: { fontSize: 15, marginBottom: 8 },
   profileRoleRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
-  profileRoleText: { fontSize: 14, color: '#2563eb', fontWeight: '600' },
+  profileRoleText: { fontSize: 14, fontWeight: '600' },
   profileLogoutBtn: {
     marginTop: 18,
-    backgroundColor: '#f1f5f9',
     paddingHorizontal: 24,
     paddingVertical: 10,
     borderRadius: 16,
@@ -2581,5 +2545,5 @@ const profileCardStyles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  profileLogoutBtnText: { color: '#ef4444', fontWeight: '700', fontSize: 15 },
+  profileLogoutBtnText: { fontWeight: '700', fontSize: 15 },
 });

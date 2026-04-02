@@ -84,23 +84,23 @@ async function saveTileIndex(index: TileIndex) {
 /**
  * Tile key oluştur
  */
-function getTileKey(z: number, x: number, y: number): string {
-  return `${z}_${x}_${y}`;
+function getTileKey(z: number, x: number, y: number, style?: string): string {
+  return style === 'dark' ? `dark_${z}_${x}_${y}` : `${z}_${x}_${y}`;
 }
 
 /**
  * Tile dosya yolu
  */
-function getTilePath(z: number, x: number, y: number): string {
-  return `${TILE_CACHE_DIR}${z}_${x}_${y}.png`;
+function getTilePath(z: number, x: number, y: number, style?: string): string {
+  return style === 'dark' ? `${TILE_CACHE_DIR}dark_${z}_${x}_${y}.png` : `${TILE_CACHE_DIR}${z}_${x}_${y}.png`;
 }
 
 /**
  * Tile'ı cache'den al (varsa)
  */
-export async function getCachedTile(z: number, x: number, y: number): Promise<string | null> {
+export async function getCachedTile(z: number, x: number, y: number, style?: string): Promise<string | null> {
   try {
-    const path = getTilePath(z, x, y);
+    const path = getTilePath(z, x, y, style);
     const fileInfo = await FileSystem.getInfoAsync(path);
     
     if (fileInfo.exists) {
@@ -121,22 +121,30 @@ export async function getCachedTile(z: number, x: number, y: number): Promise<st
 /**
  * Tile'ı indir ve cache'le
  * NOT: Bu fonksiyon çağrılmadan önce network kontrolü yapılmalı
+ * dualMode=true ise karşı temayı da arka planda cache'ler
  */
-export async function cacheTile(z: number, x: number, y: number): Promise<boolean> {
+export async function cacheTile(z: number, x: number, y: number, style?: string, dualMode: boolean = false): Promise<boolean> {
   try {
     await ensureCacheDirectory();
     
     // Tile zaten cache'de mi kontrol et (gereksiz indirmeleri önle)
-    const existingTile = await getCachedTile(z, x, y);
+    const existingTile = await getCachedTile(z, x, y, style);
     if (existingTile) {
       // console.log(`[MapTileCache] Tile zaten cache'de: ${z}/${x}/${y}`);
+      // Karşı tema da cache'lensin (background)
+      if (dualMode) {
+        const oppositeStyle = style === 'dark' ? undefined : 'dark';
+        cacheTile(z, x, y, oppositeStyle, false).catch(() => {});
+      }
       return true;
     }
     
     // Backend proxy üzerinden tile çek (backend'de CartoDB'ye yönlendirilecek)
-    const url = `${API_URL}/tiles/${z}/${x}/${y}.png?v=cartodb`;
-    const path = getTilePath(z, x, y);
-    const key = getTileKey(z, x, y);
+    // Theme-based cache bust token: light (lt) vs dark (dk)
+    const styleParam = style === 'dark' ? '&style=dark&t=dk' : '&t=lt';
+    const url = `${API_URL}/tiles/${z}/${x}/${y}.png?v=cartodb${styleParam}`;
+    const path = getTilePath(z, x, y, style);
+    const key = getTileKey(z, x, y, style);
     
     // Tile'ı indir
     const downloadResult = await FileSystem.downloadAsync(url, path);
@@ -163,6 +171,13 @@ export async function cacheTile(z: number, x: number, y: number): Promise<boolea
     await enforceMaxCacheSize(index);
     
     await saveTileIndex(index);
+
+    // Karşı temayı da arka planda cache'le (dualMode)
+    if (dualMode) {
+      const oppositeStyle = style === 'dark' ? undefined : 'dark';
+      cacheTile(z, x, y, oppositeStyle, false).catch(() => {});
+    }
+
     return true;
   } catch (error) {
     // Hata durumunda sessizce fail et (network hatası normal)
@@ -323,7 +338,8 @@ export async function precacheTilesForRegion(
   centerLat: number,
   centerLon: number,
   zoom: number,
-  radius: number = 2
+  radius: number = 2,
+  style?: string
 ): Promise<number> {
   try {
     // Lat/Lon'dan tile koordinatlarını hesapla
@@ -341,7 +357,7 @@ export async function precacheTilesForRegion(
         
         if (x >= 0 && x < Math.pow(2, zoom) && y >= 0 && y < Math.pow(2, zoom)) {
           promises.push(
-            cacheTile(zoom, x, y).then(success => {
+            cacheTile(zoom, x, y, style, true).then(success => {
               if (success) cachedCount++;
               return success;
             })
@@ -369,7 +385,8 @@ export async function precacheTilesForRegion(
 export async function precacheRegionWithRadius(
   centerLat: number,
   centerLon: number,
-  radiusKm: number = 20
+  radiusKm: number = 20,
+  style?: string
 ): Promise<{ totalTiles: number; alreadyCached: boolean; cachedTiles?: number; totalSizeMB?: number }> {
   try {
     // Daha önce cache'lenmiş mi kontrol et
@@ -405,7 +422,8 @@ export async function precacheRegionWithRadius(
         centerLat,
         centerLon,
         config.zoom,
-        config.tileRadius
+        config.tileRadius,
+        style
       );
       totalCached += count;
       

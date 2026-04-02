@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTheme } from '../components/ThemeProvider';
 import {
   List,
   Search,
@@ -120,6 +121,7 @@ const STEPS = [
 
 // ─── Ana Bileşen ──────────────────────────────────────────────────────────────
 export default function GuideScreen() {
+  const { colors } = useTheme();
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -156,12 +158,12 @@ export default function GuideScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {/* ─── Üst Bar ─── */}
-      <View style={styles.topBar}>
-        <Text style={styles.topBarTitle}>Uygulama Rehberi</Text>
+      <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <Text style={[styles.topBarTitle, { color: colors.text }]}>Uygulama Rehberi</Text>
         <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <X size={22} color="#475569" />
+          <X size={22} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
@@ -171,17 +173,17 @@ export default function GuideScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Animated.View style={[styles.card, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
+        <Animated.View style={[styles.card, { opacity: fadeAnim, transform: [{ scale: scaleAnim }], backgroundColor: colors.surface }]}>
           {/* Spotlight Alanı */}
           <SpotlightArea step={step} />
 
           {/* Metin */}
           <View style={styles.textArea}>
-            <Text style={styles.stepLabel}>
+            <Text style={[styles.stepLabel, { color: colors.muted }]}>
               {currentStep === 0 ? '' : `Adım ${currentStep} / ${STEPS.length - 1}`}
             </Text>
-            <Text style={styles.stepTitle}>{step.title}</Text>
-            <Text style={styles.stepDescription}>{step.description}</Text>
+            <Text style={[styles.stepTitle, { color: colors.text }]}>{step.title}</Text>
+            <Text style={[styles.stepDescription, { color: colors.textSecondary }]}>{step.description}</Text>
           </View>
         </Animated.View>
 
@@ -196,8 +198,9 @@ export default function GuideScreen() {
               <View
                 style={[
                   styles.dot,
-                  i === currentStep && styles.dotActive,
-                  i < currentStep && styles.dotPast,
+                  { backgroundColor: colors.border },
+                  i === currentStep && [styles.dotActive, { backgroundColor: colors.primary }],
+                  i < currentStep && [styles.dotPast, { backgroundColor: colors.accent }],
                 ]}
               />
             </TouchableOpacity>
@@ -207,17 +210,17 @@ export default function GuideScreen() {
         {/* ─── Navigasyon Butonları ─── */}
         <View style={styles.navRow}>
           <TouchableOpacity
-            style={[styles.navBtn, styles.navBtnSecondary, isFirst && styles.navBtnDisabled]}
+            style={[styles.navBtn, styles.navBtnSecondary, { borderColor: colors.primary }, isFirst && [styles.navBtnDisabled, { borderColor: colors.border, backgroundColor: colors.background }]]}
             onPress={goPrev}
             disabled={isFirst}
           >
-            <ChevronLeft size={20} color={isFirst ? '#cbd5e1' : '#059669'} />
-            <Text style={[styles.navBtnText, styles.navBtnSecondaryText, isFirst && { color: '#cbd5e1' }]}>
+            <ChevronLeft size={20} color={isFirst ? colors.border : colors.primary} />
+            <Text style={[styles.navBtnText, styles.navBtnSecondaryText, { color: colors.primary }, isFirst && { color: colors.border }]}>
               Önceki
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.navBtn, styles.navBtnPrimary]} onPress={goNext}>
+          <TouchableOpacity style={[styles.navBtn, styles.navBtnPrimary, { backgroundColor: colors.primary }]} onPress={goNext}>
             {isLast ? (
               <>
                 <CheckCircle size={20} color="#fff" />
@@ -235,7 +238,7 @@ export default function GuideScreen() {
         {/* Tüm Adımları Atla */}
         {!isLast && (
           <TouchableOpacity style={styles.skipBtn} onPress={() => router.back()}>
-            <Text style={styles.skipBtnText}>Rehberi Kapat</Text>
+            <Text style={[styles.skipBtnText, { color: colors.muted }]}>Rehberi Kapat</Text>
           </TouchableOpacity>
         )}
       </ScrollView>
@@ -453,7 +456,6 @@ const PHONE_H = PHONE_W * 0.62;
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   topBar: {
     flexDirection: 'row',
@@ -461,14 +463,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 14,
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
   },
   topBarTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1e293b',
   },
   closeBtn: {
     padding: 4,
@@ -483,7 +482,6 @@ const styles = StyleSheet.create({
   // ─ Kart ─
   card: {
     width: '100%',
-    backgroundColor: '#fff',
     borderRadius: 24,
     overflow: 'hidden',
     ...Platform.select({
@@ -497,7 +495,6 @@ const styles = StyleSheet.create({
   },
   stepLabel: {
     fontSize: 12,
-    color: '#94a3b8',
     fontWeight: '600',
     letterSpacing: 1,
     textTransform: 'uppercase',
@@ -506,13 +503,11 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#0f172a',
     marginBottom: 10,
     lineHeight: 26,
   },
   stepDescription: {
     fontSize: 15,
-    color: '#475569',
     lineHeight: 23,
   },
 
@@ -527,16 +522,13 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#cbd5e1',
   },
   dotActive: {
     width: 24,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#059669',
   },
   dotPast: {
-    backgroundColor: '#6ee7b7',
   },
 
   // ─ Nav Butonlar ─
@@ -556,16 +548,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   navBtnPrimary: {
-    backgroundColor: '#059669',
   },
   navBtnSecondary: {
-    backgroundColor: '#fff',
     borderWidth: 1.5,
-    borderColor: '#059669',
   },
   navBtnDisabled: {
-    borderColor: '#e2e8f0',
-    backgroundColor: '#f8fafc',
   },
   navBtnText: {
     fontSize: 15,
@@ -583,7 +570,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   skipBtnText: {
-    color: '#94a3b8',
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',

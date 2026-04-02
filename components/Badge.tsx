@@ -1,35 +1,65 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from './ThemeProvider';
+import { badgeSizes, getBadgeVariantColors, type BadgeVariant, type BadgeSize } from '../constants/theme/badges';
 
 type Props = {
-  variant?: 'default' | 'primary' | 'light' | 'danger';
+  /** default | primary | primaryLight | danger | warning | success | info | muted | outline */
+  variant?: BadgeVariant;
+  /** xs | sm | md | lg */
+  size?: BadgeSize;
   children: React.ReactNode;
+  /** Sola ikon eklemek için */
+  icon?: React.ReactNode;
   style?: any;
 };
 
-export default function Badge({ variant = 'default', children, style }: Props) {
-  const { theme } = useTheme();
-  const variants: Record<string, { backgroundColor: string; color: string }> = {
-    default: { backgroundColor: theme.colors.surface, color: theme.colors.muted },
-    primary: { backgroundColor: theme.colors.primary, color: '#fff' },
-    light: { backgroundColor: '#F1F5F9', color: theme.colors.text },
-    danger: { backgroundColor: theme.colors.danger, color: '#fff' },
-  };
-  const vs = variants[variant] || variants.default;
+/**
+ * Eski variant isimleri → yeni isimlere dönüştürme (geriye dönük uyumluluk)
+ */
+const legacyVariantMap: Record<string, BadgeVariant> = {
+  light: 'primaryLight',
+};
+
+export default function Badge({ variant = 'default', size = 'md', children, icon, style }: Props) {
+  const { colors } = useTheme();
+  const resolvedVariant = legacyVariantMap[variant] ?? variant;
+  const vs = getBadgeVariantColors(resolvedVariant, colors);
+  const sizeConfig = badgeSizes[size] ?? badgeSizes.md;
 
   return (
-    <View style={[styles.badge, { backgroundColor: vs.backgroundColor }, style]}>
-      <Text style={{ color: vs.color, fontSize: 12 }}>{children}</Text>
+    <View
+      style={[
+        styles.badge,
+        {
+          backgroundColor: vs.backgroundColor,
+          paddingHorizontal: sizeConfig.paddingHorizontal,
+          paddingVertical: sizeConfig.paddingVertical,
+          borderRadius: sizeConfig.borderRadius,
+          borderWidth: vs.borderColor ? 1 : 0,
+          borderColor: vs.borderColor || 'transparent',
+        },
+        style,
+      ]}
+    >
+      {icon && <View style={{ marginRight: 4 }}>{icon}</View>}
+      <Text
+        style={{
+          color: vs.textColor,
+          fontSize: sizeConfig.fontSize,
+          fontWeight: sizeConfig.fontWeight,
+        }}
+      >
+        {children}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 12,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

@@ -13,8 +13,12 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { getServerOffset } from '../../lib/time';
 import { API_URL } from '../../lib/config';
+import { useTheme } from '../../components/ThemeProvider';
+import { createThemedStyles } from '../../constants/theme/sharedStyles';
 
 export default function ResetPasswordScreen() {
+  const { colors } = useTheme();
+  const themed = createThemedStyles(colors);
   const router = useRouter();
   const params = useLocalSearchParams();
   const [token, setToken] = useState(params.token || '');
@@ -82,23 +86,23 @@ export default function ResetPasswordScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Yeni Şifre Belirle</Text>
+    <View style={[styles.container, { backgroundColor: colors.surface }]}>
+      <Text style={[styles.title, { color: colors.muted }]}>Yeni Şifre Belirle</Text>
       <TextInput
-        style={styles.input}
+        style={[themed.input, { marginBottom: 16 }]}
         placeholder="Yeni Şifre"
         secureTextEntry
         value={password}
         onChangeText={setPassword}
-        placeholderTextColor="#64748b"
+        placeholderTextColor={colors.muted}
       />
       <TextInput
-        style={styles.input}
+        style={[themed.input, { marginBottom: 16 }]}
         placeholder="Yeni Şifre (Tekrar)"
         secureTextEntry
         value={password2}
         onChangeText={setPassword2}
-        placeholderTextColor="#64748b"
+        placeholderTextColor={colors.muted}
       />
       <Button
         title={loading ? 'Kaydediliyor...' : 'Şifreyi Sıfırla'}
@@ -110,7 +114,6 @@ export default function ResetPasswordScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 24, textAlign: 'center', color: '#64748b' },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 16 },
+  container: { flex: 1, justifyContent: 'center', padding: 24 },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 24, textAlign: 'center' },
 });

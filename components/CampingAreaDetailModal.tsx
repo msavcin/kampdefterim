@@ -5,6 +5,7 @@ import Svg, { Path } from 'react-native-svg';
 import { getSVGIcon } from '@/app/icons/svgIcons';
 import { SvgXml } from 'react-native-svg';
 import { Dimensions } from 'react-native';
+import { useTheme } from './ThemeProvider';
 // Arkadaş tipini tanımla
 // API /friends?user_id=X endpoint'i { id, name, email, avatar_url } formatında döner
 // (types/friend.ts ile uyumlu). user_id de olabilir — her iki alanı destekliyoruz.
@@ -19,15 +20,16 @@ type Friend = {
   email?: string;
 };
 // Basit avatar bileşeni
-const FriendAvatar = ({ avatar, name }: { avatar?: string; name: string }) => (
-  avatar ? (
-    <Image source={{ uri: avatar }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#e5e7eb' }} />
+function FriendAvatar({ avatar, name }: { avatar?: string; name: string }) {
+  const { colors } = useTheme();
+  return avatar ? (
+    <Image source={{ uri: avatar }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: colors.border }} />
   ) : (
-    <View style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ color: '#6b7280', fontWeight: 'bold', fontSize: 18 }}>{name?.[0]?.toUpperCase() || '?'}</Text>
+    <View style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: colors.border, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: colors.muted, fontWeight: 'bold', fontSize: 18 }}>{name?.[0]?.toUpperCase() || '?'}</Text>
     </View>
-  )
-);
+  );
+}
 // API'ya gönderim için images alanını stringleştiren yardımcı fonksiyon
 export function prepareCampingAreaPayload(area: any) {
   const payload = { ...area };
@@ -49,6 +51,7 @@ export function prepareCampingAreaPayload(area: any) {
 
 // Local cache ile görsel gösteren yardımcı bileşen
 const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: string, source_id?: any, onPress?: () => void, refreshKey?: number }) => {
+  const { colors } = useTheme();
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -119,14 +122,14 @@ const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: s
 
   if (loading) {
     return (
-      <View style={[styles.galleryImageWrapper, { width: 260, height: 180, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb', borderRadius: 12 }]}> 
-        <ActivityIndicator size="large" color="#059669" />
+      <View style={[styles.galleryImageWrapper, { width: 260, height: 180, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.border, borderRadius: 12 }]}> 
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
   if (error || !uri) {
     return (
-      <View style={[styles.galleryImageWrapper, { width: 260, height: 180, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb', borderRadius: 12 }]}>
+      <View style={[styles.galleryImageWrapper, { width: 260, height: 180, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.border, borderRadius: 12 }]}>
         <Image source={require('../assets/images/image-placeholder.png')} style={{ width: 180, height: 140, resizeMode: 'contain' }} />
       </View>
     );
@@ -135,11 +138,11 @@ const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: s
     <TouchableOpacity style={styles.galleryImageWrapper} onPress={onPress} activeOpacity={0.9}>
       <Image
         source={{ uri }}
-        style={styles.galleryImage}
+        style={[styles.galleryImage, { backgroundColor: colors.border }]}
         onError={() => { setError(true); }}
       />
       {(source_id === '1' || img.includes('googleusercontent')) && (
-        <View style={styles.googleBadge}>
+        <View style={[styles.googleBadge, { backgroundColor: colors.surface, borderColor: '#4285F4' }]}>
   <Svg width={24} height={24} viewBox="0 0 24 24">
     <Path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
     <Path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
@@ -168,6 +171,7 @@ import { deleteCampingAreaSmart } from '@/lib/syncManager';
 
 // Lightbox için büyük fotoğraf bileşeni
 const LightboxImage = ({ img, refreshKey }: { img: string, refreshKey?: number }) => {
+  const { colors } = useTheme();
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -228,7 +232,7 @@ const LightboxImage = ({ img, refreshKey }: { img: string, refreshKey?: number }
   if (error || !uri) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ fontSize: 48, color: '#9ca3af' }}>🏕️</Text>
+        <Text style={{ fontSize: 48, color: colors.muted }}>🏕️</Text>
         <Text style={{ color: '#fff', marginTop: 16 }}>Fotoğraf yüklenemedi</Text>
       </View>
     );
@@ -485,6 +489,7 @@ export default function CampingAreaDetailModal({
   isSuperAdmin = false,
   currentUserId
 }: CampingAreaDetailModalProps & { isSuperAdmin?: boolean; currentUserId?: string | number }) {
+  const { colors } = useTheme();
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
 
   // Modal açıldığında görselleri yeniden kontrol et
@@ -941,33 +946,33 @@ export default function CampingAreaDetailModal({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <X size={24} color="#6b7280" />
+            <X size={24} color={colors.muted} />
           </TouchableOpacity>
           <View style={styles.headerActions}>
             <TouchableOpacity 
-              style={styles.actionButton}
+              style={[styles.actionButton, { backgroundColor: colors.surfaceVariant }]}
               onPress={() => setShowErrorReport(true)}
               accessibilityLabel="Hata bildir"
             >
-              <AlertTriangle size={20} color="#f59e0b" />
+              <AlertTriangle size={20} color={colors.warning} />
             </TouchableOpacity>
             <TouchableOpacity 
-              style={[styles.actionButton, isFavorite && styles.favoriteActive]}
+              style={[styles.actionButton, { backgroundColor: colors.surfaceVariant }, isFavorite && { backgroundColor: colors.danger }]}
               onPress={handleFavoriteToggle}
               accessibilityLabel="Favorilere ekle/kaldır"
             >
               <Heart 
                 size={20} 
-                color={isFavorite ? "#ffffff" : "#ef4444"} 
+                color={isFavorite ? "#ffffff" : colors.danger} 
                 fill={isFavorite ? "#ffffff" : "none"}
               />
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.actionButton}
+              style={[styles.actionButton, { backgroundColor: colors.surfaceVariant }]}
               onPress={handleOpenShareModal}
               accessibilityLabel="Instagram'da paylaş"
             >
@@ -975,11 +980,11 @@ export default function CampingAreaDetailModal({
             </TouchableOpacity>
             {canDelete && (
               <TouchableOpacity 
-                style={styles.actionButton} 
+                style={[styles.actionButton, { backgroundColor: colors.surfaceVariant }]} 
                 onPress={handleDelete}
                 accessibilityLabel="Kamp alanını sil"
               >
-                <Trash2 size={20} color="#ef4444" />
+                <Trash2 size={20} color={colors.danger} />
               </TouchableOpacity>
             )}
           </View>
@@ -1020,19 +1025,19 @@ export default function CampingAreaDetailModal({
           )}
 
           {/* Main Info */}
-          <View style={styles.mainInfo}>
+          <View style={[styles.mainInfo, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
             <View style={styles.titleRow}>
               <View style={styles.titleContainer}>
-                <Text style={styles.title}>{campingArea.name ? String(campingArea.name) : ''}</Text>
+                <Text style={[styles.title, { color: colors.text }]}>{campingArea.name ? String(campingArea.name) : ''}</Text>
                 <View style={[styles.typeChip, { backgroundColor: getCampingAreaBgColor(campingArea) }]}> 
-                  <Text style={styles.typeText}>{
+                  <Text style={[styles.typeText, { color: 'white' }]}>{
                     (campingArea.tags && campingArea.tags.type)
                       ? String(getCampingTypeLabel(campingArea.tags.type))
                       : (campingArea.type ? String(getCampingTypeLabel(campingArea.type)) : '')
                   }</Text>
                 </View>
-                <View style={styles.userSubmittedChip}>
-                  <Text style={styles.userSubmittedText}>
+                <View style={[styles.userSubmittedChip, { backgroundColor: colors.accent + '15' }]}>
+                  <Text style={[styles.userSubmittedText, { color: colors.accent }]}>
                     @{ownerUsername || 'KampDefterim'} ekledi
                   </Text>
                 </View>
@@ -1041,14 +1046,14 @@ export default function CampingAreaDetailModal({
 
             <View style={styles.locationRow}>
               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                <MapPin size={16} color="#6b7280" />
-                <Text style={styles.locationText}>
+                <MapPin size={16} color={colors.muted} />
+                <Text style={[styles.locationText, { color: colors.muted }]}>
                   {typeof (campingArea as any).latitude === 'number' && typeof (campingArea as any).longitude === 'number'
                     ? `${(campingArea as any).latitude.toFixed(6)}, ${(campingArea as any).longitude.toFixed(6)}`
                     : ''}
                 </Text>
                 {typeof campingArea.distance_km === 'number' ? (
-                  <Text style={styles.distanceText}>• ~ {campingArea.distance_km.toFixed(1)} km</Text>
+                  <Text style={[styles.distanceText, { color: colors.muted }]}>• ~ {campingArea.distance_km.toFixed(1)} km</Text>
                 ) : null}
                 <View style={{ flex: 1 }} />
                 {/* Sağda navigasyon ikonu */}
@@ -1059,7 +1064,7 @@ export default function CampingAreaDetailModal({
                     activeOpacity={0.7}
                   >
                     {(() => {
-                      const icon = getSVGIcon ? getSVGIcon('navigation', { width: 18, height: 18 }) : null;
+                      const icon = getSVGIcon ? getSVGIcon('navigation', { width: 18, height: 18, fill: colors.text, stroke: 'none' }) : null;
                       if (typeof icon === 'string' && icon.startsWith('<svg')) {
                         return <SvgXml xml={icon} width={22} height={22} />;
                       }
@@ -1069,11 +1074,11 @@ export default function CampingAreaDetailModal({
                       if (icon) {
                         return <View style={{ width: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}>{icon}</View>;
                       }
-                      return <Navigation size={20} color="#059669" />;
+                      return <Navigation size={20} color={colors.text} />;
                     })()}
                   </TouchableOpacity>
                   {showMapMenu && (
-                    <View style={{ position: 'absolute', top: 38, right: 0, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, paddingVertical: 6, minWidth: 140, zIndex: 999, elevation: 10 }}>
+                    <View style={{ position: 'absolute', top: 38, right: 0, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 8, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, paddingVertical: 6, minWidth: 140, zIndex: 999, elevation: 10 }}>
                       <TouchableOpacity
                         style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 16 }}
                         onPress={() => {
@@ -1088,7 +1093,7 @@ export default function CampingAreaDetailModal({
                           <Path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
                           <Path d="M1 1h22v22H1z" fill="none" />
                         </Svg>
-                        <Text style={{ fontSize: 13, color: '#222', marginLeft: 6 }}>Google Haritalar</Text>
+                        <Text style={{ fontSize: 13, color: colors.text, marginLeft: 6 }}>Google Haritalar</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 16 }}
@@ -1101,7 +1106,7 @@ export default function CampingAreaDetailModal({
                           <Path fill="#F8604A" d="M26 13c0-7.18-5.82-13-13-13S0 5.82 0 13s5.82 13 13 13 13-5.82 13-13Z" />
                           <Path fill="#fff" d="M13.353 14.343c.76 1.664 1.013 2.243 1.013 4.241v2.65h-2.714v-4.467L6.534 5.634h2.83l3.989 8.71Zm3.346-8.709-3.32 7.542h2.759l3.328-7.542h-2.767Z" />
                         </Svg>
-                        <Text style={{ fontSize: 13, color: '#222', marginLeft: 6 }}>Yandex Haritalar</Text>
+                        <Text style={{ fontSize: 13, color: colors.text, marginLeft: 6 }}>Yandex Haritalar</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -1112,7 +1117,7 @@ export default function CampingAreaDetailModal({
             {(typeof campingArea.rating === 'number' && campingArea.rating > 0) ? (
               <View style={styles.ratingRow}>
                 <Star size={16} color="#fbbf24" fill="#fbbf24" />
-                <Text style={styles.ratingText}>
+                <Text style={[styles.ratingText, { color: colors.textSecondary }]}>
                   {campingArea.rating.toFixed(1)} ({campingArea.review_count ? String(campingArea.review_count) : '0'} değerlendirme)
                 </Text>
               </View>
@@ -1121,21 +1126,21 @@ export default function CampingAreaDetailModal({
 
           {/* Description */}
           {campingArea.description && typeof campingArea.description === 'string' && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Açıklama</Text>
-              <Text style={styles.description}>{campingArea.description ?? ''}</Text>
+            <View style={[styles.section, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Açıklama</Text>
+              <Text style={[styles.description, { color: colors.textSecondary }]}>{campingArea.description ?? ''}</Text>
             </View>
           )}
 
           {/* Amenities */}
           {Array.isArray(campingArea.amenities) && campingArea.amenities.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Olanaklar</Text>
+            <View style={[styles.section, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Olanaklar</Text>
               <View style={styles.amenitiesGrid}>
                 {campingArea.amenities.map((amenity, index) => (
-                  <View key={index} style={styles.amenityChip}>
+                  <View key={index} style={[styles.amenityChip, { backgroundColor: colors.surfaceVariant }]}>
                     <Text style={styles.amenityIcon}>{getAmenityIcon(String(amenity))}</Text>
-                    <Text style={styles.amenityText}>{amenity ? String(amenity) : ''}</Text>
+                    <Text style={[styles.amenityText, { color: colors.textSecondary }]}>{amenity ? String(amenity) : ''}</Text>
                   </View>
                 ))}
               </View>
@@ -1144,29 +1149,29 @@ export default function CampingAreaDetailModal({
 
           {/* Contact Info */}
           {(campingArea.phone || campingArea.website || campingArea.contact_email) && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>İletişim Bilgileri</Text>
+            <View style={[styles.section, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>İletişim Bilgileri</Text>
               
               {campingArea.phone && typeof campingArea.phone === 'string' && (
-                <TouchableOpacity style={styles.contactItem} onPress={callPhone}>
-                  <Phone size={20} color="#059669" />
-                  <Text style={styles.contactText}>{campingArea.phone ?? ''}</Text>
-                  <Navigation size={16} color="#6b7280" />
+                <TouchableOpacity style={[styles.contactItem, { borderBottomColor: colors.surfaceVariant }]} onPress={callPhone}>
+                  <Phone size={20} color={colors.primary} />
+                  <Text style={[styles.contactText, { color: colors.primary }]}>{campingArea.phone ?? ''}</Text>
+                  <Navigation size={16} color={colors.muted} />
                 </TouchableOpacity>
               )}
               
               {campingArea.website && typeof campingArea.website === 'string' && (
-                <TouchableOpacity style={styles.contactItem} onPress={openWebsite}>
-                  <Globe size={20} color="#059669" />
-                  <Text style={styles.contactText}>{campingArea.website ?? ''}</Text>
-                  <Navigation size={16} color="#6b7280" />
+                <TouchableOpacity style={[styles.contactItem, { borderBottomColor: colors.surfaceVariant }]} onPress={openWebsite}>
+                  <Globe size={20} color={colors.primary} />
+                  <Text style={[styles.contactText, { color: colors.primary }]}>{campingArea.website ?? ''}</Text>
+                  <Navigation size={16} color={colors.muted} />
                 </TouchableOpacity>
               )}
               
               {campingArea.contact_email && typeof campingArea.contact_email === 'string' && (
-                <TouchableOpacity style={styles.contactItem} onPress={sendEmail}>
-                  <Text style={styles.contactLabel}>📧</Text>
-                  <Text style={styles.contactText}>{campingArea.contact_email ?? ''}</Text>
+                <TouchableOpacity style={[styles.contactItem, { borderBottomColor: colors.surfaceVariant }]} onPress={sendEmail}>
+                  <Text style={[styles.contactLabel, { color: colors.textSecondary }]}>📧</Text>
+                  <Text style={[styles.contactText, { color: colors.primary }]}>{campingArea.contact_email ?? ''}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -1174,16 +1179,16 @@ export default function CampingAreaDetailModal({
 
           {/* Details */}
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Detaylar</Text>
+          <View style={[styles.section, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Detaylar</Text>
 
             {/* Görünürlük Bilgisi */}
             {campingArea.visibility && (
-              <View style={styles.detailItem}>
+              <View style={[styles.detailItem, { borderBottomColor: colors.surfaceVariant }]}>
                 <Globe size={20} color={getCampingAreaBgColor(campingArea)} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Görünürlük</Text>
-                  <Text style={styles.detailValue}>
+                  <Text style={[styles.detailLabel, { color: colors.muted }]}>Görünürlük</Text>
+                  <Text style={[styles.detailValue, { color: colors.textSecondary }]}>
                     {campingArea.visibility === 'public' && 'Herkese Açık'}
                     {campingArea.visibility === 'private' && 'Sadece Size Görünüyor'}
                     {campingArea.visibility === 'community' && 'Topluluğa Açık'}
@@ -1194,15 +1199,15 @@ export default function CampingAreaDetailModal({
             )}
             {/* Paylaşılan arkadaşlar — sadece visibility='friends' ve owner için */}
             {campingArea.visibility === 'friends' && currentUserId && String(campingArea.owner_id) === String(currentUserId) && (
-              <View style={[styles.detailItem, { alignItems: 'flex-start' }]}>
-                <Users size={20} color="#059669" style={{ marginTop: 2 }} />
+              <View style={[styles.detailItem, { alignItems: 'flex-start', borderBottomColor: colors.surfaceVariant }]}>
+                <Users size={20} color={colors.primary} style={{ marginTop: 2 }} />
                 <View style={[styles.detailContent, { flexShrink: 1 }]}>
-                  <Text style={styles.detailLabel}>Paylaşılan Kişiler</Text>
-                  {loadingFriends && <ActivityIndicator size="small" color="#059669" style={{ marginTop: 4 }} />}
+                  <Text style={[styles.detailLabel, { color: colors.muted }]}>Paylaşılan Kişiler</Text>
+                  {loadingFriends && <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 4 }} />}
                   {friendsError ? (
-                    <Text style={{ color: '#dc2626', fontSize: 13, marginTop: 4 }}>{friendsError}</Text>
+                    <Text style={{ color: colors.danger, fontSize: 13, marginTop: 4 }}>{friendsError}</Text>
                   ) : !loadingFriends && friends.length === 0 ? (
-                    <Text style={{ color: '#6b7280', fontSize: 13, marginTop: 4 }}>Hiç arkadaşla paylaşılmamış.</Text>
+                    <Text style={{ color: colors.muted, fontSize: 13, marginTop: 4 }}>Hiç arkadaşla paylaşılmamış.</Text>
                   ) : (
                     friends.map(f => (
                       <View key={String(f.user_id ?? (f as any).id)} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
@@ -1211,13 +1216,13 @@ export default function CampingAreaDetailModal({
                           name={(f as any).name || f.first_name || f.email || ''}
                         />
                         <View>
-                          <Text style={{ fontWeight: '600', color: '#374151', fontSize: 14 }}>
+                          <Text style={{ fontWeight: '600', color: colors.textSecondary, fontSize: 14 }}>
                             {(f as any).name || f.first_name || ''}{f.last_name ? ' ' + f.last_name : ''}
                           </Text>
-                          {f.email ? <Text style={{ color: '#6b7280', fontSize: 12 }}>{f.email}</Text> : null}
+                          {f.email ? <Text style={{ color: colors.muted, fontSize: 12 }}>{f.email}</Text> : null}
                         </View>
-                        <View style={{ marginLeft: 8, backgroundColor: '#dcfce7', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#22c55e' }}>
-                          <Text style={{ color: '#22c55e', fontWeight: 'bold', fontSize: 12 }}>✓ Paylaşıldı</Text>
+                        <View style={{ marginLeft: 8, backgroundColor: colors.success + '20', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: colors.success }}>
+                          <Text style={{ color: colors.success, fontWeight: 'bold', fontSize: 12 }}>✓ Paylaşıldı</Text>
                         </View>
                       </View>
                     ))
@@ -1227,14 +1232,14 @@ export default function CampingAreaDetailModal({
             )}
 
             {Array.isArray(openingHoursList) && openingHoursList.length > 0 && openingHoursList.some(row => (row.day && row.day.trim()) || (row.hours && row.hours.trim())) && (
-              <View style={styles.detailItem}>
-                <Clock size={20} color="#6b7280" />
+              <View style={[styles.detailItem, { borderBottomColor: colors.surfaceVariant }]}>
+                <Clock size={20} color={colors.muted} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Açılış Saatleri</Text>
+                  <Text style={[styles.detailLabel, { color: colors.muted }]}>Açılış Saatleri</Text>
                   {openingHoursList
                     .filter(row => (row.day && row.day.trim()) || (row.hours && row.hours.trim()))
                     .map((row, idx) => (
-                      <Text key={idx} style={styles.detailValue}>
+                      <Text key={idx} style={[styles.detailValue, { color: colors.textSecondary }]}>
                         {row.day ? row.day + ':' : ''} {row.hours}
                       </Text>
                     ))}
@@ -1246,21 +1251,21 @@ export default function CampingAreaDetailModal({
               const cap = Number(campingArea.capacity);
               return cap > 0;
             })() && (
-              <View style={styles.detailItem}>
-                <Users size={20} color="#6b7280" />
+              <View style={[styles.detailItem, { borderBottomColor: colors.surfaceVariant }]}>
+                <Users size={20} color={colors.muted} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Kapasite</Text>
-                  <Text style={styles.detailValue}>{Number(campingArea.capacity)} kişi</Text>
+                  <Text style={[styles.detailLabel, { color: colors.muted }]}>Kapasite</Text>
+                  <Text style={[styles.detailValue, { color: colors.textSecondary }]}>{Number(campingArea.capacity)} kişi</Text>
                 </View>
               </View>
             )}
 
             {campingArea.price_range && typeof campingArea.price_range === 'string' && (
-              <View style={styles.detailItem}>
-                <DollarSign size={20} color="#6b7280" />
+              <View style={[styles.detailItem, { borderBottomColor: colors.surfaceVariant }]}>
+                <DollarSign size={20} color={colors.muted} />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>Fiyat Aralığı</Text>
-                  <Text style={styles.detailValue}>{getPriceRangeLabel(campingArea.price_range)}</Text>
+                  <Text style={[styles.detailLabel, { color: colors.muted }]}>Fiyat Aralığı</Text>
+                  <Text style={[styles.detailValue, { color: colors.textSecondary }]}>{getPriceRangeLabel(campingArea.price_range)}</Text>
                 </View>
               </View>
             )}
@@ -1274,11 +1279,11 @@ export default function CampingAreaDetailModal({
                   : campingArea.fee;
               if (isPaid === undefined || isPaid === null) return null;
               return (
-                <View style={styles.detailItem}>
-                  <DollarSign size={20} color="#6b7280" />
+                <View style={[styles.detailItem, { borderBottomColor: colors.surfaceVariant }]}>
+                  <DollarSign size={20} color={colors.muted} />
                   <View style={styles.detailContent}>
-                    <Text style={styles.detailLabel}>Ücret Durumu</Text>
-                    <Text style={[styles.detailValue, isPaid ? styles.paidText : styles.freeText]}>
+                    <Text style={[styles.detailLabel, { color: colors.muted }]}>Ücret Durumu</Text>
+                    <Text style={[styles.detailValue, isPaid ? { color: colors.danger } : { color: colors.success }]}>
                       {isPaid ? 'Ücretli' : 'Ücretsiz'}
                     </Text>
                   </View>
@@ -1289,9 +1294,9 @@ export default function CampingAreaDetailModal({
 
           {/* Edit Button: Sadece superadmin veya owner görebilir */}
           {isUserSubmitted && (isSuperAdmin || (currentUserId && campingArea.owner_id && String(currentUserId) === String(campingArea.owner_id))) && (
-            <View style={styles.section}>
-              <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
-                <Text style={styles.editButtonText}>Bilgileri Düzenle</Text>
+            <View style={[styles.section, { backgroundColor: colors.surface }]}>
+              <TouchableOpacity style={[styles.editButton, { backgroundColor: colors.primary }]} onPress={handleEdit}>
+                <Text style={[styles.editButtonText, { color: 'white' }]}>Bilgileri Düzenle</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1300,9 +1305,9 @@ export default function CampingAreaDetailModal({
         {/* Hata Bildirim Modalı */}
         <Modal visible={showErrorReport} animationType="slide" transparent onRequestClose={() => setShowErrorReport(false)}>
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.18)', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 16, paddingTop: 24, paddingHorizontal: 18, minWidth: 280, maxWidth: '90%', elevation: 4, maxHeight: '85%', width: '90%' }}>
-              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 18, color: '#f59e0b', textAlign: 'center' }}>Hata Bildirimi</Text>
-              <Text style={{ fontSize: 15, marginBottom: 10, color: '#374151' }}>Lütfen hatalı veya eksik bulduğunuz alanları işaretleyin:</Text>
+            <View style={{ backgroundColor: colors.surface, borderRadius: 16, paddingTop: 24, paddingHorizontal: 18, minWidth: 280, maxWidth: '90%', elevation: 4, maxHeight: '85%', width: '90%' }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 18, color: colors.warning, textAlign: 'center' }}>Hata Bildirimi</Text>
+              <Text style={{ fontSize: 15, marginBottom: 10, color: colors.textSecondary }}>Lütfen hatalı veya eksik bulduğunuz alanları işaretleyin:</Text>
               <ScrollView style={{ maxHeight: 340 }} contentContainerStyle={{ paddingBottom: 16 }}>
                 {errorFields.map(field => (
                   <View key={field}>
@@ -1310,13 +1315,13 @@ export default function CampingAreaDetailModal({
                       style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}
                       onPress={() => setErrorChecks(prev => ({ ...prev, [field]: !prev[field] }))}
                     >
-                      <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: errorChecks[field] ? '#f59e0b' : '#d1d5db', backgroundColor: errorChecks[field] ? '#f59e0b' : '#fff', marginRight: 10, alignItems: 'center', justifyContent: 'center' }}>
+                      <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: errorChecks[field] ? colors.warning : colors.border, backgroundColor: errorChecks[field] ? colors.warning : colors.surface, marginRight: 10, alignItems: 'center', justifyContent: 'center' }}>
                         {errorChecks[field] && <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>✓</Text>}
                       </View>
-                      <Text style={{ fontSize: 15, color: '#374151' }}>{field}</Text>
+                      <Text style={{ fontSize: 15, color: colors.textSecondary }}>{field}</Text>
                       {/* Alt kırılım ikonu: Kamp Türü ve Olanaklar için */}
                       {(field === 'Kamp Türü' || field === 'Olanaklar') && (
-                        <Text style={{ marginLeft: 6, fontSize: 16, color: errorChecks[field] ? '#f59e0b' : '#9ca3af' }}>
+                        <Text style={{ marginLeft: 6, fontSize: 16, color: errorChecks[field] ? colors.warning : colors.muted }}>
                           {errorChecks[field] ? '▼' : '▶'}
                         </Text>
                       )}
@@ -1333,16 +1338,16 @@ export default function CampingAreaDetailModal({
                               if (opt !== 'Diğer') setErrorTypeOther('');
                             }}
                           >
-                            <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: 2, borderColor: errorTypeValue === opt ? '#f59e0b' : '#d1d5db', backgroundColor: errorTypeValue === opt ? '#f59e0b' : '#fff', marginRight: 8, alignItems: 'center', justifyContent: 'center' }}>
+                            <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: 2, borderColor: errorTypeValue === opt ? colors.warning : colors.border, backgroundColor: errorTypeValue === opt ? colors.warning : colors.surface, marginRight: 8, alignItems: 'center', justifyContent: 'center' }}>
                               {errorTypeValue === opt && <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>✓</Text>}
                             </View>
-                            <Text style={{ fontSize: 14, color: '#374151' }}>{opt}</Text>
+                            <Text style={{ fontSize: 14, color: colors.textSecondary }}>{opt}</Text>
                           </TouchableOpacity>
                         ))}
                         {/* Diğer seçiliyse metin kutusu */}
                         {errorTypeValue === 'Diğer' && (
                           <TextInput
-                            style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 8, fontSize: 14, marginTop: 4, backgroundColor: '#f9fafb' }}
+                            style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8, fontSize: 14, marginTop: 4, backgroundColor: colors.surfaceVariant }}
                             placeholder="Kamp türünü yazınız..."
                             value={errorTypeOther}
                             onChangeText={setErrorTypeOther}
@@ -1366,16 +1371,16 @@ export default function CampingAreaDetailModal({
                               }
                             }}
                           >
-                            <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: 2, borderColor: errorAmenities.includes(opt) ? '#f59e0b' : '#d1d5db', backgroundColor: errorAmenities.includes(opt) ? '#f59e0b' : '#fff', marginRight: 8, alignItems: 'center', justifyContent: 'center' }}>
+                            <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: 2, borderColor: errorAmenities.includes(opt) ? colors.warning : colors.border, backgroundColor: errorAmenities.includes(opt) ? colors.warning : colors.surface, marginRight: 8, alignItems: 'center', justifyContent: 'center' }}>
                               {errorAmenities.includes(opt) && <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>✓</Text>}
                             </View>
-                            <Text style={{ fontSize: 14, color: '#374151' }}>{opt}</Text>
+                            <Text style={{ fontSize: 14, color: colors.textSecondary }}>{opt}</Text>
                           </TouchableOpacity>
                         ))}
                         {/* Diğer seçiliyse metin kutusu */}
                         {errorAmenities.includes('Diğer') && (
                           <TextInput
-                            style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 8, fontSize: 14, marginTop: 4, backgroundColor: '#f9fafb' }}
+                            style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8, fontSize: 14, marginTop: 4, backgroundColor: colors.surfaceVariant }}
                             placeholder="Olanak ekleyin..."
                             value={errorAmenitiesOther}
                             onChangeText={setErrorAmenitiesOther}
@@ -1386,7 +1391,7 @@ export default function CampingAreaDetailModal({
                   </View>
                 ))}
                 <TextInput
-                  style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 10, fontSize: 15, marginTop: 10, marginBottom: 16, backgroundColor: '#f9fafb' }}
+                  style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, fontSize: 15, marginTop: 10, marginBottom: 16, backgroundColor: colors.surfaceVariant }}
                   placeholder="Ek açıklama veya öneriniz..."
                   value={errorDesc}
                   onChangeText={setErrorDesc}
@@ -1395,10 +1400,10 @@ export default function CampingAreaDetailModal({
                 />
               </ScrollView>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingBottom: 8 }}>
-                <TouchableOpacity onPress={() => setShowErrorReport(false)} style={{ backgroundColor: '#e5e7eb', borderRadius: 8, paddingVertical: 12, flex: 1, alignItems: 'center' }}>
-                  <Text style={{ color: '#374151', fontWeight: 'bold', fontSize: 15 }}>Vazgeç</Text>
+                <TouchableOpacity onPress={() => setShowErrorReport(false)} style={{ backgroundColor: colors.border, borderRadius: 8, paddingVertical: 12, flex: 1, alignItems: 'center' }}>
+                  <Text style={{ color: colors.textSecondary, fontWeight: 'bold', fontSize: 15 }}>Vazgeç</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleSendErrorReport} style={{ backgroundColor: '#f59e0b', borderRadius: 8, paddingVertical: 12, flex: 1, alignItems: 'center' }}>
+                <TouchableOpacity onPress={handleSendErrorReport} style={{ backgroundColor: colors.warning, borderRadius: 8, paddingVertical: 12, flex: 1, alignItems: 'center' }}>
                   <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Gönder</Text>
                 </TouchableOpacity>
               </View>
@@ -1419,7 +1424,7 @@ export default function CampingAreaDetailModal({
             onPress={() => setShowInstagramModal(false)}
           >
             <TouchableOpacity activeOpacity={1} onPress={() => {}}>
-              <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' }}>
+              <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' }}>
                 {/* Instagram gradient header */}
                 <LinearGradient
                   colors={['#405de6', '#833ab4', '#c13584', '#e1306c', '#fd1d1d', '#fcaf45']}
@@ -1438,7 +1443,7 @@ export default function CampingAreaDetailModal({
 
                 <View style={{ padding: 20 }}>
                   {/* Önizleme kartı */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, backgroundColor: '#f9fafb', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#e5e7eb' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, backgroundColor: colors.surfaceVariant, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: colors.border }}>
                     {(() => {
                       const imgs = Array.isArray(campingArea.images)
                         ? (campingArea.images as string[]).filter((img): img is string => typeof img === 'string' && img.trim().length > 0)
@@ -1451,13 +1456,13 @@ export default function CampingAreaDetailModal({
                           resizeMode="cover"
                         />
                       ) : (
-                        <View style={{ width: 72, height: 72, borderRadius: 8, backgroundColor: '#d1fae5', marginRight: 12, justifyContent: 'center', alignItems: 'center' }}>
+                        <View style={{ width: 72, height: 72, borderRadius: 8, backgroundColor: colors.primaryLight, marginRight: 12, justifyContent: 'center', alignItems: 'center' }}>
                           <Text style={{ fontSize: 32 }}>🏕️</Text>
                         </View>
                       );
                     })()}
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: '700', fontSize: 15, color: '#1f2937', marginBottom: 4 }} numberOfLines={2}>
+                      <Text style={{ fontWeight: '700', fontSize: 15, color: colors.text, marginBottom: 4 }} numberOfLines={2}>
                         {campingArea.name}
                       </Text>
                       <Text style={{ color: '#833ab4', fontWeight: '600', fontSize: 13 }}>@kamp.defterim</Text>
@@ -1465,7 +1470,7 @@ export default function CampingAreaDetailModal({
                   </View>
 
                   {/* Gönderi metni */}
-                  <Text style={{ color: '#374151', fontWeight: '600', fontSize: 13, marginBottom: 6 }}>
+                  <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 13, marginBottom: 6 }}>
                     {isStoryMode ? 'Story Metni (120 karakter):' : 'Gönderi Metni:'}
                   </Text>
                   <TextInput
@@ -1474,12 +1479,12 @@ export default function CampingAreaDetailModal({
                     multiline
                     style={{
                       borderWidth: 1,
-                      borderColor: '#e5e7eb',
+                      borderColor: colors.border,
                       borderRadius: 10,
                       padding: 10,
                       fontSize: 13,
-                      color: '#374151',
-                      backgroundColor: '#f9fafb',
+                      color: colors.textSecondary,
+                      backgroundColor: colors.surfaceVariant,
                       minHeight: 110,
                       maxHeight: 160,
                       textAlignVertical: 'top',
@@ -1503,8 +1508,8 @@ export default function CampingAreaDetailModal({
                         height: 20,
                         borderRadius: 5,
                         borderWidth: 2,
-                        borderColor: isStoryMode ? '#833ab4' : '#d1d5db',
-                        backgroundColor: isStoryMode ? '#833ab4' : '#fff',
+                        borderColor: isStoryMode ? '#833ab4' : colors.border,
+                        backgroundColor: isStoryMode ? '#833ab4' : colors.surface,
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
@@ -1513,7 +1518,7 @@ export default function CampingAreaDetailModal({
                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, lineHeight: 16 }}>✓</Text>
                       )}
                     </View>
-                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>
+                    <Text style={{ fontSize: 13, color: colors.textSecondary, flex: 1 }}>
                       Story için kısalt (max 120 karakter)
                     </Text>
                     {isStoryMode && (
@@ -1525,12 +1530,12 @@ export default function CampingAreaDetailModal({
                     )}
                   </TouchableOpacity>
                   {captionCopied ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, marginBottom: 14, backgroundColor: '#dcfce7', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, marginBottom: 14, backgroundColor: colors.success + '20', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
                       <Text style={{ fontSize: 14 }}>✅</Text>
-                      <Text style={{ color: '#15803d', fontWeight: '600', fontSize: 13 }}>Metin panoya kopyalandı! Instagram'da yapıştırın.</Text>
+                      <Text style={{ color: colors.success, fontWeight: '600', fontSize: 13 }}>Metin panoya kopyalandı! Instagram'da yapıştırın.</Text>
                     </View>
                   ) : (
-                    <Text style={{ color: '#9ca3af', fontSize: 11, marginTop: 6, marginBottom: 18 }}>
+                    <Text style={{ color: colors.muted, fontSize: 11, marginTop: 6, marginBottom: 18 }}>
                       💡 "Paylaş"a basıldığında metin otomatik panoya kopyalanır.
                     </Text>
                   )}
@@ -1622,60 +1627,58 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 8,
     marginBottom: 0,
-    backgroundColor: '#f59e0b',
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
   },
   addAtMapButtonText: {
-    color: 'white',
     fontWeight: '700',
     fontSize: 15,
   },
   // Styles aynen senin verdiğin şekilde kaldı
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  container: { flex: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1 },
   closeButton: { padding: 4 },
   headerActions: { flexDirection: 'row', gap: 12 },
-  actionButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f3f4f6', justifyContent: 'center', alignItems: 'center' },
-  favoriteActive: { backgroundColor: '#ef4444' },
+  actionButton: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  favoriteActive: { },
   content: { flex: 1 },
   heroImage: { width: '100%', height: 200, resizeMode: 'cover' },
   galleryContainer: { width: '100%', height: 200, marginBottom: 8 },
   galleryContent: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
   galleryImageWrapper: { position: 'relative', marginRight: 8 },
-  galleryImage: { width: 260, height: 180, borderRadius: 12, resizeMode: 'cover', backgroundColor: '#e5e7eb' },
-  googleBadge: { position: 'absolute', top: 8, right: 12, backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: '#4285F4', zIndex: 2 },
-  googleBadgeText: { color: '#4285F4', fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace' },
-  mainInfo: { backgroundColor: 'white', padding: 20, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  galleryImage: { width: 260, height: 180, borderRadius: 12, resizeMode: 'cover' },
+  googleBadge: { position: 'absolute', top: 8, right: 12, borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, zIndex: 2 },
+  googleBadgeText: { fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace' },
+  mainInfo: { padding: 20, borderBottomWidth: 1 },
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
   titleContainer: { flex: 1 },
-  title: { fontSize: 24, fontWeight: '700', color: '#1f2937', marginBottom: 8 },
+  title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
   typeChip: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginBottom: 4 },
-  typeText: { fontSize: 12, color: 'white', fontWeight: '600' },
-  userSubmittedChip: { alignSelf: 'flex-start', backgroundColor: '#f3e8ff', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  userSubmittedText: { fontSize: 12, color: '#8b5cf6', fontWeight: '600' },
+  typeText: { fontSize: 12, fontWeight: '600' },
+  userSubmittedChip: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  userSubmittedText: { fontSize: 12, fontWeight: '600' },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-  locationText: { fontSize: 14, color: '#6b7280', fontFamily: 'monospace' },
-  distanceText: { fontSize: 14, color: '#6b7280', fontWeight: '500' },
+  locationText: { fontSize: 14, fontFamily: 'monospace' },
+  distanceText: { fontSize: 14, fontWeight: '500' },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ratingText: { fontSize: 14, color: '#374151', fontWeight: '500' },
-  section: { backgroundColor: 'white', marginTop: 8, padding: 20 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1f2937', marginBottom: 16 },
-  description: { fontSize: 16, color: '#374151', lineHeight: 24 },
+  ratingText: { fontSize: 14, fontWeight: '500' },
+  section: { marginTop: 8, padding: 20 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 16 },
+  description: { fontSize: 16, lineHeight: 24 },
   amenitiesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  amenityChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f5f9', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, gap: 6 },
+  amenityChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, gap: 6 },
   amenityIcon: { fontSize: 16 },
-  amenityText: { fontSize: 14, color: '#475569', fontWeight: '500' },
-  contactItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', gap: 12 },
-  contactLabel: { fontSize: 16, color: '#374151', fontWeight: '500' },
-  contactText: { fontSize: 16, color: '#059669', flex: 1 },
-  detailItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', gap: 12 },
+  amenityText: { fontSize: 14, fontWeight: '500' },
+  contactItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, gap: 12 },
+  contactLabel: { fontSize: 16, fontWeight: '500' },
+  contactText: { fontSize: 16, flex: 1 },
+  detailItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, gap: 12 },
   detailContent: { flex: 1 },
-  detailLabel: { fontSize: 14, color: '#6b7280', marginBottom: 2 },
-  detailValue: { fontSize: 16, color: '#374151', fontWeight: '500' },
-  paidText: { color: '#dc2626' },
-  freeText: { color: '#059669' },
-  editButton: { backgroundColor: '#059669', paddingVertical: 16, borderRadius: 8, alignItems: 'center' },
-  editButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  detailLabel: { fontSize: 14, marginBottom: 2 },
+  detailValue: { fontSize: 16, fontWeight: '500' },
+  paidText: { },
+  freeText: { },
+  editButton: { paddingVertical: 16, borderRadius: 8, alignItems: 'center' },
+  editButtonText: { fontSize: 16, fontWeight: '600' },
 });

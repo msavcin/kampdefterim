@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Button, FlatList, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { listCommunities, joinCommunity } from '../../lib/userCommunityApi';
 import { useRouter } from 'expo-router';
+import { useTheme } from '../../components/ThemeProvider';
 
 export default function CommunityScreen() {
+  const { colors } = useTheme();
   const [communities, setCommunities] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState<number | null>(null);
@@ -43,14 +45,14 @@ export default function CommunityScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Topluluk Seç</Text>
+    <View style={[styles.container, { backgroundColor: colors.surface }]}>
+      <Text style={[styles.title, { color: colors.text }]}>Topluluk Seç</Text>
       <FlatList
         data={communities}
         keyExtractor={item => item.id.toString()}
         renderItem={({ item }) => (
-          <View style={styles.communityItem}>
-            <Text style={styles.communityName}>{item.name}</Text>
+          <View style={[styles.communityItem, { borderColor: colors.border }]}>
+            <Text style={[styles.communityName, { color: colors.text }]}>{item.name}</Text>
             <Button
               title={joining === item.id ? 'Katılıyor...' : 'Katıl'}
               onPress={() => handleJoin(item.id)}
@@ -65,8 +67,8 @@ export default function CommunityScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, backgroundColor: '#fff' },
+  container: { flex: 1, padding: 24 },
   title: { fontSize: 24, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
-  communityItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#eee' },
+  communityItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1 },
   communityName: { fontSize: 18 },
 });

@@ -8,6 +8,7 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { getLastKnownLocationAsync } from '../lib/largeStorage';
 import CustomDatePicker, { formatDateTR } from '../components/CustomDatePicker';
+import DateRangePicker from '../components/DateRangePicker';
 import { SvgXml } from 'react-native-svg';
 import { campingTypes, getCampingTypeLabel, getCampingTypeIcon } from '../lib/categories';
 import { getDatabase } from '../lib/database';
@@ -94,6 +95,7 @@ export default function CampPlanPage() {
   const [selectedLocationText, setSelectedLocationText] = useState('Henüz konum seçilmedi');
   const [isStartDatePickerOpen, setIsStartDatePickerOpen] = useState(false);
   const [isEndDatePickerOpen, setIsEndDatePickerOpen] = useState(false);
+  const [isDateRangePickerOpen, setIsDateRangePickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weathermap, setWeatherMap] = useState<any>(null);
@@ -140,11 +142,46 @@ export default function CampPlanPage() {
     planCard: [styles.planCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
     smallHeader: [styles.smallHeader, { color: theme.colors.text }],
     summaryText: [styles.summaryText, { color: theme.colors.text }],
-    weatherBox: [styles.weatherBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
+    weatherBox: [styles.weatherBox, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.border }],
     actionBtn: [styles.actionBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
     actionBtnText: [styles.actionBtnText, { color: theme.colors.text }],
     editBtn: [styles.editBtn, { backgroundColor: theme.colors.background }],
-    smallItem: [styles.smallItem, { backgroundColor: theme.colors.surface }],
+    smallItem: [styles.smallItem, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
+    fieldLabel: [styles.fieldLabel, { color: theme.colors.text }],
+    helpText: [styles.helpText, { color: theme.colors.muted }],
+    statusText: [styles.statusText, { color: theme.colors.textSecondary }],
+    sectionTitle: [styles.sectionTitle, { color: theme.colors.text }],
+    sectionTitle2: [styles.sectionTitle2, { color: theme.colors.text }],
+    evaluationBox: [styles.evaluationBox, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.border }],
+    evaluationTitle: [styles.evaluationTitle, { color: theme.colors.text }],
+    evaluationText: [styles.evaluationText, { color: theme.colors.textSecondary }],
+    evaluationIcon: [styles.evaluationIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
+    planCardTitle: [styles.planCardTitle, { color: theme.colors.text }],
+    planCardSubtitle: [styles.planCardSubtitle, { color: theme.colors.textSecondary }],
+    routeBtn: [styles.routeBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
+    routeBtnText: [styles.routeBtnText, { color: theme.colors.text }],
+    detailLinkText: [styles.detailLinkText, { color: theme.colors.primary }],
+    headerEditBtn: [styles.headerEditBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
+    headerEditBtnText: [styles.headerEditBtnText, { color: theme.colors.text }],
+    headerDeleteBtn: [styles.headerDeleteBtn, { backgroundColor: theme.colors.surface }],
+    forecastCard: [styles.forecastCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
+    forecastDate: [styles.forecastDate, { color: theme.colors.text }],
+    forecastSummary: [styles.forecastSummary, { color: theme.colors.muted }],
+    forecastTemp: [styles.forecastTemp, { color: theme.colors.text }],
+    forecastMinTemp: [styles.forecastMinTemp, { color: theme.colors.muted }],
+    forecastMetaText: [styles.forecastMetaText, { color: theme.colors.textSecondary }],
+    forecastDivider: [styles.forecastDivider, { backgroundColor: theme.colors.border }],
+    forecastIconContainer: [styles.forecastIconContainer, { backgroundColor: theme.colors.surfaceVariant }],
+    weatherSummaryCard: [styles.weatherSummaryCard, { backgroundColor: theme.colors.surfaceVariant, borderColor: theme.colors.border }],
+    typeCard: [styles.typeCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
+    typeCardSelected: [styles.typeCardSelected, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primaryLight }],
+    typeLabel: [styles.typeLabel, { color: theme.colors.muted }],
+    typeLabelSelected: [styles.typeLabelSelected, { color: theme.colors.primary }],
+    dot: [styles.dot, { backgroundColor: theme.colors.border }],
+    dotActive: [styles.dotActive, { backgroundColor: theme.colors.text }],
+    planDetailsInline: [styles.planDetailsInline, { borderTopColor: theme.colors.border }],
+    listItemText: [styles.listItemText, { color: theme.colors.text }],
+    planCardRow: [styles.planCardRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }],
   };
 
   useEffect(() => {
@@ -1109,23 +1146,29 @@ export default function CampPlanPage() {
       case 0:
         return (
           <View>
-            <Text style={styles.fieldLabel}>Kamp Başlangıç Tarihi</Text>
-            <TouchableOpacity style={themedStyles.selectButton} onPress={() => setIsStartDatePickerOpen(true)}>
-              <Text style={themedStyles.selectButtonText}>{draft.startDate ? formatDateTR(draft.startDate) : 'Tarih Seçilmedi'}</Text>
+            <Text style={themedStyles.fieldLabel}>Kamp Tarihi</Text>
+            <TouchableOpacity style={themedStyles.selectButton} onPress={() => setIsDateRangePickerOpen(true)}>
+              <Text style={themedStyles.selectButtonText}>
+                {draft.startDate && draft.endDate
+                  ? `${formatDateTR(draft.startDate)} - ${formatDateTR(draft.endDate)}`
+                  : draft.startDate
+                    ? formatDateTR(draft.startDate)
+                    : 'Tarih Aralığı Seçin'}
+              </Text>
             </TouchableOpacity>
 
-            <Text style={styles.fieldLabel}>Kamp Bitiş Tarihi</Text>
-            <TouchableOpacity style={themedStyles.selectButton} onPress={() => setIsEndDatePickerOpen(true)}>
-              <Text style={themedStyles.selectButtonText}>{draft.endDate ? formatDateTR(draft.endDate) : 'Tarih Seçilmedi'}</Text>
-            </TouchableOpacity>
+            {draft.startDate && draft.endDate && (() => {
+              const diff = Math.ceil(Math.abs(new Date(draft.endDate).getTime() - new Date(draft.startDate).getTime()) / (1000 * 60 * 60 * 24));
+              return <Text style={[themedStyles.helpText, { marginBottom: 4 }]}>{diff} gece · {diff + 1} gün</Text>;
+            })()}
 
-            <Text style={styles.helpText}>Tarih seçmek zorunlu değildir. Boş geçerek sonraki adıma devam edebilirsiniz.</Text>
+            <Text style={themedStyles.helpText}>Tarih seçmek zorunlu değildir. Boş geçerek sonraki adıma devam edebilirsiniz.</Text>
           </View>
         );
       case 1:
         return (
           <View>
-            <Text style={styles.fieldLabel}>Kamp Türü Seçin</Text>
+            <Text style={themedStyles.fieldLabel}>Kamp Türü Seçin</Text>
             <View style={styles.typeGrid}>
               {campingTypes.map((type) => {
                 const selected = draft.campType === type.id;
@@ -1133,7 +1176,12 @@ export default function CampPlanPage() {
                 const renderIcon = (n: any) => {
                   if (typeof n === 'string') {
                     if (n.startsWith('<svg')) {
-                      return <SvgXml xml={n} width={18} height={18} />;
+                      const iconColor = selected ? theme.colors.primary : theme.colors.text;
+                      // SVG rengini tema rengine uyarla
+                      const svgXml = n
+                        .replace(/fill=['"]#[0-9a-fA-F]{6}['"]|fill=['"]black['"]|fill=['"]#000['"]/gi, `fill="${iconColor}"`)
+                        .replace(/stroke=['"]#[0-9a-fA-F]{6}['"]|stroke=['"]black['"]|stroke=['"]#000['"]/gi, `stroke="${iconColor}"`);
+                      return <SvgXml xml={svgXml} width={18} height={18} />;
                     }
                     return <Text style={{ fontSize: 20 }}>{n}</Text>;
                   }
@@ -1142,28 +1190,28 @@ export default function CampPlanPage() {
                 return (
                   <TouchableOpacity
                     key={type.id}
-                    style={[styles.typeCard, selected && styles.typeCardSelected]}
+                    style={[themedStyles.typeCard, selected && themedStyles.typeCardSelected]}
                     onPress={() => saveDraft({ ...draft, campType: type.id })}
                   >
                     <View style={styles.typeIcon}>{renderIcon(iconNode)}</View>
-                    <Text style={[styles.typeLabel, selected && styles.typeLabelSelected]}>{type.label}</Text>
+                    <Text style={[themedStyles.typeLabel, selected && themedStyles.typeLabelSelected]}>{type.label}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-            <Text style={styles.helpText}>Kamp türleri dinamik olarak merkezi kategori listesinden gelir.</Text>
+            <Text style={themedStyles.helpText}>Kamp türleri dinamik olarak merkezi kategori listesinden gelir.</Text>
           </View>
         );
       case 2:
         return (
           <View>
-            <Text style={styles.fieldLabel}>Bölge seçimi</Text>
-            <TouchableOpacity style={styles.selectButton} onPress={selectCurrentLocation}>
+            <Text style={themedStyles.fieldLabel}>Bölge seçimi</Text>
+            <TouchableOpacity style={themedStyles.selectButton} onPress={selectCurrentLocation}>
               <Icon name="MapPin" size={16} color="#fff" />
-              <Text style={themedStyles.selectButtonText || styles.selectButtonText}>Mevcut konumu kullan</Text>
+              <Text style={themedStyles.selectButtonText}>Mevcut konumu kullan</Text>
             </TouchableOpacity>
-            <Text style={styles.helpText}>Haritaya dokunarak istediğiniz noktayı seçin.</Text>
-            <Text style={styles.helpText}>Haritayı tam ekran açarak daha detaylı seçim yapabilirsiniz.</Text>
+            <Text style={themedStyles.helpText}>Haritaya dokunarak istediğiniz noktayı seçin.</Text>
+            <Text style={themedStyles.helpText}>Haritayı tam ekran açarak daha detaylı seçim yapabilirsiniz.</Text>
             <TouchableOpacity style={[themedStyles.selectButton, { marginTop: 8 }]} onPress={() => {
               // Harita ekranını aç ve seçili kamp türü ile lokasyonu gönder
               try {
@@ -1185,34 +1233,47 @@ export default function CampPlanPage() {
               })();
             }}>
               <Icon name="MapPin" size={16} color="#fff" />
-              <Text style={themedStyles.selectButtonText || styles.selectButtonText}>Haritada Aç</Text>
+              <Text style={themedStyles.selectButtonText}>Haritada Aç</Text>
             </TouchableOpacity>
-            <Text style={styles.statusText}>Seçilen koordinat: {selectedLocationText}</Text>
-            <Text style={styles.helpText}>Haritadan kamp alanı seçerek devam edebilirsiniz.</Text>
+            <Text style={themedStyles.statusText}>Seçilen koordinat: {selectedLocationText}</Text>
+            <Text style={themedStyles.helpText}>Haritadan kamp alanı seçerek devam edebilirsiniz.</Text>
           </View>
         );
       case 3:
         return (
           <View>
-            <Text style={styles.fieldLabel}>Hava Durumu</Text>
-            {weatherLoading ? <ActivityIndicator size="small" color="#059669" /> : (
+            <Text style={themedStyles.fieldLabel}>Hava Durumu</Text>
+            {weatherLoading ? <ActivityIndicator size="small" color={theme.colors.primary} /> : (
               weathermap?.list?.length > 0 ? (
                 <View>
+                  {weathermap?.days?.length === 0 ? (
+                    <View style={[themedStyles.evaluationBox, { marginBottom: 8 }]}>
+                      <View style={styles.evaluationHeader}>
+                        <View style={themedStyles.evaluationIcon}><Icon name="Info" size={16} color={theme.colors.text} /></View>
+                        <Text style={themedStyles.evaluationTitle}>Tahmin Aralığı Dışında</Text>
+                      </View>
+                      <Text style={themedStyles.evaluationText}>Seçilen tarih aralığı için hava durumu tahmini sağlanamamaktadır. Hava durumu tahmini yalnızca bugünden itibaren en fazla 15 günlük aralıkta sağlanmaktadır.</Text>
+                    </View>
+                  ) : (
                     <View style={themedStyles.weatherBox}>
-                                <Text style={styles.smallHeader}>Şu anki: {locationName ?? weathermap.city?.name ?? ''}</Text>
-                    <Text>{weathermap.list[0].weather[0].description} · {Math.round(weathermap.list[0].main.temp)}°C</Text>
-                    {weathermap?.list?.[0]?.main?.humidity != null && (
-                      <Text>Nem {weathermap.list[0].main.humidity}%</Text>
-                    )}
-                    <Text style={{ marginTop: 6, color: '#0f172a', fontWeight: '600' }}>Seçilen Kamp Alanı: {draft.location?.label ?? locationName ?? weathermap.city?.name ?? selectedLocationText}</Text>
-                  </View>
+                      <Text style={themedStyles.smallHeader}>Şu anki: {locationName ?? weathermap.city?.name ?? ''}</Text>
+                      <Text style={{ color: theme.colors.textSecondary }}>
+                        {weathermap.list[0].weather[0].description}
+                        {weathermap.list[0].main.temp != null ? ` · ${Math.round(weathermap.list[0].main.temp)}°C` : ''}
+                      </Text>
+                      {weathermap?.list?.[0]?.main?.humidity != null && (
+                        <Text style={{ color: theme.colors.textSecondary }}>Nem {weathermap.list[0].main.humidity}%</Text>
+                      )}
+                      <Text style={{ marginTop: 6, color: theme.colors.text, fontWeight: '600' }}>Seçilen Kamp Alanı: {draft.location?.label ?? locationName ?? weathermap.city?.name ?? selectedLocationText}</Text>
+                    </View>
+                  )}
 
                   {weathermap?.days?.length > 0 && (
                     <View style={{ marginTop: 12 }}>
                       <View style={styles.sectionTitleRow}>
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <Icon name="Calendar" size={16} color={theme.colors.text} />
-                          <Text style={[styles.sectionTitle2, { marginLeft: 6 }]}>Tahmin ({weathermap.days.length} gün)</Text>
+                          <Text style={[themedStyles.sectionTitle2, { marginLeft: 6 }]}>Tahmin ({weathermap.days.length} gün)</Text>
                         </View>
                       </View>
                       <ScrollView
@@ -1223,22 +1284,22 @@ export default function CampPlanPage() {
                         nestedScrollEnabled={true}
                       >
                         {weathermap.days.map((d: any) => (
-                          <View key={d.date} style={styles.forecastCard}>
-                            <Text style={styles.forecastDate}>{formatYmdToDdMmYyyy(d.date)}</Text>
-                            <Text style={styles.forecastSummary}>{d.text || '...'}</Text>
+                          <View key={d.date} style={themedStyles.forecastCard}>
+                            <Text style={themedStyles.forecastDate}>{formatYmdToDdMmYyyy(d.date)}</Text>
+                            <Text style={themedStyles.forecastSummary}>{d.text || '...'}</Text>
                             <View style={styles.flashRow}>
-                              <View style={styles.forecastIconContainer}>
-                                <WeatherIcon condition={d.text || ''} size={30} />
+                              <View style={themedStyles.forecastIconContainer}>
+                                <WeatherIcon condition={d.text || ''} size={40} />
                               </View>
                               <View style={styles.tempColumn}>
-                                <Text style={styles.forecastTemp}>{(d.avgTemp ?? d.maxTemp ?? '-') }°C</Text>
-                                <Text style={styles.forecastMinTemp}>Min {(d.minTemp ?? '-') }°C</Text>
+                                <Text style={themedStyles.forecastTemp}>{(typeof d.avgTemp === 'number' ? d.avgTemp.toFixed(1) : (d.maxTemp ?? '-'))}°C</Text>
+                                <Text style={themedStyles.forecastMinTemp}>Min {(typeof d.minTemp === 'number' ? d.minTemp.toFixed(1) : (d.minTemp ?? '-'))}°C</Text>
                               </View>
                             </View>
-                            <View style={styles.forecastDivider} />
+                            <View style={themedStyles.forecastDivider} />
                             <View style={styles.forecastMetaColumn}>
-                              <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>💧</Text><Text style={styles.forecastMetaText}>{`Yağış ${Math.round(Number(d.pop ?? 0))}%`}</Text></View>
-                              <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>🍃</Text><Text style={styles.forecastMetaText}>{`Rüzgâr ${Math.round(Number(d.wind_kph ?? 0))} km/s`}</Text></View>
+                              <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>💧</Text><Text style={themedStyles.forecastMetaText}>{`Yağış: ${Math.round(Number(d.pop ?? 0))}%`}</Text></View>
+                              <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>🍃</Text><Text style={themedStyles.forecastMetaText}>{`Rüzgar: ${Number(d.wind_kph ?? 0).toFixed(1)} km/s`}</Text></View>
                             </View>
                           </View>
                         ))}
@@ -1247,12 +1308,12 @@ export default function CampPlanPage() {
                             const evalText = evaluateForecast(weathermap.days);
                             if (!evalText) return null;
                             return (
-                              <View style={[styles.evaluationBox, { marginTop: 8 }]}> 
+                              <View style={[themedStyles.evaluationBox, { marginTop: 8 }]}> 
                                 <View style={styles.evaluationHeader}>
-                                  <View style={styles.evaluationIcon}><Icon name="Info" size={16} color="#0f172a" /></View>
-                                  <Text style={styles.evaluationTitle}>Hava Değerlendirmesi</Text>
+                                  <View style={themedStyles.evaluationIcon}><Icon name="Info" size={16} color={theme.colors.text} /></View>
+                                  <Text style={themedStyles.evaluationTitle}>Hava Değerlendirmesi</Text>
                                 </View>
-                                <Text style={styles.evaluationText}>{evalText}</Text>
+                                <Text style={themedStyles.evaluationText}>{evalText}</Text>
                               </View>
                             );
                           })()}
@@ -1260,46 +1321,46 @@ export default function CampPlanPage() {
                   )}
                 </View>
               ) : (
-                <Text style={styles.helpText}>Hava verisi yok. Lokasyon seçin veya internete bağlanın.</Text>
+                <Text style={themedStyles.helpText}>Hava verisi yok. Lokasyon seçin veya internete bağlanın.</Text>
               )
             )}
 
-            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Duyurular</Text>
+            <Text style={[themedStyles.fieldLabel, { marginTop: 16 }]}>Duyurular</Text>
             {announcementList.length > 0 ? announcementList.slice(0, 5).map((ann: any) => (
               <View key={ann.id || ann.title || Math.random()} style={themedStyles.smallItem}>
-                <Text style={styles.smallHeader}>{ann.title || ann.baslik || 'Duyuru'}</Text>
-                <Text style={styles.helpText}>{ann.summary || ann.aciklama || 'Detay yok'}</Text>
+                <Text style={themedStyles.smallHeader}>{ann.title || ann.baslik || 'Duyuru'}</Text>
+                <Text style={themedStyles.helpText}>{ann.summary || ann.aciklama || 'Detay yok'}</Text>
               </View>
-            )) : <Text style={styles.helpText}>Bu konum için aktif duyuru bulunamadı.</Text>}
+            )) : <Text style={themedStyles.helpText}>Bu konum için aktif duyuru bulunamadı.</Text>}
           </View>
         );
       case 4:
         return (
           <View>
-            <Text style={styles.fieldLabel}>Plan Özeti</Text>
-            <Text style={styles.summaryText}>Başlangıç: {draft.startDate ? formatDateTR(draft.startDate) : 'Yok'}</Text>
-            <Text style={styles.summaryText}>Bitiş: {draft.endDate ? formatDateTR(draft.endDate) : 'Yok'}</Text>
-            <Text style={styles.summaryText}>Kamp Türü: {draft.campType ? getCampingTypeLabel(draft.campType) : 'Seçilmedi'}</Text>
-            <Text style={styles.summaryText}>Konum: {draft.location ? (draft.location.label ? draft.location.label : `${draft.location.latitude.toFixed(4)}, ${draft.location.longitude.toFixed(4)}`) : 'Seçilmedi'}</Text>
+            <Text style={themedStyles.fieldLabel}>Plan Özeti</Text>
+            <Text style={themedStyles.summaryText}>Başlangıç: {draft.startDate ? formatDateTR(draft.startDate) : 'Yok'}</Text>
+            <Text style={themedStyles.summaryText}>Bitiş: {draft.endDate ? formatDateTR(draft.endDate) : 'Yok'}</Text>
+            <Text style={themedStyles.summaryText}>Kamp Türü: {draft.campType ? getCampingTypeLabel(draft.campType) : 'Seçilmedi'}</Text>
+            <Text style={themedStyles.summaryText}>Konum: {draft.location ? (draft.location.label ? draft.location.label : `${draft.location.latitude.toFixed(4)}, ${draft.location.longitude.toFixed(4)}`) : 'Seçilmedi'}</Text>
             {weathermap ? (() => {
               const evalText = evaluateForecast(weathermap.days);
               return evalText ? (
-                <View style={[styles.evaluationBox, { marginTop: 8 }]}> 
+                <View style={[themedStyles.evaluationBox, { marginTop: 8 }]}> 
                   <View style={styles.evaluationHeader}>
-                    <View style={styles.evaluationIcon}><Icon name="Info" size={16} color="#0f172a" /></View>
-                    <Text style={styles.evaluationTitle}>Hava Değerlendirmesi</Text>
+                    <View style={themedStyles.evaluationIcon}><Icon name="Info" size={16} color={theme.colors.text} /></View>
+                    <Text style={themedStyles.evaluationTitle}>Hava Değerlendirmesi</Text>
                   </View>
-                  <Text style={styles.evaluationText}>{evalText}</Text>
+                  <Text style={themedStyles.evaluationText}>{evalText}</Text>
                 </View>
               ) : null;
             })() : (
-              <Text style={styles.helpText}>Hava değerlendirmesi için konum seçin.</Text>
+              <Text style={themedStyles.helpText}>Hava değerlendirmesi için konum seçin.</Text>
             )}
-            <Text style={styles.summaryText}>Durum: {draft.status}</Text>
+            <Text style={themedStyles.summaryText}>Durum: {draft.status}</Text>
           </View>
         );
       default:
-        return <Text>Adım bulunamadı</Text>;
+        return <Text style={{ color: theme.colors.text }}>Adım bulunamadı</Text>;
     }
   }, [stepIndex, draft, availableCampAreas, weathermap, announcementList, weatherLoading, selectedLocationText]);
 
@@ -1327,10 +1388,10 @@ export default function CampPlanPage() {
               console.warn('[camp-plan] yeni plan başlatma hata', e);
             }
           }}>
-              <Icon name="Plus" size={20} color="#059669" />
+              <Icon name="Plus" size={20} color={theme.colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => { router.back(); }} style={styles.closeIcon}>
-              <Icon name="X" size={22} color="#475569" />
+              <Icon name="X" size={22} color={theme.colors.muted} />
           </TouchableOpacity>
         </View>
       </View>
@@ -1339,7 +1400,7 @@ export default function CampPlanPage() {
         {stepIndex === 0 && !isCreatingNewPlan && (
           <>
             {savedPlans.length === 0 ? (
-              <Text style={styles.helpText}>Henüz kaydedilmiş plan yok.</Text>
+              <Text style={themedStyles.helpText}>Henüz kaydedilmiş plan yok.</Text>
             ) : !expandedPlanId ? (
               savedPlans.map((plan) => {
                 const expanded = expandedPlanId === plan.id;
@@ -1378,24 +1439,24 @@ export default function CampPlanPage() {
                           }
                         }}>
                           <View>
-                            <Text style={styles.planCardTitle}>{title}</Text>
-                            <Text style={styles.planCardSubtitle}>{plan.campType ? getCampingTypeLabel(plan.campType) : 'Seçilmedi'}</Text>
+                            <Text style={themedStyles.planCardTitle}>{title}</Text>
+                            <Text style={themedStyles.planCardSubtitle}>{plan.campType ? getCampingTypeLabel(plan.campType) : 'Seçilmedi'}</Text>
                             <View style={styles.planBadgesRow}>
                               {plan.startDate && plan.endDate ? (
-                                <Badge variant="light" style={styles.badgeDate}>{formatDateTR(plan.startDate)} - {formatDateTR(plan.endDate)}</Badge>
+                                <Badge variant="primaryLight" style={styles.badgeDate}>{formatDateTR(plan.startDate)} - {formatDateTR(plan.endDate)}</Badge>
                               ) : (
-                                <Badge variant="light" style={styles.badgeDate}>{plan.startDate ? formatDateTR(plan.startDate) : 'Tarih yok'}</Badge>
+                                <Badge variant="primaryLight" style={styles.badgeDate}>{plan.startDate ? formatDateTR(plan.startDate) : 'Tarih yok'}</Badge>
                               )}
                             </View>
                           </View>
                       </TouchableOpacity>
 
                       <View style={styles.planCardHeaderRight}>
-                        <TouchableOpacity style={styles.headerEditBtn} onPress={() => openPlan(plan)}>
-                          <Icon name="Edit" size={14} color="#0f172a" />
-                          <Text style={styles.headerEditBtnText}>Düzenle</Text>
+                        <TouchableOpacity style={themedStyles.headerEditBtn} onPress={() => openPlan(plan)}>
+                          <Icon name="Edit" size={14} color={theme.colors.text} />
+                          <Text style={themedStyles.headerEditBtnText}>Düzenle</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.headerDeleteBtn} onPress={async () => {
+                        <TouchableOpacity style={themedStyles.headerDeleteBtn} onPress={async () => {
                           try {
                             const existing = await AsyncStorage.getItem(SAVED_PLANS_KEY);
                             let list: CampPlan[] = [];
@@ -1413,34 +1474,34 @@ export default function CampPlanPage() {
                             Alert.alert('Hata', 'Plan silinemedi. Lütfen tekrar deneyin.');
                           }
                         }}>
-                          <Icon name="Trash2" size={14} color="#b91c1c" />
+                          <Icon name="Trash2" size={14} color={theme.colors.danger} />
                         </TouchableOpacity>
                       </View>
                       </View>
                     </View>
                     {expanded && (
                       <View style={styles.planDetailsOutside}>
-                        <View style={styles.planDetailsInline}>
-                        {weatherLoading ? <ActivityIndicator size="small" color="#059669" /> : (
+                        <View style={themedStyles.planDetailsInline}>
+                        {weatherLoading ? <ActivityIndicator size="small" color={theme.colors.primary} /> : (
                           weathermap?.list?.length > 0 ? (
                             <View>
-                              <View style={styles.weatherSummaryCard}>
+                              <View style={themedStyles.weatherSummaryCard}>
                                 <View style={styles.weatherSummaryTop}>
                                   <WeatherIcon condition={weathermap.list[0].weather[0].description || ''} size={26} />
                                   <View style={{ marginLeft: 10, flex: 1 }}>
-                                    <Text style={styles.smallHeader}>Konum: {(planLocationNames[plan.id] ?? locationName ?? plan.location?.label ?? weathermap.city?.name) || ''}</Text>
-                                    <Text style={styles.helpText}>{weathermap.list[0].weather[0].description} · {Math.round(weathermap.list[0].main.temp)}°C</Text>
+                                    <Text style={themedStyles.smallHeader}>Konum: {(planLocationNames[plan.id] ?? locationName ?? plan.location?.label ?? weathermap.city?.name) || ''}</Text>
+                                    <Text style={themedStyles.helpText}>{weathermap.list[0].weather[0].description} · {Math.round(weathermap.list[0].main.temp)}°C</Text>
                                   </View>
                                 </View>
                                 {weathermap?.list?.[0]?.main?.humidity != null && (
-                                  <Text style={styles.helpText}>Nem {weathermap.list[0].main.humidity}%</Text>
+                                  <Text style={themedStyles.helpText}>Nem {weathermap.list[0].main.humidity}%</Text>
                                 )}
                               </View>
 
                               {weathermap?.days?.length > 0 && (
                                 <View style={{ marginTop: 12 }}>
                                   <View style={styles.sectionTitleRow}>
-                                    <Text style={styles.sectionTitle2}>Tahmin ({weathermap.days.length} gün)</Text>
+                                    <Text style={themedStyles.sectionTitle2}>Tahmin ({weathermap.days.length} gün)</Text>
                                   </View>
                                   <ScrollView
                                     horizontal
@@ -1450,22 +1511,22 @@ export default function CampPlanPage() {
                                     nestedScrollEnabled={true}
                                   >
                                     {weathermap.days.map((d: any) => (
-                                      <View key={d.date} style={styles.forecastCard}>
-                                        <Text style={styles.forecastDate}>{formatYmdToDdMmYyyy(d.date)}</Text>
-                                        <Text style={styles.forecastSummary}>{d.text || '...'}</Text>
+                                      <View key={d.date} style={themedStyles.forecastCard}>
+                                        <Text style={themedStyles.forecastDate}>{formatYmdToDdMmYyyy(d.date)}</Text>
+                                        <Text style={themedStyles.forecastSummary}>{d.text || '...'}</Text>
                                         <View style={styles.flashRow}>
-                                          <View style={styles.forecastIconContainer}>
-                                            <WeatherIcon condition={d.text || ''} size={32} />
+                                          <View style={themedStyles.forecastIconContainer}>
+                                            <WeatherIcon condition={d.text || ''} size={40} />
                                           </View>
                                           <View style={styles.tempColumn}>
-                                            <Text style={styles.forecastTemp}>{(typeof d.maxTemp === 'number' ? d.maxTemp.toFixed(1) : (d.avgTemp ?? d.maxTemp ?? '-'))}°C</Text>
-                                            <Text style={styles.forecastMinTemp}>Min {(d.minTemp ?? '-') }°C</Text>
+                                            <Text style={themedStyles.forecastTemp}>{(typeof d.maxTemp === 'number' ? d.maxTemp.toFixed(1) : (d.avgTemp ?? '-'))}°C</Text>
+                                            <Text style={themedStyles.forecastMinTemp}>Min {(typeof d.minTemp === 'number' ? d.minTemp.toFixed(1) : (d.minTemp ?? '-'))}°C</Text>
                                           </View>
                                         </View>
-                                        <View style={styles.forecastDivider} />
+                                        <View style={themedStyles.forecastDivider} />
                                         <View style={styles.forecastMetaColumn}>
-                                          <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>💧</Text><Text style={styles.forecastMetaText}>{`Yağış ${Math.round(Number(d.pop ?? 0))}%`}</Text></View>
-                                          <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>🍃</Text><Text style={styles.forecastMetaText}>{`Rüzgar ${Math.round(Number(d.wind_kph ?? 0))} km/s`}</Text></View>
+                                          <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>💧</Text><Text style={themedStyles.forecastMetaText}>{`Yağış: ${Math.round(Number(d.pop ?? 0))}%`}</Text></View>
+                                          <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>🍃</Text><Text style={themedStyles.forecastMetaText}>{`Rüzgar: ${Number(d.wind_kph ?? 0).toFixed(1)} km/s`}</Text></View>
                                         </View>
                                       </View>
                                     ))}
@@ -1474,12 +1535,12 @@ export default function CampPlanPage() {
                                     const evalText = evaluateForecast(weathermap.days);
                                     if (!evalText) return null;
                                     return (
-                                      <View style={[styles.evaluationBox, { marginTop: 8 }]}> 
+                                      <View style={[themedStyles.evaluationBox, { marginTop: 8 }]}> 
                                         <View style={styles.evaluationHeader}>
-                                          <View style={styles.evaluationIcon}><Icon name="Info" size={16} color="#0f172a" /></View>
-                                          <Text style={styles.evaluationTitle}>Hava Değerlendirmesi</Text>
+                                          <View style={themedStyles.evaluationIcon}><Icon name="Info" size={16} color={theme.colors.text} /></View>
+                                          <Text style={themedStyles.evaluationTitle}>Hava Değerlendirmesi</Text>
                                         </View>
-                                        <Text style={styles.evaluationText}>{evalText}</Text>
+                                        <Text style={themedStyles.evaluationText}>{evalText}</Text>
                                       </View>
                                     );
                                   })()}
@@ -1487,22 +1548,22 @@ export default function CampPlanPage() {
                               )}
                             </View>
                           ) : (
-                            <Text style={styles.helpText}>Hava verisi yok. Lokasyon seçin veya internete bağlanın.</Text>
+                            <Text style={themedStyles.helpText}>Hava verisi yok. Lokasyon seçin veya internete bağlanın.</Text>
                           )
                         )}
 
                         <View style={styles.detailActionsRow}>
                           <View style={{ flexDirection: 'row' }}>
-                            <TouchableOpacity style={[styles.routeBtn, !plan.location && { opacity: 0.5 }]} disabled={!plan.location} onPress={() => handleNavigate(plan.location?.latitude, plan.location?.longitude, 'google')}>
-                              <Text style={styles.routeBtnText}>🧭 Rota (Google)</Text>
+                            <TouchableOpacity style={[themedStyles.routeBtn, !plan.location && { opacity: 0.5 }]} disabled={!plan.location} onPress={() => handleNavigate(plan.location?.latitude, plan.location?.longitude, 'google')}>
+                              <Text style={themedStyles.routeBtnText}>🧭 Rota (Google)</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.routeBtn, !plan.location && { opacity: 0.5 }]} disabled={!plan.location} onPress={() => handleNavigate(plan.location?.latitude, plan.location?.longitude, 'yandex')}>
-                              <Text style={styles.routeBtnText}>🧭 Rota (Yandex)</Text>
+                            <TouchableOpacity style={[themedStyles.routeBtn, !plan.location && { opacity: 0.5 }]} disabled={!plan.location} onPress={() => handleNavigate(plan.location?.latitude, plan.location?.longitude, 'yandex')}>
+                              <Text style={themedStyles.routeBtnText}>🧭 Rota (Yandex)</Text>
                             </TouchableOpacity>
                           </View>
                         </View>
                         <TouchableOpacity style={styles.detailLink} onPress={() => openCampingAreaDetail(plan)}>
-                          <Text style={styles.detailLinkText}>Detaylı Bilgi ↗</Text>
+                          <Text style={themedStyles.detailLinkText}>Detaylı Bilgi ↗</Text>
                         </TouchableOpacity>
                         </View>
                       </View>
@@ -1548,24 +1609,24 @@ export default function CampPlanPage() {
                               }
                             }}>
                               <View>
-                                <Text style={styles.planCardTitle}>{title}</Text>
-                                <Text style={styles.planCardSubtitle}>{plan.campType ? getCampingTypeLabel(plan.campType) : 'Seçilmedi'}</Text>
+                                <Text style={themedStyles.planCardTitle}>{title}</Text>
+                                <Text style={themedStyles.planCardSubtitle}>{plan.campType ? getCampingTypeLabel(plan.campType) : 'Seçilmedi'}</Text>
                                 <View style={styles.planBadgesRow}>
                                   {plan.startDate && plan.endDate ? (
-                                    <Badge variant="light" style={styles.badgeDate}>{formatDateTR(plan.startDate)} - {formatDateTR(plan.endDate)}</Badge>
+                                    <Badge variant="primaryLight" style={styles.badgeDate}>{formatDateTR(plan.startDate)} - {formatDateTR(plan.endDate)}</Badge>
                                   ) : (
-                                    <Badge variant="light" style={styles.badgeDate}>{plan.startDate ? formatDateTR(plan.startDate) : 'Tarih yok'}</Badge>
+                                    <Badge variant="primaryLight" style={styles.badgeDate}>{plan.startDate ? formatDateTR(plan.startDate) : 'Tarih yok'}</Badge>
                                   )}
                                 </View>
                               </View>
                             </TouchableOpacity>
 
                             <View style={styles.planCardHeaderRight}>
-                              <TouchableOpacity style={styles.headerEditBtn} onPress={() => openPlan(plan)}>
-                                <Icon name="Edit" size={14} color="#0f172a" />
-                                <Text style={styles.headerEditBtnText}>Düzenle</Text>
+                              <TouchableOpacity style={themedStyles.headerEditBtn} onPress={() => openPlan(plan)}>
+                                <Icon name="Edit" size={14} color={theme.colors.text} />
+                                <Text style={themedStyles.headerEditBtnText}>Düzenle</Text>
                               </TouchableOpacity>
-                              <TouchableOpacity style={styles.headerDeleteBtn} onPress={async () => {
+                              <TouchableOpacity style={themedStyles.headerDeleteBtn} onPress={async () => {
                                 try {
                                   const existing = await AsyncStorage.getItem(SAVED_PLANS_KEY);
                                   let list: CampPlan[] = [];
@@ -1582,34 +1643,44 @@ export default function CampPlanPage() {
                                   Alert.alert('Hata', 'Plan silinemedi. Lütfen tekrar deneyin.');
                                 }
                               }}>
-                                <Icon name="Trash2" size={14} color="#b91c1c" />
+                                <Icon name="Trash2" size={14} color={theme.colors.danger} />
                               </TouchableOpacity>
                             </View>
                           </View>
                         </View>
 
                         <View style={styles.planDetailsOutside}>
-                          <View style={styles.planDetailsInline}>
-                            {weatherLoading ? <ActivityIndicator size="small" color="#059669" /> : (
+                          <View style={themedStyles.planDetailsInline}>
+                            {weatherLoading ? <ActivityIndicator size="small" color={theme.colors.primary} /> : (
                               weathermap?.list?.length > 0 ? (
                                 <View>
-                                  <View style={styles.weatherSummaryCard}>
-                                    <View style={styles.weatherSummaryTop}>
-                                      <WeatherIcon condition={weathermap.list[0].weather[0].description || ''} size={26} />
-                                      <View style={{ marginLeft: 10, flex: 1 }}>
-                                        <Text style={styles.smallHeader}>Konum: {(planLocationNames[plan.id] ?? locationName ?? plan.location?.label ?? weathermap.city?.name) || ''}</Text>
-                                        <Text style={styles.helpText}>{weathermap.list[0].weather[0].description} · {Math.round(weathermap.list[0].main.temp)}°C</Text>
+                                  {weathermap?.days?.length === 0 ? (
+                                    <View style={[themedStyles.evaluationBox, { marginBottom: 8 }]}>
+                                      <View style={styles.evaluationHeader}>
+                                        <View style={themedStyles.evaluationIcon}><Icon name="Info" size={16} color={theme.colors.text} /></View>
+                                        <Text style={themedStyles.evaluationTitle}>Tahmin Aralığı Dışında</Text>
                                       </View>
+                                      <Text style={themedStyles.evaluationText}>Seçilen tarih aralığı için hava durumu tahmini sağlanamamaktadır. Hava durumu tahmini yalnızca bugünden itibaren en fazla 15 günlük aralıkta sağlanmaktadır.</Text>
                                     </View>
-                                    {weathermap?.list?.[0]?.main?.humidity != null && (
-                                      <Text style={styles.helpText}>Nem {weathermap.list[0].main.humidity}%</Text>
-                                    )}
-                                  </View>
+                                  ) : (
+                                    <View style={themedStyles.weatherSummaryCard}>
+                                      <View style={styles.weatherSummaryTop}>
+                                        <WeatherIcon condition={weathermap.list[0].weather[0].description || ''} size={26} />
+                                        <View style={{ marginLeft: 10, flex: 1 }}>
+                                          <Text style={themedStyles.smallHeader}>Konum: {(planLocationNames[plan.id] ?? locationName ?? plan.location?.label ?? weathermap.city?.name) || ''}</Text>
+                                          <Text style={themedStyles.helpText}>{weathermap.list[0].weather[0].description}{weathermap.list[0].main.temp != null ? ` · ${Math.round(weathermap.list[0].main.temp)}°C` : ''}</Text>
+                                        </View>
+                                      </View>
+                                      {weathermap?.list?.[0]?.main?.humidity != null && (
+                                        <Text style={themedStyles.helpText}>Nem {weathermap.list[0].main.humidity}%</Text>
+                                      )}
+                                    </View>
+                                  )}
 
                                   {weathermap?.days?.length > 0 && (
                                     <View style={{ marginTop: 12 }}>
                                       <View style={styles.sectionTitleRow}>
-                                        <Text style={styles.sectionTitle2}>Tahmin ({weathermap.days.length} gün)</Text>
+                                        <Text style={themedStyles.sectionTitle2}>Tahmin ({weathermap.days.length} gün)</Text>
                                       </View>
                                       <ScrollView
                                         horizontal
@@ -1619,22 +1690,22 @@ export default function CampPlanPage() {
                                         nestedScrollEnabled={true}
                                       >
                                         {weathermap.days.map((d: any) => (
-                                          <View key={d.date} style={styles.forecastCard}>
-                                            <Text style={styles.forecastDate}>{formatYmdToDdMmYyyy(d.date)}</Text>
-                                            <Text style={styles.forecastSummary}>{d.text || '...'}</Text>
+                                          <View key={d.date} style={themedStyles.forecastCard}>
+                                            <Text style={themedStyles.forecastDate}>{formatYmdToDdMmYyyy(d.date)}</Text>
+                                            <Text style={themedStyles.forecastSummary}>{d.text || '...'}</Text>
                                             <View style={styles.flashRow}>
-                                              <View style={styles.forecastIconContainer}>
-                                                <WeatherIcon condition={d.text || ''} size={32} />
+                                              <View style={themedStyles.forecastIconContainer}>
+                                                <WeatherIcon condition={d.text || ''} size={40} />
                                               </View>
                                               <View style={styles.tempColumn}>
-                                                <Text style={styles.forecastTemp}>{(typeof d.maxTemp === 'number' ? d.maxTemp.toFixed(1) : (d.avgTemp ?? d.maxTemp ?? '-'))}°C</Text>
-                                                <Text style={styles.forecastMinTemp}>Min {(d.minTemp ?? '-') }°C</Text>
+                                                <Text style={themedStyles.forecastTemp}>{(typeof d.maxTemp === 'number' ? d.maxTemp.toFixed(1) : (d.avgTemp ?? '-'))}°C</Text>
+                                                <Text style={themedStyles.forecastMinTemp}>Min {(typeof d.minTemp === 'number' ? d.minTemp.toFixed(1) : (d.minTemp ?? '-'))}°C</Text>
                                               </View>
                                             </View>
-                                            <View style={styles.forecastDivider} />
+                                            <View style={themedStyles.forecastDivider} />
                                             <View style={styles.forecastMetaColumn}>
-                                              <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>💧</Text><Text style={styles.forecastMetaText}>{`Yağış ${Math.round(Number(d.pop ?? 0))}%`}</Text></View>
-                                              <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>🍃</Text><Text style={styles.forecastMetaText}>{`Rüzgar ${Math.round(Number(d.wind_kph ?? 0))} km/s`}</Text></View>
+                                              <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>💧</Text><Text style={themedStyles.forecastMetaText}>{`Yağış: ${Math.round(Number(d.pop ?? 0))}%`}</Text></View>
+                                              <View style={styles.forecastMetaRowItem}><Text style={styles.forecastMetaIcon}>🍃</Text><Text style={themedStyles.forecastMetaText}>{`Rüzgar: ${Number(d.wind_kph ?? 0).toFixed(1)} km/s`}</Text></View>
                                             </View>
                                           </View>
                                         ))}
@@ -1643,12 +1714,12 @@ export default function CampPlanPage() {
                                         const evalText = evaluateForecast(weathermap.days);
                                         if (!evalText) return null;
                                         return (
-                                          <View style={[styles.evaluationBox, { marginTop: 8 }]}> 
+                                          <View style={[themedStyles.evaluationBox, { marginTop: 8 }]}> 
                                             <View style={styles.evaluationHeader}>
-                                              <View style={styles.evaluationIcon}><Icon name="Info" size={16} color="#0f172a" /></View>
-                                              <Text style={styles.evaluationTitle}>Hava Değerlendirmesi</Text>
+                                              <View style={themedStyles.evaluationIcon}><Icon name="Info" size={16} color={theme.colors.text} /></View>
+                                              <Text style={themedStyles.evaluationTitle}>Hava Değerlendirmesi</Text>
                                             </View>
-                                            <Text style={styles.evaluationText}>{evalText}</Text>
+                                            <Text style={themedStyles.evaluationText}>{evalText}</Text>
                                           </View>
                                         );
                                       })()}
@@ -1656,22 +1727,22 @@ export default function CampPlanPage() {
                                   )}
                                 </View>
                               ) : (
-                                <Text style={styles.helpText}>Hava verisi yok. Lokasyon seçin veya internete bağlanın.</Text>
+                                <Text style={themedStyles.helpText}>Hava verisi yok. Lokasyon seçin veya internete bağlanın.</Text>
                               )
                             )}
 
                             <View style={styles.detailActionsRow}>
                               <View style={{ flexDirection: 'row' }}>
-                                <TouchableOpacity style={[styles.routeBtn, !plan.location && { opacity: 0.5 }]} disabled={!plan.location} onPress={() => handleNavigate(plan.location?.latitude, plan.location?.longitude, 'google')}>
-                                  <Text style={styles.routeBtnText}>🧭 Rota (Google)</Text>
+                                <TouchableOpacity style={[themedStyles.routeBtn, !plan.location && { opacity: 0.5 }]} disabled={!plan.location} onPress={() => handleNavigate(plan.location?.latitude, plan.location?.longitude, 'google')}>
+                                  <Text style={themedStyles.routeBtnText}>🧭 Rota (Google)</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity style={[styles.routeBtn, !plan.location && { opacity: 0.5 }]} disabled={!plan.location} onPress={() => handleNavigate(plan.location?.latitude, plan.location?.longitude, 'yandex')}>
-                                  <Text style={styles.routeBtnText}>🧭 Rota (Yandex)</Text>
+                                <TouchableOpacity style={[themedStyles.routeBtn, !plan.location && { opacity: 0.5 }]} disabled={!plan.location} onPress={() => handleNavigate(plan.location?.latitude, plan.location?.longitude, 'yandex')}>
+                                  <Text style={themedStyles.routeBtnText}>🧭 Rota (Yandex)</Text>
                                 </TouchableOpacity>
                               </View>
                             </View>
                             <TouchableOpacity style={styles.detailLink} onPress={() => openCampingAreaDetail(plan)}>
-                              <Text style={styles.detailLinkText}>Detaylı Bilgi ↗</Text>
+                              <Text style={themedStyles.detailLinkText}>Detaylı Bilgi ↗</Text>
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -1680,7 +1751,7 @@ export default function CampPlanPage() {
                   })}
                 </ScrollView>
                 <View style={styles.paginationContainer}>
-                  {savedPlans.map((_, i) => <View key={i} style={[styles.dot, i === carouselIndex ? styles.dotActive : null]} />)}
+                  {savedPlans.map((_, i) => <View key={i} style={[themedStyles.dot, i === carouselIndex ? themedStyles.dotActive : null]} />)}
                 </View>
               </>
             )}
@@ -1727,19 +1798,15 @@ export default function CampPlanPage() {
         campingArea={selectedCampingAreaObj}
       />
 
-      <CustomDatePicker
-        visible={isStartDatePickerOpen}
-        value={draft.startDate ? new Date(draft.startDate) : new Date()}
-        onChange={(date) => saveDraft({ ...draft, startDate: date.toISOString() })}
-        onClose={() => setIsStartDatePickerOpen(false)}
-        title="Başlangıç Tarihi"
-      />
-      <CustomDatePicker
-        visible={isEndDatePickerOpen}
-        value={draft.endDate ? new Date(draft.endDate) : new Date()}
-        onChange={(date) => saveDraft({ ...draft, endDate: date.toISOString() })}
-        onClose={() => setIsEndDatePickerOpen(false)}
-        title="Bitiş Tarihi"
+      <DateRangePicker
+        visible={isDateRangePickerOpen}
+        onClose={() => setIsDateRangePickerOpen(false)}
+        onConfirm={(start, end) => {
+          saveDraft({ ...draft, startDate: start.toISOString(), endDate: end.toISOString() });
+        }}
+        initialStartDate={draft.startDate ? new Date(draft.startDate) : null}
+        initialEndDate={draft.endDate ? new Date(draft.endDate) : null}
+        title="Kamp Tarihi Seçin"
       />
     </SafeAreaView>
   );
@@ -1818,19 +1885,19 @@ const styles = StyleSheet.create({
   weatherSummaryCard: { backgroundColor: '#eeeeef', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 12 },
   weatherSummaryTop: { flexDirection: 'row', alignItems: 'center' },
   forecastScroll: { marginTop: 6 },
-  forecastCard: { width: 160, padding: 14, marginRight: 12, backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e7e7ea', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
-  forecastDate: { fontSize: 12, color: '#334155', fontWeight: '700' },
-  forecastSummary: { fontSize: 12, color: '#6b7280', marginTop: 6, fontWeight: '600' },
-  forecastIconContainer: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  forecastCard: { width: 185, padding: 16, marginRight: 12, backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e7e7ea', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+  forecastDate: { fontSize: 17, color: '#111827', fontWeight: '700' },
+  forecastSummary: { fontSize: 13, color: '#6b7280', marginTop: 5, fontWeight: '500' },
+  forecastIconContainer: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginTop: 10 },
   flashRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
-  tempColumn: { justifyContent: 'center', alignItems: 'flex-end' },
-  forecastTemp: { fontSize: 20, color: '#111827', fontWeight: '800' },
-  forecastMinTemp: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+  tempColumn: { justifyContent: 'center', alignItems: 'flex-start' },
+  forecastTemp: { fontSize: 28, color: '#111827', fontWeight: '800' },
+  forecastMinTemp: { fontSize: 13, color: '#94a3b8', marginTop: 2 },
   forecastDivider: { height: 1, backgroundColor: '#eef2f7', marginTop: 10 },
   forecastMetaColumn: { marginTop: 8 },
   forecastMetaRowItem: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
   forecastMetaIcon: { marginRight: 8 },
-  forecastMetaText: { fontSize: 12, color: '#60a5fa' },
+  forecastMetaText: { fontSize: 12, color: '#475569' },
   forecastDetails: { fontSize: 12, color: '#64748b', marginTop: 6 },
   planDetailsOutside: { marginTop: 4, paddingHorizontal: 0 },
   planDetailsInline: { marginTop: 4, paddingTop: 6, paddingBottom: 6, paddingHorizontal: 0, borderTopWidth: 1, borderTopColor: '#e6eef6', backgroundColor: 'transparent' },

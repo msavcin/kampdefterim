@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import type { CampingArea } from '../lib/database';
 import { getCampingTypeLabel } from '../lib/categories';
 import { filterCampingAreasByUser } from '../lib/accessControl';
+import { useTheme } from './ThemeProvider';
 
 interface Props {
   campingAreas: CampingArea[];
@@ -22,6 +23,7 @@ function getTypeLabel(type: string): string {
 }
 
 export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnMap, user, isGuest, isConnected = true, campTypeFilter }: Props) {
+  const { colors } = useTheme();
   const router = useRouter();
   const isMountedRef = useRef(true);
   const [searchText, setSearchText] = useState('');
@@ -67,7 +69,7 @@ export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnM
   }, [searchText, campingAreas, user, isGuest]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.surface }]}>
       {/* Guest User Premium Banner - Hide when offline */}
       {isGuest && isConnected && (
         <View style={styles.guestBanner}>
@@ -75,7 +77,7 @@ export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnM
             Tüm kamp alanlarında arama yapabilmek için Premium aboneliğe sahip olmanız gerekmektedir.
           </Text>
           <TouchableOpacity
-            style={styles.premiumButton}
+            style={[styles.premiumButton, { backgroundColor: colors.primary }]}
             onPress={() => router.push('/premium' as any)}
           >
             <Text style={styles.premiumButtonText}>Premium Ol!</Text>
@@ -84,10 +86,11 @@ export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnM
       )}
 
       <View style={styles.searchRow}>
-        <Search size={22} color="#059669" style={{ marginRight: 8 }} />
+        <Search size={22} color={colors.primary} style={{ marginRight: 8 }} />
         <TextInput
-          style={styles.input}
+          style={[styles.input, { borderColor: colors.border, backgroundColor: colors.background, color: colors.text }]}
           placeholder="Kamp alanı ara..."
+          placeholderTextColor={colors.muted}
           value={searchText}
           onChangeText={setSearchText}
         />
@@ -98,10 +101,10 @@ export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnM
           data={results}
           keyExtractor={item => String(item.id)}
           renderItem={({ item }) => (
-            <TouchableOpacity style={styles.item} onPress={() => onSelect(item)}>
+            <TouchableOpacity style={[styles.item, { borderBottomColor: colors.border }]} onPress={() => onSelect(item)}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.title}>{item.name}</Text>
-                <Text style={styles.type}>{getTypeLabel(item.tags?.type || item.type)}</Text>
+                <Text style={[styles.title, { color: colors.text }]}>{item.name}</Text>
+                <Text style={[styles.type, { color: colors.primary }]}>{getTypeLabel(item.tags?.type || item.type)}</Text>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <TouchableOpacity
@@ -110,7 +113,7 @@ export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnM
                 >
                   <Text style={styles.mapText}>Haritada Göster</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.detailButton} onPress={() => onSelect(item)}>
+                <TouchableOpacity style={[styles.detailButton, { backgroundColor: colors.primary }]} onPress={() => onSelect(item)}>
                   <Text style={styles.detailText}>Detaylı Bilgi</Text>
                 </TouchableOpacity>
               </View>

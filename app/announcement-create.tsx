@@ -1,4 +1,5 @@
-import CustomDatePicker, { formatDateTR } from '../components/CustomDatePicker';
+import { formatDateTR } from '../components/CustomDatePicker';
+import DateRangePicker from '../components/DateRangePicker';
 const styles = StyleSheet.create({
   modalBg: {
     flex: 1,
@@ -9,11 +10,9 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: '100%',
-    backgroundColor: '#fff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 28,
-    shadowColor: '#2563eb',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.12,
     shadowRadius: 8,
@@ -25,7 +24,6 @@ const styles = StyleSheet.create({
     top: 18,
     right: 18,
     zIndex: 2,
-    backgroundColor: '#e5e7eb',
     borderRadius: 16,
     width: 32,
     height: 32,
@@ -34,14 +32,12 @@ const styles = StyleSheet.create({
   },
   closeButtonText: {
     fontSize: 22,
-    color: '#2563eb',
     fontWeight: 'bold',
     marginTop: -2,
   },
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#2563eb',
     marginBottom: 24,
     textAlign: 'center',
     marginTop: 8,
@@ -49,13 +45,10 @@ const styles = StyleSheet.create({
   input: {
     width: '100%',
     borderWidth: 1,
-    borderColor: '#2563eb',
     borderRadius: 12,
     padding: 14,
     marginBottom: 18,
-    backgroundColor: '#fff',
     fontSize: 16,
-    color: '#1f2937',
   },
   textarea: {
     minHeight: 90,
@@ -63,7 +56,6 @@ const styles = StyleSheet.create({
   },
   button: {
     width: '100%',
-    backgroundColor: '#2563eb',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -78,13 +70,11 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     width: '100%',
-    backgroundColor: '#e5e7eb',
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
   },
   cancelButtonText: {
-    color: '#2563eb',
     fontSize: 16,
     fontWeight: '100',
   },
@@ -100,6 +90,7 @@ import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityInd
 import { getToken } from '../lib/auth';
 import { getMe } from '../lib/userCommunityApi';
 import { getDatabase } from '../lib/database';
+import { useTheme } from '../components/ThemeProvider';
 
 // Alttaki styles tanımı kaldırıldı, sadece üstteki styles kullanılacak
 
@@ -110,6 +101,7 @@ interface AnnouncementCreateProps {
 }
 
 export default function AnnouncementCreate({ visible, onClose, onSuccess }: AnnouncementCreateProps) {
+  const { colors } = useTheme();
   const [eventPhoto, setEventPhoto] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
@@ -198,8 +190,7 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
   // Sadece birer tane tanımlı olmalı
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
-  const [showBaslamaPicker, setShowBaslamaPicker] = useState(false);
-  const [showBitisPicker, setShowBitisPicker] = useState(false);
+  const [showDateRangePicker, setShowDateRangePicker] = useState(false);
 
   useEffect(() => {
     // Kamp alanlarını yükle (sadece kullanıcının oluşturdukları)
@@ -383,7 +374,7 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={{ flex: 1, backgroundColor: '#f8fafc' }}>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -392,20 +383,20 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
           <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 20 }} keyboardShouldPersistTaps="always">
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
               <TouchableOpacity onPress={onClose} style={{ padding: 8 }}>
-                <Text style={{ fontSize: 24, color: '#6b7280' }}>←</Text>
+                <Text style={{ fontSize: 24, color: colors.muted }}>←</Text>
               </TouchableOpacity>
-              <Text style={[styles.title, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>Yeni Duyuru Oluştur</Text>
+              <Text style={[styles.title, { flex: 1, textAlign: 'center', marginBottom: 0, color: colors.primary }]}>Yeni Duyuru Oluştur</Text>
               <View style={{ width: 40 }} />
             </View>
             {/* Etkinlik fotoğrafı alanı sadece user doluysa gösterilecek */}
             {user && (
               <View style={{ marginBottom: 16, }}>
-                <Text style={{ fontWeight: 'bold', marginBottom: 8 }}>Etkinlik Fotoğrafı</Text>
+                <Text style={{ fontWeight: 'bold', marginBottom: 8, color: colors.text }}>Etkinlik Fotoğrafı</Text>
                 {eventPhoto ? (
                   <Image source={{ uri: eventPhoto }} style={{ width: 180, height: 120, borderRadius: 8, marginBottom: 8 }} />
                 ) : null}
                 <TouchableOpacity
-                  style={{ backgroundColor: (!user?.community_id && user?.role !== 'superadmin') ? '#a5b4fc' : '#2563eb', padding: 10, borderRadius: 8, marginBottom: 8 }}
+                  style={{ backgroundColor: (!user?.community_id && user?.role !== 'superadmin') ? colors.muted : colors.primary, padding: 10, borderRadius: 8, marginBottom: 8 }}
                   onPress={pickEventPhoto}
                   disabled={uploadingPhoto || (!user?.community_id && user?.role !== 'superadmin')}
                 >
@@ -417,33 +408,33 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
             <View style={{ width: '100%', marginBottom: 18 }}>
               <View style={{ flexDirection: 'row', gap: 0, width: '100%' }}>
                 <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: announcementType === 'duyuru' ? '#2563eb' : '#e5e7eb', borderRadius: 10, padding: 10, alignItems: 'center', marginRight: 2 }}
+                  style={{ flex: 1, backgroundColor: announcementType === 'duyuru' ? colors.primary : colors.border, borderRadius: 10, padding: 10, alignItems: 'center', marginRight: 2 }}
                   onPress={() => setAnnouncementType('duyuru')}
                 >
-                  <Text style={{ color: announcementType === 'duyuru' ? '#fff' : '#2563eb', fontWeight: 'bold' }}>Duyuru</Text>
+                  <Text style={{ color: announcementType === 'duyuru' ? '#fff' : colors.primary, fontWeight: 'bold' }}>Duyuru</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: announcementType === 'etkinlik' ? '#2563eb' : '#e5e7eb', borderRadius: 10, padding: 10, alignItems: 'center', marginLeft: 2 }}
+                  style={{ flex: 1, backgroundColor: announcementType === 'etkinlik' ? colors.primary : colors.border, borderRadius: 10, padding: 10, alignItems: 'center', marginLeft: 2 }}
                   onPress={() => setAnnouncementType('etkinlik')}
                 >
-                  <Text style={{ color: announcementType === 'etkinlik' ? '#fff' : '#2563eb', fontWeight: 'bold' }}>Etkinlik</Text>
+                  <Text style={{ color: announcementType === 'etkinlik' ? '#fff' : colors.primary, fontWeight: 'bold' }}>Etkinlik</Text>
                 </TouchableOpacity>
               </View>
             </View>
             {/* Duyuru tipine göre alanlar */}
             <TextInput
-              style={styles.input}
+              style={[styles.input, { borderColor: colors.primary, backgroundColor: colors.surface, color: colors.text }]}
               placeholder="Başlık"
               value={title}
               onChangeText={setTitle}
               editable={!loading}
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.muted}
             />
             {announcementType === 'etkinlik' && (
               <View>
                 {/* Etkinlik Türü tag seçimi */}
                 <View style={{ marginBottom: 18 }}>
-                  <Text style={{ fontWeight: 'bold', color: '#2563eb', marginBottom: 6 }}>Etkinlik Türü:</Text>
+                  <Text style={{ fontWeight: 'bold', color: colors.primary, marginBottom: 6 }}>Etkinlik Türü:</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {etkinlikTuruList.map((tur) => (
                       <TouchableOpacity
@@ -452,21 +443,21 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
                           paddingVertical: 8,
                           paddingHorizontal: 16,
                           borderRadius: 18,
-                          backgroundColor: etkinlikTuru === tur ? '#2563eb' : '#e5e7eb',
+                          backgroundColor: etkinlikTuru === tur ? colors.primary : colors.border,
                           marginRight: 8,
                           marginBottom: 8,
                         }}
                         onPress={() => setEtkinlikTuru(tur)}
                         disabled={loading}
                       >
-                        <Text style={{ color: etkinlikTuru === tur ? '#fff' : '#2563eb', fontWeight: 'bold' }}>{tur}</Text>
+                        <Text style={{ color: etkinlikTuru === tur ? '#fff' : colors.primary, fontWeight: 'bold' }}>{tur}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 </View>
                 {/* Zorluk Seviyesi tag seçimi */}
                 <View style={{ marginBottom: 18 }}>
-                  <Text style={{ fontWeight: 'bold', color: '#2563eb', marginBottom: 6 }}>Zorluk Seviyesi:</Text>
+                  <Text style={{ fontWeight: 'bold', color: colors.primary, marginBottom: 6 }}>Zorluk Seviyesi:</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {zorlukSeviyesiList.map((zorluk) => (
                       <TouchableOpacity
@@ -475,56 +466,44 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
                           paddingVertical: 8,
                           paddingHorizontal: 16,
                           borderRadius: 18,
-                          backgroundColor: zorlukSeviyesi === zorluk ? '#2563eb' : '#e5e7eb',
+                          backgroundColor: zorlukSeviyesi === zorluk ? colors.primary : colors.border,
                           marginRight: 8,
                           marginBottom: 8,
                         }}
                         onPress={() => setZorlukSeviyesi(zorluk)}
                         disabled={loading}
                       >
-                        <Text style={{ color: zorlukSeviyesi === zorluk ? '#fff' : '#2563eb', fontWeight: 'bold' }}>{zorluk}</Text>
+                        <Text style={{ color: zorlukSeviyesi === zorluk ? '#fff' : colors.primary, fontWeight: 'bold' }}>{zorluk}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 </View>
-                {/* Etkinlik Süresi alanı */}
-                <View style={{ marginBottom: 18 }}>
-                  <Text style={{ fontWeight: 'bold', color: '#2563eb', marginBottom: 6 }}>Etkinlik Süresi:</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="örn. 2 gün, 5 saat"
-                    value={etkinlikSuresi}
-                    onChangeText={setEtkinlikSuresi}
-                    editable={!loading}
-                    placeholderTextColor="#64748b"
-                  />
-                </View>
                 {/* Etkinlik Yeri arama ve seçim arayüzü */}
                 <View style={{ marginBottom: 18 }}>
-                  <Text style={{ fontWeight: 'bold', color: '#2563eb', marginBottom: 6 }}>Etkinlik Yeri:</Text>
+                  <Text style={{ fontWeight: 'bold', color: colors.primary, marginBottom: 6 }}>Etkinlik Yeri:</Text>
                   <TouchableOpacity
-                    style={{ backgroundColor: showCampingAreaSearch ? '#2563eb' : '#e5e7eb', borderRadius: 12, padding: 12, alignItems: 'center', marginBottom: 8 }}
+                    style={{ backgroundColor: showCampingAreaSearch ? colors.primary : colors.border, borderRadius: 12, padding: 12, alignItems: 'center', marginBottom: 8 }}
                     onPress={() => setShowCampingAreaSearch(v => !v)}
                   >
-                    <Text style={{ color: showCampingAreaSearch ? '#fff' : '#2563eb', fontWeight: 'bold' }}>
+                    <Text style={{ color: showCampingAreaSearch ? '#fff' : colors.primary, fontWeight: 'bold' }}>
                       {showCampingAreaSearch ? 'Etkinlik Yeri Aramasını Gizle' : 'Etkinlik Yeri Ara'}
                     </Text>
                   </TouchableOpacity>
                   {showCampingAreaSearch && (
                     <>
                       <TextInput
-                        style={styles.input}
+                        style={[styles.input, { borderColor: colors.primary, backgroundColor: colors.surface, color: colors.text }]}
                         placeholder="Etkinlik Yeri ara (en az 3 harf)"
                         value={campingAreaSearchText}
                         onChangeText={setCampingAreaSearchText}
-                        placeholderTextColor="#64748b"
+                        placeholderTextColor={colors.muted}
                       />
                       {campingAreaSearchText.length >= 3 && searchCampingAreas.length > 0 && (
-                        <View style={{ borderWidth: 1, borderColor: '#2563eb', borderRadius: 12, backgroundColor: '#fff', marginTop: 4 }}>
+                        <View style={{ borderWidth: 1, borderColor: colors.primary, borderRadius: 12, backgroundColor: colors.surface, marginTop: 4 }}>
                           {searchCampingAreas.map(area => (
                             <TouchableOpacity
                               key={area.id}
-                              style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', backgroundColor: selectedCampingAreaId === area.id ? '#f3f4f6' : '#fff' }}
+                              style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: selectedCampingAreaId === area.id ? colors.surfaceVariant : colors.surface }}
                               onPress={() => {
                                 setSelectedCampingAreaId(area.id);
                                 setEtkinlikYeri(area.name);
@@ -532,7 +511,7 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
                                 setSearchCampingAreas([]);
                               }}
                             >
-                              <Text style={{ color: '#1f2937', fontSize: 15 }}>{area.name}</Text>
+                              <Text style={{ color: colors.text, fontSize: 15 }}>{area.name}</Text>
                             </TouchableOpacity>
                           ))}
                         </View>
@@ -542,16 +521,16 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
                   {/* Seçilen kamp alanı tag olarak gösterilsin */}
                   {selectedCampingAreaId && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 4 }}>
-                      <View style={{ backgroundColor: '#2563eb', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8 }}>
+                      <View style={{ backgroundColor: colors.primary, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8 }}>
                         <Text style={{ color: '#fff', fontWeight: 'bold' }}>{campingAreas.find(a => a.id === selectedCampingAreaId)?.name || etkinlikYeri}</Text>
                       </View>
                       <TouchableOpacity onPress={() => { setSelectedCampingAreaId(null); setEtkinlikYeri(''); }}>
-                        <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 16 }}>×</Text>
+                        <Text style={{ color: colors.danger, fontWeight: 'bold', fontSize: 16 }}>×</Text>
                       </TouchableOpacity>
                     </View>
                   )}
                   <TextInput
-                    style={[styles.input, { marginTop: 8 }]}
+                    style={[styles.input, { marginTop: 8, borderColor: colors.primary, backgroundColor: colors.surface, color: colors.text }]}
                     placeholder="Etkinlik Yeri"
                     value={etkinlikYeri}
                     onChangeText={text => {
@@ -559,82 +538,70 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
                       setSelectedCampingAreaId(null);
                     }}
                     editable={!loading}
-                    placeholderTextColor="#64748b"
+                    placeholderTextColor={colors.muted}
                   />
                 </View>
                 {/* Başlangıç ve Bitiş Tarihi alanları */}
                 <View style={{ marginBottom: 18 }}>
-                  <Text style={{ fontWeight: 'bold', color: '#2563eb', marginBottom: 6 }}>Duyuru Başlangıç Tarihi:</Text>
-                  <TouchableOpacity onPress={() => setShowBaslamaPicker(true)} style={styles.input}>
-                    <Text style={{ color: '#2563eb', fontSize: 16 }}>
-                      {baslama_zamani ? formatDateTR(baslama_zamani) : 'Tarih seçiniz'}
+                  <Text style={{ fontWeight: 'bold', color: colors.primary, marginBottom: 6 }}>Etkinlik Tarihi:</Text>
+                  <TouchableOpacity onPress={() => setShowDateRangePicker(true)} style={[styles.input, { borderColor: colors.primary, backgroundColor: colors.surface }]}>
+                    <Text style={{ color: colors.primary, fontSize: 16 }}>
+                      {baslama_zamani && bitis_zamani && baslama_zamani !== defaultIso
+                        ? `${formatDateTR(baslama_zamani)} - ${formatDateTR(bitis_zamani)}`
+                        : 'Tarih aralığı seçiniz'}
                     </Text>
                   </TouchableOpacity>
-                  <CustomDatePicker
-                    value={baslama_zamani ? new Date(baslama_zamani) : undefined}
-                    visible={showBaslamaPicker}
-                    onChange={(date) => {
-                      if (date && date instanceof Date) {
+                  <DateRangePicker
+                    visible={showDateRangePicker}
+                    onClose={() => setShowDateRangePicker(false)}
+                    onConfirm={(start, end) => {
+                      const toIso = (d: Date) => {
                         const now = new Date();
-                        date.setHours(now.getHours(), now.getMinutes(), 0, 0);
-                        const iso = date.toISOString().replace('T', ' ').slice(0, 19);
-                        setBaslamaZamani(iso);
-                      } else if (typeof date === 'string') {
-                        setBaslamaZamani(date);
-                      } else {
-                        setBaslamaZamani('');
-                      }
+                        d.setHours(now.getHours(), now.getMinutes(), 0, 0);
+                        return d.toISOString().replace('T', ' ').slice(0, 19);
+                      };
+                      setBaslamaZamani(toIso(start));
+                      setBitisZamani(toIso(end));
+                      const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                      setEtkinlikSuresi(diffDays === 1 ? '1 gün' : `${diffDays} gün`);
                     }}
-                    onClose={() => setShowBaslamaPicker(false)}
-                    title="Başlangıç Tarihi Seç"
+                    initialStartDate={baslama_zamani && baslama_zamani !== defaultIso ? new Date(baslama_zamani) : null}
+                    initialEndDate={bitis_zamani && bitis_zamani !== defaultIso ? new Date(bitis_zamani) : null}
+                    title="Etkinlik Tarihi Seçin"
                   />
                 </View>
+                {/* Etkinlik Süresi alanı */}
                 <View style={{ marginBottom: 18 }}>
-                  <Text style={{ fontWeight: 'bold', color: '#2563eb', marginBottom: 6 }}>Duyuru Bitiş Tarihi:</Text>
-                  <TouchableOpacity onPress={() => setShowBitisPicker(true)} style={styles.input}>
-                    <Text style={{ color: '#2563eb', fontSize: 16 }}>
-                      {bitis_zamani ? formatDateTR(bitis_zamani) : 'Tarih seçiniz'}
-                    </Text>
-                  </TouchableOpacity>
-                  <CustomDatePicker
-                    value={bitis_zamani ? new Date(bitis_zamani) : undefined}
-                    visible={showBitisPicker}
-                    onChange={(date) => {
-                      if (date && date instanceof Date) {
-                        const now = new Date();
-                        date.setHours(now.getHours(), now.getMinutes(), 0, 0);
-                        const iso = date.toISOString().replace('T', ' ').slice(0, 19);
-                        setBitisZamani(iso);
-                      } else if (typeof date === 'string') {
-                        setBitisZamani(date);
-                      } else {
-                        setBitisZamani('');
-                      }
-                    }}
-                    onClose={() => setShowBitisPicker(false)}
-                    title="Bitiş Tarihi Seç"
+                  <Text style={{ fontWeight: 'bold', color: colors.primary, marginBottom: 6 }}>Etkinlik Süresi:</Text>
+                  <TextInput
+                    style={[styles.input, { borderColor: colors.primary, backgroundColor: colors.surface, color: colors.text }]}
+                    placeholder="örn. 2 gün, 5 saat"
+                    value={etkinlikSuresi}
+                    onChangeText={setEtkinlikSuresi}
+                    editable={!loading}
+                    placeholderTextColor={colors.muted}
                   />
                 </View>
               </View>
             )}
             <TextInput
-              style={[styles.input, styles.textarea]}
+              style={[styles.input, styles.textarea, { borderColor: colors.primary, backgroundColor: colors.surface, color: colors.text }]}
               placeholder="İçerik"
               value={content}
               onChangeText={setContent}
               multiline
               editable={!loading}
-                    placeholderTextColor="#64748b"
+                    placeholderTextColor={colors.muted}
             />
             {loading ? (
-              <ActivityIndicator style={{ marginVertical: 16 }} color="#1f1f1fff" />
+              <ActivityIndicator style={{ marginVertical: 16 }} color={colors.primary} />
             ) : (
-              <TouchableOpacity style={styles.button} onPress={handleSubmit}>
+              <TouchableOpacity style={[styles.button, { backgroundColor: colors.primary }]} onPress={handleSubmit}>
                 <Text style={styles.buttonText}>Duyuru Ekle</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-              <Text style={styles.cancelButtonText}>Vazgeç</Text>
+            <TouchableOpacity style={[styles.cancelButton, { backgroundColor: colors.border }]} onPress={onClose}>
+              <Text style={[styles.cancelButtonText, { color: colors.primary }]}>Vazgeç</Text>
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>

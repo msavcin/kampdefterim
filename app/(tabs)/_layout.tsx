@@ -8,6 +8,7 @@ import { View, TouchableOpacity, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import { emit } from '../../lib/eventBus';
+import { useTheme } from '../../components/ThemeProvider';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -15,6 +16,7 @@ export default function TabLayout() {
   const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(true); // Default true, false ise duyurular disabled
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { colors } = useTheme();
 
   useEffect(() => {
     (async () => {
@@ -106,15 +108,15 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#ffffff',
+          backgroundColor: colors.tabBar,
           borderTopWidth: 1,
-          borderTopColor: '#e5e7eb',
+          borderTopColor: colors.tabBarBorder,
           paddingTop: 8,
           paddingBottom: insets.bottom + 8,
           height: 70 + insets.bottom,
         },
-        tabBarActiveTintColor: '#059669',
-        tabBarInactiveTintColor: '#6b7280',
+        tabBarActiveTintColor: colors.tabBarActive,
+        tabBarInactiveTintColor: colors.tabBarInactive,
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',
@@ -140,7 +142,7 @@ export default function TabLayout() {
             ),
             tabBarIcon: ({ color, size }) => (
               <View style={{ position: 'relative' }}>
-                <tab.icon color={tab.disabled ? '#000000ff' : color} size={size} style={{ opacity: tab.disabled ? 0.5 : 1 }} />
+                <tab.icon color={tab.disabled ? colors.muted : color} size={size} style={{ opacity: tab.disabled ? 0.5 : 1 }} />
                 {/* Guest kullanıcı için disabled tab'larda Premium badge */}
                 {guestDisabled && tab.disabled && tab.name !== 'index' && tab.name !== 'favorites' && tab.name !== 'profile' && (
                   <TouchableOpacity
@@ -149,14 +151,14 @@ export default function TabLayout() {
                       position: 'absolute',
                       top: -4,
                       right: -8,
-                      backgroundColor: '#059669',
+                      backgroundColor: colors.primary,
                       borderRadius: 10,
                       width: 20,
                       height: 20,
                       alignItems: 'center',
                       justifyContent: 'center',
                       borderWidth: 1.5,
-                      borderColor: '#fff',
+                      borderColor: colors.tabBar,
                     }}
                   >
                     <Crown size={12} color="#fff" fill="#fff" />

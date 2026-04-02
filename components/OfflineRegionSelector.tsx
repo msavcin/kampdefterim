@@ -8,6 +8,7 @@ import { getDatabase } from '@/lib/database';
 import { getLocationNameFromOSM } from '@/lib/osmReverseGeocode';
 import type { CampingArea } from '@/lib/database';
 import { useFocusEffect } from '@react-navigation/native';
+import { useTheme } from '@/components/ThemeProvider';
 
 interface CachedRegion {
   id: string;
@@ -28,6 +29,7 @@ interface OfflineRegionSelectorProps {
 const CACHED_REGIONS_KEY = 'offline_cached_regions';
 
 export default function OfflineRegionSelector({ user }: OfflineRegionSelectorProps) {
+  const { colors } = useTheme();
   // offline_radius_km değerine göre yarıçap seçenekleri ve varsayılan değer
   const maxRadius = user?.offline_radius_km || 20;
   const radiusOptions = maxRadius === 50 
@@ -299,17 +301,17 @@ export default function OfflineRegionSelector({ user }: OfflineRegionSelectorPro
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>📦 Offline Bölge İndirme</Text>
-      <Text style={styles.subtitle}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.surface }]}>
+      <Text style={[styles.title, { color: colors.text }]}>📦 Offline Bölge İndirme</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
         Seçtiğiniz bölgeyi cihazınıza indirerek internet olmadan kullanabilirsiniz.
       </Text>
 
       {/* Mevcut konum */}
       {currentLocation && (
-        <View style={styles.infoBox}>
-          <MapPin size={18} color="#10b981" />
-          <Text style={styles.infoText}>
+        <View style={[styles.infoBox, { backgroundColor: colors.success + '15' }]}>
+          <MapPin size={18} color={colors.success} />
+          <Text style={[styles.infoText, { color: colors.success }]}>
             Mevcut konum: {currentLocationName || `${currentLocation.latitude.toFixed(4)}, ${currentLocation.longitude.toFixed(4)}`}
           </Text>
         </View>
@@ -317,7 +319,7 @@ export default function OfflineRegionSelector({ user }: OfflineRegionSelectorPro
 
       {/* Yarıçap seçici */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Bölge Yarıçapı</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Bölge Yarıçapı</Text>
         <View style={styles.radiusGrid}>
           {radiusOptions.map(radius => (
             <TouchableOpacity
@@ -325,16 +327,18 @@ export default function OfflineRegionSelector({ user }: OfflineRegionSelectorPro
               onPress={() => setSelectedRadius(radius)}
               style={[
                 styles.radiusButton,
-                selectedRadius === radius && styles.radiusButtonActive
+                { backgroundColor: colors.surfaceVariant },
+                selectedRadius === radius && [styles.radiusButtonActive, { backgroundColor: colors.success + '20', borderColor: colors.success }]
               ]}
             >
               <Text style={[
                 styles.radiusText,
-                selectedRadius === radius && styles.radiusTextActive
+                { color: colors.text },
+                selectedRadius === radius && { color: colors.success }
               ]}>
                 {radius} km
               </Text>
-              <Text style={styles.radiusSize}>~{estimateSize(radius)} MB</Text>
+              <Text style={[styles.radiusSize, { color: colors.textSecondary }]}>~{estimateSize(radius)} MB</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -346,6 +350,7 @@ export default function OfflineRegionSelector({ user }: OfflineRegionSelectorPro
         disabled={downloading || !currentLocation}
         style={[
           styles.downloadButton,
+          { backgroundColor: colors.success },
           (downloading || !currentLocation) && styles.downloadButtonDisabled
         ]}
       >
@@ -358,46 +363,46 @@ export default function OfflineRegionSelector({ user }: OfflineRegionSelectorPro
       {/* Favori Alanlar */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>❤️ Favori Alanlarım</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>❤️ Favori Alanlarım</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={styles.favoriteCount}>{favorites.length} alan</Text>
+            <Text style={[styles.favoriteCount, { color: colors.textSecondary }]}>{favorites.length} alan</Text>
             <TouchableOpacity
               onPress={() => {
                 console.log('[OfflineRegionSelector] Manuel refresh tetiklendi');
                 loadFavorites();
               }}
               disabled={loadingFavorites}
-              style={styles.refreshButton}
+              style={[styles.refreshButton, { backgroundColor: colors.success + '15', borderColor: colors.success }]}
             >
               {loadingFavorites ? (
-                <ActivityIndicator size="small" color="#10b981" />
+                <ActivityIndicator size="small" color={colors.success} />
               ) : (
-                <RefreshCw size={16} color="#10b981" />
+                <RefreshCw size={16} color={colors.success} />
               )}
             </TouchableOpacity>
           </View>
         </View>
-        <Text style={styles.sectionSubtitle}>
+        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
           Favori kamp alanlarınızı offline kullanmak için indirin.
         </Text>
         
         {loadingFavorites && favorites.length === 0 ? (
-          <ActivityIndicator size="small" color="#10b981" style={{ marginVertical: 20 }} />
+          <ActivityIndicator size="small" color={colors.success} style={{ marginVertical: 20 }} />
         ) : favorites.length === 0 ? (
           <View style={styles.emptyFavorites}>
-            <Heart size={32} color="#d1d5db" />
-            <Text style={styles.emptyFavoritesText}>Henüz favori alanınız yok</Text>
-            <Text style={styles.emptyFavoritesSubtext}>Haritadan kamp alanlarını favorilerinize ekleyin</Text>
+            <Heart size={32} color={colors.muted} />
+            <Text style={[styles.emptyFavoritesText, { color: colors.textSecondary }]}>Henüz favori alanınız yok</Text>
+            <Text style={[styles.emptyFavoritesSubtext, { color: colors.muted }]}>Haritadan kamp alanlarını favorilerinize ekleyin</Text>
           </View>
         ) : (
           favorites.map(favorite => (
-            <View key={favorite.id} style={styles.favoriteCard}>
+            <View key={favorite.id} style={[styles.favoriteCard, { backgroundColor: colors.danger + '10', borderColor: colors.danger + '30' }]}>
               <View style={styles.favoriteInfo}>
-                <Heart size={16} color="#ef4444" fill="#ef4444" />
+                <Heart size={16} color={colors.danger} fill={colors.danger} />
                 <View style={styles.favoriteDetails}>
-                  <Text style={styles.favoriteName}>{favorite.name}</Text>
+                  <Text style={[styles.favoriteName, { color: colors.text }]}>{favorite.name}</Text>
                   {favorite.latitude && favorite.longitude && (
-                    <Text style={styles.favoriteMeta}>
+                    <Text style={[styles.favoriteMeta, { color: colors.textSecondary }]}>
                       📍 {favorite.latitude.toFixed(4)}, {favorite.longitude.toFixed(4)}
                     </Text>
                   )}
@@ -408,6 +413,7 @@ export default function OfflineRegionSelector({ user }: OfflineRegionSelectorPro
                 disabled={downloadingFavoriteId === favorite.id}
                 style={[
                   styles.favoriteDownloadButton,
+                  { backgroundColor: colors.success },
                   downloadingFavoriteId === favorite.id && styles.favoriteDownloadButtonDisabled
                 ]}
               >
@@ -426,23 +432,23 @@ export default function OfflineRegionSelector({ user }: OfflineRegionSelectorPro
       {cachedRegions.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>💾 İndirilmiş Bölgeler</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>💾 İndirilmiş Bölgeler</Text>
             <View style={styles.totalSize}>
-              <HardDrive size={16} color="#6b7280" />
-              <Text style={styles.totalSizeText}>{getTotalCacheSize()} MB</Text>
+              <HardDrive size={16} color={colors.textSecondary} />
+              <Text style={[styles.totalSizeText, { color: colors.textSecondary }]}>{getTotalCacheSize()} MB</Text>
             </View>
           </View>
           
           {cachedRegions.map(region => (
-            <View key={region.id} style={styles.regionCard}>
+            <View key={region.id} style={[styles.regionCard, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
               <View style={styles.regionInfo}>
-                <MapPin size={16} color="#10b981" />
+                <MapPin size={16} color={colors.success} />
                 <View style={styles.regionDetails}>
-                  <Text style={styles.regionName}>{region.name}</Text>
-                  <Text style={styles.regionMeta}>
+                  <Text style={[styles.regionName, { color: colors.text }]}>{region.name}</Text>
+                  <Text style={[styles.regionMeta, { color: colors.textSecondary }]}>
                     {region.radiusKm} km • {region.sizeMB} MB
                   </Text>
-                  <Text style={styles.regionDate}>
+                  <Text style={[styles.regionDate, { color: colors.muted }]}>
                     {new Date(region.cachedAt).toLocaleDateString('tr-TR')}
                   </Text>
                 </View>
@@ -460,15 +466,15 @@ export default function OfflineRegionSelector({ user }: OfflineRegionSelectorPro
                 }}
                 style={styles.deleteButton}
               >
-                <Trash2 size={18} color="#ef4444" />
+                <Trash2 size={18} color={colors.danger} />
               </TouchableOpacity>
             </View>
           ))}
         </View>
       )}
 
-      <View style={styles.infoBox}>
-        <Text style={styles.helpText}>
+      <View style={[styles.infoBox, { backgroundColor: colors.success + '15' }]}>
+        <Text style={[styles.helpText, { color: colors.success }]}>
           💡 İpucu: WiFi bağlantısı kullanarak indirme yapmanız önerilir.
         </Text>
       </View>
@@ -480,30 +486,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    backgroundColor: '#fff',
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: '#6b7280',
     marginBottom: 20,
   },
   infoBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0fdf4',
     padding: 12,
     borderRadius: 8,
     marginBottom: 20,
   },
   infoText: {
     fontSize: 13,
-    color: '#059669',
     marginLeft: 8,
     flex: 1,
   },
@@ -519,7 +520,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
     marginBottom: 12,
   },
   totalSize: {
@@ -529,7 +529,6 @@ const styles = StyleSheet.create({
   },
   totalSizeText: {
     fontSize: 13,
-    color: '#6b7280',
     fontWeight: '500',
   },
   radiusGrid: {
@@ -540,31 +539,22 @@ const styles = StyleSheet.create({
   radiusButton: {
     flex: 1,
     minWidth: '45%',
-    backgroundColor: '#f3f4f6',
     padding: 12,
     borderRadius: 8,
     borderWidth: 2,
     borderColor: 'transparent',
   },
   radiusButtonActive: {
-    backgroundColor: '#d1fae5',
-    borderColor: '#10b981',
   },
   radiusText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#1f2937',
     marginBottom: 4,
-  },
-  radiusTextActive: {
-    color: '#059669',
   },
   radiusSize: {
     fontSize: 12,
-    color: '#6b7280',
   },
   downloadButton: {
-    backgroundColor: '#10b981',
     padding: 16,
     borderRadius: 10,
     flexDirection: 'row',
@@ -584,12 +574,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f9fafb',
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
   },
   regionInfo: {
     flexDirection: 'row',
@@ -603,45 +591,37 @@ const styles = StyleSheet.create({
   regionName: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#1f2937',
     marginBottom: 2,
   },
   regionMeta: {
     fontSize: 12,
-    color: '#6b7280',
     marginBottom: 2,
   },
   regionDate: {
     fontSize: 11,
-    color: '#9ca3af',
   },
   deleteButton: {
     padding: 8,
   },
   helpText: {
     fontSize: 13,
-    color: '#059669',
   },
   sectionSubtitle: {
     fontSize: 13,
-    color: '#6b7280',
     marginBottom: 12,
   },
   favoriteCount: {
     fontSize: 13,
-    color: '#6b7280',
     fontWeight: '500',
   },
   favoriteCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fef2f2',
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#fecaca',
   },
   favoriteInfo: {
     flexDirection: 'row',
@@ -655,15 +635,12 @@ const styles = StyleSheet.create({
   favoriteName: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#1f2937',
     marginBottom: 2,
   },
   favoriteMeta: {
     fontSize: 12,
-    color: '#6b7280',
   },
   favoriteDownloadButton: {
-    backgroundColor: '#10b981',
     padding: 10,
     borderRadius: 8,
   },
@@ -673,9 +650,7 @@ const styles = StyleSheet.create({
   refreshButton: {
     padding: 6,
     borderRadius: 6,
-    backgroundColor: '#f0fdf4',
     borderWidth: 1,
-    borderColor: '#10b981',
   },
   emptyFavorites: {
     alignItems: 'center',
@@ -685,12 +660,10 @@ const styles = StyleSheet.create({
   emptyFavoritesText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#6b7280',
     marginTop: 12,
   },
   emptyFavoritesSubtext: {
     fontSize: 13,
-    color: '#9ca3af',
     marginTop: 4,
     textAlign: 'center',
   },

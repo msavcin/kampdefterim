@@ -91,8 +91,10 @@ interface CustomChecklistItem {
 // const checklistData: Record<string, Record<string, ChecklistItem[]>> = {}; // Artık kullanılmıyor
 
 import { useFocusEffect } from '@react-navigation/native';
+import { useTheme } from '../../components/ThemeProvider';
 
 export default function ChecklistScreen({ navigation }: any) {
+  const { colors } = useTheme();
   // State'ler en üstte tanımlanmalı
   const [userRole, setUserRole] = useState<string>('');
   
@@ -1245,13 +1247,13 @@ const removeSharedChecklist = async (shareId: string) => {
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <View style={{ flex: 1 }}>
               <TextInput
-                style={[styles.itemText, { borderBottomWidth: 1, borderColor: '#059669', padding: 4, marginBottom: 4 }]}
+                style={[styles.itemText, { borderBottomWidth: 1, borderColor: colors.primary, padding: 4, marginBottom: 4, color: colors.text }]}
                 value={editName}
                 onChangeText={setEditName}
                 placeholder="Item adı"
               />
               <TextInput
-                style={[styles.itemText, { borderBottomWidth: 1, borderColor: '#059669', padding: 4 }]}
+                style={[styles.itemText, { borderBottomWidth: 1, borderColor: colors.primary, padding: 4, color: colors.text }]}
                 value={editCategory}
                 onChangeText={setEditCategory}
                 placeholder="Kategori"
@@ -1278,7 +1280,7 @@ const removeSharedChecklist = async (shareId: string) => {
                 <Text style={{ color: 'white' }}>Kaydet</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#ef4444' }]}
+                style={[styles.actionButton, { backgroundColor: colors.danger }]}
                 onPress={() => setEditingItem(null)}
               >
                 <Text style={{ color: 'white' }}>İptal</Text>
@@ -1291,24 +1293,24 @@ const removeSharedChecklist = async (shareId: string) => {
 
     return (
       <TouchableOpacity
-        style={[styles.checklistItem, checkedItems[item.id] && styles.checkedItem]}
+        style={[styles.checklistItem, { borderBottomColor: colors.surfaceVariant }, checkedItems[item.id] && [styles.checkedItem, { backgroundColor: colors.primaryLight }]]}
         onPress={() => toggleItem(item.id)}
       >
         <View style={styles.checkboxContainer}>
           {checkedItems[item.id] ? (
-            <CheckSquare size={24} color="#059669" />
+            <CheckSquare size={24} color={colors.primary} />
           ) : (
-            <Square size={24} color="#9ca3af" />
+            <Square size={24} color={colors.muted} />
           )}
         </View>
-        <Text style={[styles.itemText, checkedItems[item.id] && styles.checkedText]}>
+        <Text style={[styles.itemText, { color: colors.textSecondary }, checkedItems[item.id] && [styles.checkedText, { color: colors.primary }]]}>
           {item.name}
         </Text>
         {(isCustom || (isStandardItem && userRole === 'superadmin')) && (
           <View style={{ flexDirection: 'row' }}>
             {isStandardItem && userRole === 'superadmin' && (
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#3b82f6', marginRight: 8 }]}
+                style={[styles.actionButton, { backgroundColor: colors.info, marginRight: 8 }]}
                 onPress={() => {
                   setEditingItem(item);
                   setEditName(item.name);
@@ -1319,7 +1321,7 @@ const removeSharedChecklist = async (shareId: string) => {
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: '#ef4444' }]}
+              style={[styles.actionButton, { backgroundColor: colors.danger }]}
               onPress={() => isStandardItem ? deleteStandardItem(item.id.toString()) : deleteCustomItem(item.id)}
             >
               <Text style={{ color: 'white' }}>Sil</Text>
@@ -1331,29 +1333,29 @@ const removeSharedChecklist = async (shareId: string) => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
       <ScrollView 
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            colors={['#059669']}
-            tintColor="#059669"
+            colors={[colors.primary]}
+            tintColor={colors.primary}
           />
         }
       >
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <View>
-              <Text style={styles.headerTitle}>Kamp Checklist</Text>
-              <Text style={styles.headerSubtitle}>Kamp hazırlığınızı organize edin</Text>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>Kamp Checklist</Text>
+              <Text style={[styles.headerSubtitle, { color: colors.muted }]}>Kamp hazırlığınızı organize edin</Text>
             </View>
             {Object.values(checkedItems).some(v => v) && (
               <View style={{ flex: 1, alignItems: 'flex-end', maxWidth: '50%' }}>
                 <TouchableOpacity
                   onPress={clearChecklist}
-                  style={{ backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 8, borderRadius: 8, maxWidth: '100%' }}
+                  style={{ backgroundColor: colors.danger, paddingVertical: 8, paddingHorizontal: 8, borderRadius: 8, maxWidth: '100%' }}
                   activeOpacity={0.8}
                 >
                   <Text
@@ -1369,28 +1371,29 @@ const removeSharedChecklist = async (shareId: string) => {
           </View>
         </View>
 
-        <View style={styles.progressContainer}>
+        <View style={[styles.progressContainer, { backgroundColor: colors.surface }]}>
           <View style={styles.progressHeader}>
-            <Text style={styles.progressTitle}>İlerleme</Text>
-            <Text style={styles.progressPercentage}>{completionPercentage}%</Text>
+            <Text style={[styles.progressTitle, { color: colors.text }]}>İlerleme</Text>
+            <Text style={[styles.progressPercentage, { color: colors.primary }]}>{completionPercentage}%</Text>
           </View>
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${completionPercentage}%` }]} />
+          <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+            <View style={[styles.progressFill, { width: `${completionPercentage}%`, backgroundColor: colors.primary }]} />
           </View>
-          <Text style={styles.progressText}>
+          <Text style={[styles.progressText, { color: colors.muted }]}>
             {completedCount} / {totalCount} öğe tamamlandı
           </Text>
         </View>
 
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Mevsim Seçin</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Mevsim Seçin</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
             {seasons.map((season) => (
               <TouchableOpacity
                 key={season.id}
                 style={[
                   styles.seasonCard,
-                  selectedSeason === season.id && styles.selectedCard,
+                  { backgroundColor: colors.surface },
+                  selectedSeason === season.id && [styles.selectedCard, { backgroundColor: colors.primary }],
                   { borderColor: season.color }
                 ]}
                 onPress={() => setSelectedSeason(season.id)}
@@ -1401,6 +1404,7 @@ const removeSharedChecklist = async (shareId: string) => {
                 />
                 <Text style={[
                   styles.cardText,
+                  { color: colors.textSecondary },
                   selectedSeason === season.id && styles.selectedCardText
                 ]}>
                   {season.name}
@@ -1411,14 +1415,15 @@ const removeSharedChecklist = async (shareId: string) => {
         </View>
 
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Kamp Türü Seçin</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Kamp Türü Seçin</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
             {campingTypes.map((type) => (
               <TouchableOpacity
                 key={type.id}
                 style={[
                   styles.typeCard,
-                  selectedCampingType === type.id && styles.selectedCard,
+                  { backgroundColor: colors.surface },
+                  selectedCampingType === type.id && [styles.selectedCard, { backgroundColor: colors.primary }],
                   { borderColor: type.color }
                 ]}
                 onPress={() => setSelectedCampingType(type.id)}
@@ -1435,6 +1440,7 @@ const removeSharedChecklist = async (shareId: string) => {
                 />
                 <Text style={[
                   styles.cardText,
+                  { color: colors.textSecondary },
                   selectedCampingType === type.id && styles.selectedCardText
                 ]}>
                   {type.name}
@@ -1445,28 +1451,28 @@ const removeSharedChecklist = async (shareId: string) => {
         </View>
 
         <View style={styles.checklistContainer}>
-          <Text style={styles.sectionTitle}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
             {seasons.find(s => s.id === selectedSeason)?.name} - {campingTypes.find(t => t.id === selectedCampingType)?.name} Listesi
           </Text>
           {/* Eğer superadmin ve standart checklist yoksa oluşturma butonu göster */}
           {userRole === 'superadmin' && !standardChecklist && (
             <TouchableOpacity
-              style={[styles.addCategoryButton, { marginBottom: 12 }]}
+              style={[styles.addCategoryButton, { marginBottom: 12, borderColor: colors.primary, backgroundColor: colors.surface }]}
               onPress={handleCreateStandardChecklist}
             >
-              <Plus size={20} color="#059669" />
-              <Text style={styles.addCategoryText}>Yeni Standart Checklist Oluştur</Text>
+              <Plus size={20} color={colors.primary} />
+              <Text style={[styles.addCategoryText, { color: colors.primary }]}>Yeni Standart Checklist Oluştur</Text>
             </TouchableOpacity>
           )}
           {Object.entries(groupedItems).map(([category, items]) => (
-            <View key={category} style={styles.categoryContainer}>
+            <View key={category} style={[styles.categoryContainer, { backgroundColor: colors.surface }]}>
               <TouchableOpacity
-                style={styles.categoryHeader}
+                style={[styles.categoryHeader, { backgroundColor: colors.surfaceVariant, borderBottomColor: colors.border }]}
                 onPress={() => toggleCategory(category)}
                 activeOpacity={0.8}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flex: 1 }}>
-                  <Text style={styles.categoryTitle}>{category}</Text>
+                  <Text style={[styles.categoryTitle, { color: colors.text, backgroundColor: 'transparent', borderBottomWidth: 0 }]}>{category}</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     {userRole === 'superadmin' && standardChecklist && (
                       <TouchableOpacity
@@ -1477,14 +1483,14 @@ const removeSharedChecklist = async (shareId: string) => {
                           setShowAddModal(true);
                         }}
                       >
-                        <Plus size={16} color="#059669" />
+                        <Plus size={16} color={colors.primary} />
                       </TouchableOpacity>
                     )}
                     <View style={{ marginLeft: 8 }}>
                       {openCategories[category] ? (
-                        <ChevronUp size={20} color="#64748b" />
+                        <ChevronUp size={20} color={colors.muted} />
                       ) : (
-                        <ChevronDown size={20} color="#64748b" />
+                        <ChevronDown size={20} color={colors.muted} />
                       )}
                     </View>
                   </View>
@@ -1503,24 +1509,24 @@ const removeSharedChecklist = async (shareId: string) => {
           ))}
           {userRole === 'superadmin' && standardChecklist && (
             <TouchableOpacity
-              style={styles.addCategoryButton}
+              style={[styles.addCategoryButton, { borderColor: colors.primary, backgroundColor: colors.surface }]}
               onPress={() => {
                 setSelectedCategory('Yeni Kategori');
                 setShowAddModal(true);
               }}
             >
-              <Plus size={20} color="#059669" />
-              <Text style={styles.addCategoryText}>Yeni Kategori Ekle</Text>
+              <Plus size={20} color={colors.primary} />
+              <Text style={[styles.addCategoryText, { color: colors.primary }]}>Yeni Kategori Ekle</Text>
             </TouchableOpacity>
           )}
         </View>
 
         {/* Kişisel checklistler bölümü */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Kişisel Checklistlerim</Text>
-          <TouchableOpacity style={styles.addCategoryButton} onPress={() => setShowCreateChecklistModal(true)}>
-            <Plus size={20} color="#059669" />
-            <Text style={styles.addCategoryText}>Yeni Kişisel Checklist Oluştur</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Kişisel Checklistlerim</Text>
+          <TouchableOpacity style={[styles.addCategoryButton, { borderColor: colors.primary, backgroundColor: colors.surface }]} onPress={() => setShowCreateChecklistModal(true)}>
+            <Plus size={20} color={colors.primary} />
+            <Text style={[styles.addCategoryText, { color: colors.primary }]}>Yeni Kişisel Checklist Oluştur</Text>
           </TouchableOpacity>
           {customChecklists.map((cl, idx) => {
             if (idx === 0) {
@@ -1528,56 +1534,56 @@ const removeSharedChecklist = async (shareId: string) => {
             }
             console.log('[DEBUG RENDER] customChecklistItemsApi[cl.id]:', cl.id, customChecklistItemsApi[cl.id]);
             return (
-              <View key={cl.id} style={styles.categoryContainer}>
-                <View style={styles.categoryHeader}>
+              <View key={cl.id} style={[styles.categoryContainer, { backgroundColor: colors.surface }]}>
+                <View style={[styles.categoryHeader, { backgroundColor: colors.surfaceVariant, borderBottomColor: colors.border }]}>
                   {editingChecklistId === cl.id ? (
                     <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                       <TextInput
-                        style={[styles.categoryTitle, { borderBottomWidth: 1, borderColor: '#059669', flex: 1, marginRight: 8 }]}
+                        style={[styles.categoryTitle, { borderBottomWidth: 1, borderColor: colors.primary, flex: 1, marginRight: 8, color: colors.text, backgroundColor: 'transparent' }]}
                         value={editChecklistName}
                         onChangeText={setEditChecklistName}
                         placeholder="Checklist başlığı"
                       />
                       <TouchableOpacity
-                        style={[styles.addItemButton, { marginRight: 4 }]}
+                        style={[styles.addItemButton, { marginRight: 4, backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
                         onPress={async () => {
                           await updateCustomChecklistName(cl.id, editChecklistName);
                           setEditingChecklistId(null);
                         }}
                       >
-                        <CheckCircle2 size={16} color="#059669" />
+                        <CheckCircle2 size={16} color={colors.primary} />
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={[styles.addItemButton]}
+                        style={[styles.addItemButton, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
                         onPress={() => setEditingChecklistId(null)}
                       >
-                        <X size={16} color="#ef4444" />
+                        <X size={16} color={colors.danger} />
                       </TouchableOpacity>
                     </View>
                   ) : (
                     <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Text style={styles.categoryTitle}>{cl.name}</Text>
+                      <Text style={[styles.categoryTitle, { color: colors.text, backgroundColor: 'transparent', borderBottomWidth: 0 }]}>{cl.name}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         {/* DÜZENLE BUTONU */}
-                        <TouchableOpacity style={styles.addItemButton} onPress={() => {
+                        <TouchableOpacity style={[styles.addItemButton, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]} onPress={() => {
                           setEditingChecklistId(cl.id);
                           setEditChecklistName(cl.name);
                         }}>
-                          <Edit size={16} color="#3b82f6" />
+                          <Edit size={16} color={colors.info} />
                         </TouchableOpacity>
                         {/* PAYLAŞ BUTONU */}
-                        <TouchableOpacity style={[styles.addItemButton, { marginLeft: 8 }]} onPress={() => handleShareButton(cl.id)}>
-                          <Share2 size={16} color="#0ea5e9" />
+                        <TouchableOpacity style={[styles.addItemButton, { marginLeft: 8, backgroundColor: colors.primaryLight, borderColor: colors.primary }]} onPress={() => handleShareButton(cl.id)}>
+                          <Share2 size={16} color={colors.info} />
                         </TouchableOpacity>
                         {/* EKLE BUTONU */}
-                        <TouchableOpacity style={[styles.addItemButton, { marginLeft: 8 }]} onPress={() => {
+                        <TouchableOpacity style={[styles.addItemButton, { marginLeft: 8, backgroundColor: colors.primaryLight, borderColor: colors.primary }]} onPress={() => {
                           setSelectedChecklistId(cl.id);
                           setShowAddChecklistItemModal(true);
                         }}>
-                          <Plus size={16} color="#059669" />
+                          <Plus size={16} color={colors.primary} />
                         </TouchableOpacity>
                         {/* SİL BUTONU */}
-                        <TouchableOpacity style={[styles.addItemButton, { marginLeft: 8 }]} onPress={async () => {
+                        <TouchableOpacity style={[styles.addItemButton, { marginLeft: 8, backgroundColor: colors.primaryLight, borderColor: colors.primary }]} onPress={async () => {
                           try {
                             const token = await getToken();
                             const resShares = await fetch(`${API_URL}/checklst_shares?checklist_id=${cl.id}`, {
@@ -1606,7 +1612,7 @@ const removeSharedChecklist = async (shareId: string) => {
                             Alert.alert('Hata', 'Checklist silinirken bir hata oluştu');
                           }
                         }}>
-                          <Trash2 size={16} color="#ef4444" />
+                          <Trash2 size={16} color={colors.danger} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -1619,28 +1625,28 @@ const removeSharedChecklist = async (shareId: string) => {
                   return (
                     <TouchableOpacity
                       key={item.id}
-                      style={[styles.checklistItem, checked && styles.checkedItem]}
+                      style={[styles.checklistItem, { borderBottomColor: colors.surfaceVariant }, checked && [styles.checkedItem, { backgroundColor: colors.primaryLight }]]}
                       onPress={() => {
                         setCheckedItems(prev => ({ ...prev, [key]: !prev[key] }));
                       }}
                     >
                       <View style={styles.checkboxContainer}>
                         {checked ? (
-                          <CheckSquare size={24} color="#059669" />
+                          <CheckSquare size={24} color={colors.primary} />
                         ) : (
-                          <Square size={24} color="#9ca3af" />
+                          <Square size={24} color={colors.muted} />
                         )}
                       </View>
                       {isEditing ? (
                         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                           <TextInput
-                            style={[styles.itemText, { borderBottomWidth: 1, borderColor: '#059669', padding: 4, marginRight: 8 }]}
+                            style={[styles.itemText, { borderBottomWidth: 1, borderColor: colors.primary, padding: 4, marginRight: 8, color: colors.text }]}
                             value={editName}
                             onChangeText={setEditName}
                             placeholder="Item adı"
                           />
                           <TouchableOpacity
-                            style={[styles.actionButton, { backgroundColor: '#059669', marginRight: 4 }]}
+                            style={[styles.actionButton, { backgroundColor: colors.primary, marginRight: 4 }]}
                             onPress={async () => {
                               await updateCustomChecklistItem(item.id, editName);
                               setEditingItem(null);
@@ -1649,7 +1655,7 @@ const removeSharedChecklist = async (shareId: string) => {
                             <CheckSquare size={20} color="white" />
                           </TouchableOpacity>
                           <TouchableOpacity
-                            style={[styles.actionButton, { backgroundColor: '#ef4444' }]}
+                            style={[styles.actionButton, { backgroundColor: colors.danger }]}
                             onPress={() => setEditingItem(null)}
                           >
                             <Square size={20} color="white" />
@@ -1657,10 +1663,10 @@ const removeSharedChecklist = async (shareId: string) => {
                         </View>
                       ) : (
                         <>
-                          <Text style={[styles.itemText, checked && styles.checkedText]}>{item.item_name}</Text>
+                          <Text style={[styles.itemText, { color: colors.textSecondary }, checked && [styles.checkedText, { color: colors.primary }]]}>{item.item_name}</Text>
                           <View style={{ flexDirection: 'row' }}>
                             <TouchableOpacity
-                              style={[styles.actionButton, { backgroundColor: '#3b82f6', marginRight: 8 }]}
+                              style={[styles.actionButton, { backgroundColor: colors.info, marginRight: 8 }]}
                               onPress={() => {
                                 setEditingItem(item as any);
                                 setEditName(item.item_name);
@@ -1669,7 +1675,7 @@ const removeSharedChecklist = async (shareId: string) => {
                               <Edit size={20} color="white" />
                             </TouchableOpacity>
                             <TouchableOpacity
-                              style={[styles.actionButton, { backgroundColor: '#ef4444', marginRight: 8 }]}
+                              style={[styles.actionButton, { backgroundColor: colors.danger, marginRight: 8 }]}
                               onPress={() => deleteCustomChecklistItem(item.id)}
                             >
                               <Trash2 size={20} color="white" />
@@ -1688,7 +1694,7 @@ const removeSharedChecklist = async (shareId: string) => {
         {/* Paylaşılan Checklistler bölümü */}
         {sharedChecklists.length > 0 && (
           <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>Benimle Paylaşılan Checklistler</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Benimle Paylaşılan Checklistler</Text>
             {sharedChecklists.map((cl, index) => {
               const checklistItems = customChecklistItemsApi[cl.id] || [];
               // Durum badge'i için status ve is_active alanlarını kullan
@@ -1696,10 +1702,10 @@ const removeSharedChecklist = async (shareId: string) => {
               const isActive = (cl as any).is_active !== false;
               const revokedAt = (cl as any).revokedAt;
               return (
-                <View key={`shared-checklist-${cl.id || index}`} style={styles.categoryContainer}>
-                  <View style={styles.categoryHeader}>
+                <View key={`shared-checklist-${cl.id || index}`} style={[styles.categoryContainer, { backgroundColor: colors.surface }]}>
+                  <View style={[styles.categoryHeader, { backgroundColor: colors.surfaceVariant, borderBottomColor: colors.border }]}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.categoryTitle}>
+                      <Text style={[styles.categoryTitle, { color: colors.text, backgroundColor: 'transparent', borderBottomWidth: 0 }]}>
                         {cl.name || (cl as any).title || (cl as any).checklist_name}
                       </Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
@@ -1722,10 +1728,10 @@ const removeSharedChecklist = async (shareId: string) => {
                     {/* Kaldırma butonu */}
                     {cl.share_id && (
                       <TouchableOpacity
-                        style={[styles.addItemButton, { marginLeft: 8 }]}
+                        style={[styles.addItemButton, { marginLeft: 8, backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
                         onPress={() => removeSharedChecklist(cl.share_id!)}
                       >
-                        <Trash2 size={16} color="#ef4444" />
+                        <Trash2 size={16} color={colors.danger} />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1736,19 +1742,19 @@ const removeSharedChecklist = async (shareId: string) => {
                         return (
                           <TouchableOpacity
                             key={item.id || idx}
-                            style={[styles.checklistItem, checked && styles.checkedItem]}
+                            style={[styles.checklistItem, { borderBottomColor: colors.surfaceVariant }, checked && [styles.checkedItem, { backgroundColor: colors.primaryLight }]]}
                             onPress={() => {
                               setSharedCheckedItems(prev => ({ ...prev, [item.id]: !prev[item.id] }));
                             }}
                           >
                             <View style={styles.checkboxContainer}>
                               {checked ? (
-                                <CheckSquare size={24} color="#059669" />
+                                <CheckSquare size={24} color={colors.primary} />
                               ) : (
-                                <Square size={24} color="#9ca3af" />
+                                <Square size={24} color={colors.muted} />
                               )}
                             </View>
-                            <Text style={[styles.itemText, checked && styles.checkedText]}>
+                            <Text style={[styles.itemText, { color: colors.textSecondary }, checked && [styles.checkedText, { color: colors.primary }]]}>
                               {item.item_name}
                             </Text>
                           </TouchableOpacity>
@@ -1758,7 +1764,7 @@ const removeSharedChecklist = async (shareId: string) => {
                   ) : (
                     <Text style={{ 
                       textAlign: 'center',
-                      color: '#6b7280',
+                      color: colors.muted,
                       paddingVertical: 12,
                       fontStyle: 'italic'
                     }}>Bu listede henüz öğe yok</Text>
@@ -1778,36 +1784,36 @@ const removeSharedChecklist = async (shareId: string) => {
             onRequestClose={() => setShowCreateChecklistModal(false)}
           >
             <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.18)' }}>
-              <View style={{ height: '80%', backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.15, shadowRadius: 8 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
-                  <Text style={{ fontSize: 18, fontWeight: '700', color: '#1f2937' }}>Yeni Kişisel Checklist Oluştur</Text>
+              <View style={{ height: '80%', backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.15, shadowRadius: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text }}>Yeni Kişisel Checklist Oluştur</Text>
                   <TouchableOpacity onPress={() => setShowCreateChecklistModal(false)} style={{ padding: 4 }}>
-                    <X size={24} color="#64748b" />
+                    <X size={24} color={colors.muted} />
                   </TouchableOpacity>
                 </View>
                 <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 20 }}>
                   <View style={{ marginBottom: 24 }}>
-                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>Checklist Adı *</Text>
+                    <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 12 }}>Checklist Adı *</Text>
                     <TextInput
                       placeholder="Checklist adı"
                       value={newChecklistName}
                       onChangeText={setNewChecklistName}
-                      style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, backgroundColor: 'white' }}
+                      style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, backgroundColor: colors.surface, color: colors.text }}
                     />
                   </View>
                   <View style={{ marginBottom: 24 }}>
-                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>Checklist Item</Text>
+                    <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 12 }}>Checklist Item</Text>
                     <TextInput
                       placeholder="İlk item adı"
                       value={newChecklistItemName}
                       onChangeText={setNewChecklistItemName}
-                      style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, backgroundColor: 'white' }}
+                      style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, backgroundColor: colors.surface, color: colors.text }}
                     />
                   </View>
                 </View>
-                <View style={{ padding: 20, backgroundColor: 'white', borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
+                <View style={{ padding: 20, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border }}>
                   <TouchableOpacity
-                    style={{ backgroundColor: newChecklistName.trim() ? '#059669' : '#9ca3af', paddingVertical: 16, borderRadius: 8, alignItems: 'center' }}
+                    style={{ backgroundColor: newChecklistName.trim() ? colors.primary : colors.muted, paddingVertical: 16, borderRadius: 8, alignItems: 'center' }}
                     onPress={async () => {
                       if (!newChecklistName.trim()) return;
                       // Önce checklisti oluştur
@@ -1833,15 +1839,15 @@ const removeSharedChecklist = async (shareId: string) => {
         {/* Yeni checklist item modalı */}
         {showAddChecklistItemModal && (
           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.18)', justifyContent: 'center', alignItems: 'center', zIndex: 99 }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, minWidth: 260, alignItems: 'center', elevation: 4 }}>
-              <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 18, color: '#0e7490' }}>Yeni Checklist Item</Text>
+            <View style={{ backgroundColor: colors.surface, borderRadius: 16, padding: 24, minWidth: 260, alignItems: 'center', elevation: 4 }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 18, color: colors.primary }}>Yeni Checklist Item</Text>
               <TextInput
                 placeholder="Item adı"
                 value={newChecklistItemName}
                 onChangeText={setNewChecklistItemName}
-                style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 8, width: 200, marginBottom: 12 }}
+                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 8, width: 200, marginBottom: 12, color: colors.text }}
               />
-              <TouchableOpacity style={{ backgroundColor: '#059669', borderRadius: 8, padding: 10, marginBottom: 8 }} onPress={async () => {
+              <TouchableOpacity style={{ backgroundColor: colors.primary, borderRadius: 8, padding: 10, marginBottom: 8 }} onPress={async () => {
                 if (selectedChecklistId) {
                   await addCustomChecklistItem(selectedChecklistId, newChecklistItemName);
                 }
@@ -1852,7 +1858,7 @@ const removeSharedChecklist = async (shareId: string) => {
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Ekle</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setShowAddChecklistItemModal(false)} style={{ padding: 8 }}>
-                <Text style={{ color: '#64748b', fontWeight: 'bold' }}>Vazgeç</Text>
+                <Text style={{ color: colors.muted, fontWeight: 'bold' }}>Vazgeç</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1873,7 +1879,7 @@ const removeSharedChecklist = async (shareId: string) => {
         <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.18)' }}>
           <View style={{ 
             height: '80%', 
-            backgroundColor: '#fff', 
+            backgroundColor: colors.surface, 
             borderTopLeftRadius: 24, 
             borderTopRightRadius: 24,
             padding: 20,
@@ -1884,7 +1890,7 @@ const removeSharedChecklist = async (shareId: string) => {
             shadowRadius: 8
           }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1f2937' }}>Checklist Paylaş</Text>
+              <Text style={{ fontSize: 20, fontWeight: 'bold', color: colors.text }}>Checklist Paylaş</Text>
               <TouchableOpacity 
                 onPress={() => {
                   setShowShareModal(false);
@@ -1893,11 +1899,11 @@ const removeSharedChecklist = async (shareId: string) => {
                 }}
                 style={{ padding: 8 }}
               >
-                <X size={24} color="#6b7280" />
+                <X size={24} color={colors.muted} />
               </TouchableOpacity>
             </View>
 
-            <Text style={{ fontSize: 16, color: '#4b5563', marginBottom: 12 }}>Paylaşmak istediğiniz arkadaşları seçin:</Text>
+            <Text style={{ fontSize: 16, color: colors.textSecondary, marginBottom: 12 }}>Paylaşmak istediğiniz arkadaşları seçin:</Text>
 
             <ScrollView style={{ flex: 1 }}>
               {(() => {
@@ -1916,7 +1922,7 @@ const removeSharedChecklist = async (shareId: string) => {
                   friendIdAsString: String(friend.id)
                 });
                 return (
-                  <View key={friend.id} style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', backgroundColor: selectedFriends.includes(friend.id) ? '#f0fdf4' : 'white' }}>
+                  <View key={friend.id} style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: selectedFriends.includes(friend.id) ? colors.primaryLight : colors.surface }}>
                     <TouchableOpacity
                       style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
                       onPress={() => {
@@ -1928,22 +1934,22 @@ const removeSharedChecklist = async (shareId: string) => {
                       }}
                       disabled={isShared}
                     >
-                      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#e5e7eb', marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
-                        <User size={24} color="#6b7280" />
+                      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.border, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
+                        <User size={24} color={colors.muted} />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 16, color: '#1f2937', fontWeight: '500' }}>{friend.name}</Text>
-                        <Text style={{ fontSize: 14, color: '#6b7280' }}>{friend.email}</Text>
+                        <Text style={{ fontSize: 16, color: colors.text, fontWeight: '500' }}>{friend.name}</Text>
+                        <Text style={{ fontSize: 14, color: colors.muted }}>{friend.email}</Text>
                       </View>
                       {selectedFriends.includes(friend.id) && !isShared && (
-                        <CheckCircle2 size={24} color="#059669" />
+                        <CheckCircle2 size={24} color={colors.primary} />
                       )}
                     </TouchableOpacity>
                     {isShared ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <View style={{ backgroundColor: '#d1fae5', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4, marginRight: 8, flexDirection: 'row', alignItems: 'center' }}>
-                          <CheckCircle2 size={14} color="#059669" style={{ marginRight: 4 }} />
-                          <Text style={{ color: '#059669', fontWeight: '600', fontSize: 12 }}>Paylaşıldı</Text>
+                        <View style={{ backgroundColor: colors.primaryLight, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4, marginRight: 8, flexDirection: 'row', alignItems: 'center' }}>
+                          <CheckCircle2 size={14} color={colors.primary} style={{ marginRight: 4 }} />
+                          <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 12 }}>Paylaşıldı</Text>
                         </View>
                         <TouchableOpacity
                           style={[styles.addItemButton]}
@@ -1954,7 +1960,7 @@ const removeSharedChecklist = async (shareId: string) => {
                             }
                           }}
                         >
-                          <X size={16} color="#059669" />
+                          <X size={16} color={colors.primary} />
                         </TouchableOpacity>
                       </View>
                     ) : null}
@@ -1966,7 +1972,7 @@ const removeSharedChecklist = async (shareId: string) => {
             <View style={{ paddingVertical: 16 }}>
               <TouchableOpacity
                 style={{
-                  backgroundColor: selectedFriends.length > 0 ? '#059669' : '#d1d5db',
+                  backgroundColor: selectedFriends.length > 0 ? colors.primary : colors.border,
                   padding: 16,
                   borderRadius: 12,
                   alignItems: 'center',
@@ -2010,38 +2016,38 @@ const removeSharedChecklist = async (shareId: string) => {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { paddingHorizontal: 20, paddingVertical: 20, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  headerTitle: { fontSize: 24, fontWeight: '700', color: '#1f2937', marginBottom: 4 },
-  headerSubtitle: { fontSize: 14, color: '#6b7280' },
-  progressContainer: { backgroundColor: 'white', margin: 20, padding: 20, borderRadius: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+  container: { flex: 1 },
+  header: { paddingHorizontal: 20, paddingVertical: 20, borderBottomWidth: 1 },
+  headerTitle: { fontSize: 24, fontWeight: '700', marginBottom: 4 },
+  headerSubtitle: { fontSize: 14 },
+  progressContainer: { margin: 20, padding: 20, borderRadius: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
   progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  progressTitle: { fontSize: 16, fontWeight: '600', color: '#1f2937' },
-  progressPercentage: { fontSize: 18, fontWeight: '700', color: '#059669' },
-  progressBar: { height: 8, backgroundColor: '#e5e7eb', borderRadius: 4, marginBottom: 8 },
-  progressFill: { height: '100%', backgroundColor: '#059669', borderRadius: 4 },
-  progressText: { fontSize: 14, color: '#6b7280', textAlign: 'center' },
+  progressTitle: { fontSize: 16, fontWeight: '600' },
+  progressPercentage: { fontSize: 18, fontWeight: '700' },
+  progressBar: { height: 8, borderRadius: 4, marginBottom: 8 },
+  progressFill: { height: '100%', borderRadius: 4 },
+  progressText: { fontSize: 14, textAlign: 'center' },
   sectionContainer: { marginBottom: 20 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1f2937', paddingHorizontal: 20, marginBottom: 16 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', paddingHorizontal: 20, marginBottom: 16 },
   horizontalScroll: { paddingLeft: 20 },
-  seasonCard: { alignItems: 'center', padding: 16, marginRight: 12, backgroundColor: 'white', borderRadius: 16, borderWidth: 2, minWidth: 100, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-  typeCard: { alignItems: 'center', padding: 16, marginRight: 12, backgroundColor: 'white', borderRadius: 16, borderWidth: 2, minWidth: 110, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-  selectedCard: { backgroundColor: '#059669' },
-  cardText: { fontSize: 12, fontWeight: '600', color: '#374151', marginTop: 8, textAlign: 'center' },
+  seasonCard: { alignItems: 'center', padding: 16, marginRight: 12, borderRadius: 16, borderWidth: 2, minWidth: 100, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+  typeCard: { alignItems: 'center', padding: 16, marginRight: 12, borderRadius: 16, borderWidth: 2, minWidth: 110, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+  selectedCard: { },
+  cardText: { fontSize: 12, fontWeight: '600', marginTop: 8, textAlign: 'center' },
   selectedCardText: { color: 'white' },
   checklistContainer: { paddingHorizontal: 20, paddingBottom: 20 },
-  categoryContainer: { backgroundColor: 'white', borderRadius: 16, marginBottom: 16, overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-  categoryTitle: { fontSize: 16, fontWeight: '600', color: '#1f2937', backgroundColor: '#f9fafb', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  checklistItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  checkedItem: { backgroundColor: '#f0fdf4' },
+  categoryContainer: { borderRadius: 16, marginBottom: 16, overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+  categoryTitle: { fontSize: 16, fontWeight: '600', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  checklistItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  checkedItem: { },
   checkboxContainer: { marginRight: 12 },
-  itemText: { fontSize: 16, color: '#374151', flex: 1 },
-  checkedText: { color: '#059669', textDecorationLine: 'line-through' },
-  categoryHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9fafb', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  addItemButton: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#f0fdf4', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#059669' },
+  itemText: { fontSize: 16, flex: 1 },
+  checkedText: { textDecorationLine: 'line-through' },
+  categoryHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  addItemButton: { width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
   deleteButton: { padding: 8, marginLeft: 8 },
-  addCategoryButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'white', borderRadius: 16, padding: 20, marginTop: 16, borderWidth: 2, borderColor: '#059669', borderStyle: 'dashed' },
-  addCategoryText: { fontSize: 16, color: '#059669', fontWeight: '600', marginLeft: 8 },
+  addCategoryButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 16, padding: 20, marginTop: 16, borderWidth: 2, borderStyle: 'dashed' },
+  addCategoryText: { fontSize: 16, fontWeight: '600', marginLeft: 8 },
   actionButton: { 
     paddingHorizontal: 12,
     paddingVertical: 6,

@@ -43,10 +43,17 @@ export function getCampingTypeLabel(id: string) {
 }
 
 import type { SVGStandardizeOptions } from '../app/icons/svgIcons';
-export function getCampingTypeIcon(id: string, options?: SVGStandardizeOptions) {
+export function getCampingTypeIcon(id: string, options?: SVGStandardizeOptions & { color?: string }) {
   const iconKey = campingTypes.find(t => t.id === id)?.icon;
   if (!iconKey) return '❓';
   // Eğer fill/stroke opsiyonu verilmemişse merkezi renkleri uygula
-  const colorOpts = CAMP_TYPE_ICON_COLORS[iconKey] || { fill: 'none', stroke: '#000' };
-  return getSVGIcon(iconKey as any, { width: 18, height: 18, ...colorOpts, ...options });
+  const baseColorOpts = CAMP_TYPE_ICON_COLORS[iconKey] || { fill: 'none', stroke: '#000' };
+  let colorOpts = { ...baseColorOpts };
+  const { color, ...restOptions } = options || {};
+  if (color) {
+    // fill veya stroke'tan hangisi aktif renk taşıyorsa onu tema rengiyle güncelle
+    if (baseColorOpts.fill && baseColorOpts.fill !== 'none') colorOpts.fill = color;
+    if (baseColorOpts.stroke && baseColorOpts.stroke !== 'none') colorOpts.stroke = color;
+  }
+  return getSVGIcon(iconKey as any, { width: 18, height: 18, ...colorOpts, ...restOptions });
 }

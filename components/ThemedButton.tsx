@@ -11,12 +11,12 @@ type Props = {
 };
 
 export default function ThemedButton({ variant = 'primary', children, onPress, style, disabled }: Props) {
-  const { theme } = useTheme();
+  const { colors } = useTheme();
   const variants: Record<string, { backgroundColor: string; color: string; borderColor?: string }> = {
-    primary: { backgroundColor: theme.colors.primary, color: '#fff' },
-    secondary: { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border },
-    ghost: { backgroundColor: 'transparent', color: theme.colors.primary },
-    danger: { backgroundColor: theme.colors.danger, color: '#fff' },
+    primary: { backgroundColor: colors.primary, color: '#fff' },
+    secondary: { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border },
+    ghost: { backgroundColor: 'transparent', color: colors.primary },
+    danger: { backgroundColor: colors.danger, color: '#fff' },
   };
 
   const vs = variants[variant] || variants.primary;

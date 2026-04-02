@@ -15,6 +15,8 @@ import { Feather } from '@expo/vector-icons';
 import { MapPin, Navigation, Info } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from './ThemeProvider';
+import { createThemedStyles } from '../constants/theme/sharedStyles';
 import { eventBus } from '@/lib/eventBus';
 import type { CampingArea } from '@/lib/database';
 import { getCampingTypeLabel } from '@/lib/categories';
@@ -48,6 +50,8 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   isCampPlanMode = false,
 }) => {
   const router = useRouter();
+  const { colors } = useTheme();
+  const themed = createThemedStyles(colors);
   const [loadingImages, setLoadingImages] = useState<Set<string | number>>(new Set());
 
   // Visible kamp alanları için il/ilçe bilgisi
@@ -251,12 +255,12 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
 
     return (
       <TouchableOpacity
-        style={[styles.listItem, disabled && styles.listItemDisabled]}
+        style={[styles.listItem, { backgroundColor: colors.surface }, disabled && styles.listItemDisabled]}
         onPress={() => !disabled && onSelectArea(item)}
         activeOpacity={disabled ? 1 : 0.7}
         disabled={disabled}
       >
-        <View style={styles.imageContainer}>
+        <View style={[styles.imageContainer, { backgroundColor: colors.surfaceVariant }]}>
           <Image
             source={coverImage ? { uri: coverImage } : require('../assets/images/image-placeholder.png')}
             style={coverImage ? styles.coverImage : styles.placeholderCoverImage}
@@ -267,60 +271,60 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
           />
           {isImageLoading && coverImage && (
             <View style={styles.loadingOverlay}>
-              <ActivityIndicator size="large" color="#059669" />
+              <ActivityIndicator size="large" color={colors.primary} />
             </View>
           )}
           <TouchableOpacity
-            style={[styles.favoriteButton, isFavorite && styles.favoriteButtonActive]}
+            style={[styles.favoriteButton, { backgroundColor: colors.danger + '18', borderColor: colors.danger }, isFavorite && { backgroundColor: colors.danger }]}
             onPress={() => !disabled && onToggleFavorite(item)}
             disabled={disabled}
           >
-            <Feather name="heart" size={18} color={isFavorite ? '#fff' : '#ef4444'} />
+            <Feather name="heart" size={18} color={isFavorite ? '#fff' : colors.danger} />
           </TouchableOpacity>
         </View>
 
         <View style={styles.contentContainer}>
           {/* Başlık */}
-          <Text style={styles.title} numberOfLines={2}>
+          <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
             {item.name || 'İsimsiz Alan'}
           </Text>
 
           {/* Kamp Türü */}
           <View style={styles.typeContainer}>
-            <View style={styles.typeBadge}>
-              <Text style={styles.typeText}>{typeLabel}</Text>
+            <View style={[styles.typeBadge, { backgroundColor: colors.primaryLight }]}>
+              <Text style={[styles.typeText, { color: colors.primary }]}>{typeLabel}</Text>
             </View>
           </View>
 
           {/* Ekleyen Kullanıcı */}
           <View style={styles.infoRow}>
-            <Feather name="user" size={14} color="#6b7280" />
-            <Text style={styles.infoText}>{ownerName}</Text>
+            <Feather name="user" size={14} color={colors.muted} />
+            <Text style={[styles.infoText, { color: colors.muted }]}>{ownerName}</Text>
           </View>
 
           {/* Uzaklık */}
           {distance && (
             <View style={styles.infoRow}>
-              <MapPin size={14} color="#6b7280" />
-              <Text style={styles.infoText}>{distance}</Text>
+              <MapPin size={14} color={colors.muted} />
+              <Text style={[styles.infoText, { color: colors.muted }]}>{distance}</Text>
             </View>
           )}
 
           {/* İl / İlçe (reverse geocode) */}
           {locationNames[areaId] !== undefined && locationNames[areaId] !== null ? (
             <View style={styles.infoRow}>
-              <MapPin size={14} color="#6b7280" />
-              <Text style={styles.infoText}>{locationNames[areaId]}</Text>
+              <MapPin size={14} color={colors.muted} />
+              <Text style={[styles.infoText, { color: colors.muted }]}>{locationNames[areaId]}</Text>
             </View>
           ) : loadingLocationIds.has(areaId) ? (
             <View style={styles.infoRow}>
-              <ActivityIndicator size="small" color="#6b7280" />
-              <Text style={styles.infoText}>Yükleniyor...</Text>
+              <ActivityIndicator size="small" color={colors.muted} />
+              <Text style={[styles.infoText, { color: colors.muted }]}>Yükleniyor...</Text>
             </View>
           ) : (areaId in locationNames) ? (
             <View style={styles.infoRow}>
-              <MapPin size={14} color="#6b7280" />
-              <Text style={styles.infoText}>Konum alınamıyor</Text>
+              <MapPin size={14} color={colors.muted} />
+              <Text style={[styles.infoText, { color: colors.muted }]}>Konum alınamıyor</Text>
             </View>
           ) : null}
 
@@ -328,28 +332,28 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
           <View style={styles.actionsContainer}>
             {/* Detaylı Bilgi */}
             <TouchableOpacity
-              style={[styles.actionButton, disabled && styles.actionButtonDisabled]}
+              style={[styles.actionButton, { backgroundColor: colors.primaryLight }, disabled && styles.actionButtonDisabled]}
               onPress={() => !disabled && onSelectArea(item)}
               disabled={disabled}
             >
-              <Info size={16} color={disabled ? "#9ca3af" : "#059669"} />
-              <Text style={[styles.actionButtonText, disabled && styles.actionButtonTextDisabled]}>Detay</Text>
+              <Info size={16} color={disabled ? colors.muted : colors.primary} />
+              <Text style={[styles.actionButtonText, { color: colors.primary }, disabled && { color: colors.muted }]}>Detay</Text>
             </TouchableOpacity>
 
             {/* Navigasyon */}
             <TouchableOpacity
-              style={[styles.actionButton, styles.navigationButton, disabled && styles.actionButtonDisabled]}
+              style={[styles.actionButton, { backgroundColor: colors.info + '15' }, disabled && styles.actionButtonDisabled]}
               onPress={() => !disabled && handleNavigationMenu(item)}
               disabled={disabled}
             >
-              <Navigation size={16} color={disabled ? "#9ca3af" : "#3b82f6"} />
-              <Text style={[styles.actionButtonText, styles.navigationButtonText, disabled && styles.actionButtonTextDisabled]}>Yol Tarifi</Text>
+              <Navigation size={16} color={disabled ? colors.muted : colors.info} />
+              <Text style={[styles.actionButtonText, { color: colors.info }, disabled && { color: colors.muted }]}>Yol Tarifi</Text>
             </TouchableOpacity>
 
             {/* Bu kampı seç (Camp Plan) - sadece camp-plan modunda görünür */}
             {showSelectMode && (
               <TouchableOpacity
-                style={[styles.actionButton, styles.selectButton, disabled && styles.actionButtonDisabled]}
+                style={[styles.actionButton, { backgroundColor: colors.primaryLight }, disabled && styles.actionButtonDisabled]}
                 onPress={() => {
                   if (disabled) return;
                   try {
@@ -371,8 +375,8 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
                 }}
                 disabled={disabled}
               >
-                <Feather name="check-circle" size={16} color={disabled ? "#9ca3af" : "#059669"} />
-                <Text style={[styles.actionButtonText, disabled && styles.actionButtonTextDisabled]}>Bu kampı seç</Text>
+                <Feather name="check-circle" size={16} color={disabled ? colors.muted : colors.primary} />
+                <Text style={[styles.actionButtonText, { color: colors.primary }, disabled && { color: colors.muted }]}>Bu kampı seç</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -382,18 +386,18 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Guest User Premium Banner - Hide when offline */}
       {isGuest && isConnected && (
-        <View style={styles.guestBanner}>
-          <Text style={styles.guestBannerText}>
+        <View style={[styles.guestBanner, { backgroundColor: colors.warning + '20', borderBottomColor: colors.warning }]}>
+          <Text style={[styles.guestBannerText, { color: colors.warning }]}>
             Tüm kamp alanlarını görebilmek için Premium aboneliği gerekmektedir.
           </Text>
           <TouchableOpacity
-            style={styles.premiumButton}
+            style={[styles.premiumButton, { backgroundColor: colors.primary }]}
             onPress={() => router.push('/premium' as any)}
           >
-            <Text style={styles.premiumButtonText}>Premium Ol!</Text>
+            <Text style={[styles.premiumButtonText, { color: 'white' }]}>Premium Ol!</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -409,9 +413,9 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={() => (
           <View style={styles.emptyContainer}>
-            <Feather name="map-pin" size={48} color="#d1d5db" />
-            <Text style={styles.emptyText}>Kamp alanı bulunamadı</Text>
-            <Text style={styles.emptySubtext}>
+            <Feather name="map-pin" size={48} color={colors.border} />
+            <Text style={[styles.emptyText, { color: colors.muted }]}>Kamp alanı bulunamadı</Text>
+            <Text style={[styles.emptySubtext, { color: colors.muted }]}>
               Filtreleri değiştirerek veya farklı bir bölgeye bakarak arama yapabilirsiniz
             </Text>
           </View>
@@ -424,12 +428,9 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   guestBanner: {
-    backgroundColor: '#fef3c7',
     borderBottomWidth: 1,
-    borderBottomColor: '#f59e0b',
     paddingHorizontal: 20,
     paddingVertical: 12,
     flexDirection: 'row',
@@ -440,20 +441,17 @@ const styles = StyleSheet.create({
   },
   guestBannerText: {
     fontSize: 13,
-    color: '#92400e',
     fontWeight: '600',
     textAlign: 'center',
     flex: 1,
   },
   premiumButton: {
-    backgroundColor: '#059669',
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 16,
     marginLeft: 8,
   },
   premiumButtonText: {
-    color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -462,7 +460,6 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   listItem: {
-    backgroundColor: '#fff',
     borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -478,7 +475,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 180,
     position: 'relative',
-    backgroundColor: '#f3f4f6',
   },
   coverImage: {
     width: '100%',
@@ -508,15 +504,12 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(254, 242, 242, 0.95)',
     borderWidth: 1,
-    borderColor: '#ef4444',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
   },
   favoriteButtonActive: {
-    backgroundColor: '#ef4444',
   },
   contentContainer: {
     padding: 16,
@@ -524,7 +517,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#111827',
     marginBottom: 8,
   },
   typeContainer: {
@@ -532,7 +524,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   typeBadge: {
-    backgroundColor: '#dcfce7',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -540,7 +531,6 @@ const styles = StyleSheet.create({
   typeText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#059669',
   },
   infoRow: {
     flexDirection: 'row',
@@ -550,7 +540,6 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: 13,
-    color: '#6b7280',
   },
   actionsContainer: {
     flexDirection: 'row',
@@ -562,7 +551,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f0fdf4',
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,
@@ -574,19 +562,14 @@ const styles = StyleSheet.create({
   actionButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#059669',
   },
   actionButtonTextDisabled: {
-    color: '#9ca3af',
   },
   navigationButton: {
-    backgroundColor: '#eff6ff',
   },
   navigationButtonText: {
-    color: '#3b82f6',
   },
   selectButton: {
-    backgroundColor: '#ecfdf5',
   },
   separator: {
     height: 12,
@@ -601,13 +584,11 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#6b7280',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#9ca3af',
     textAlign: 'center',
     lineHeight: 20,
   },

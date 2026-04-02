@@ -9,6 +9,7 @@ import { Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { optimizeImageForWeb } from '@/lib/imageOptimizer';
 import { uploadCampgroundImage } from '@/lib/campgroundImageApi';
+import { useTheme } from './ThemeProvider';
 
 // React Native ortamı için basit id üretici
 function generateImageId() {
@@ -41,15 +42,16 @@ type Friend = {
 };
 
 // Basit avatar bileşeni
-const FriendAvatar = ({ avatar, name }: { avatar?: string; name: string }) => (
-  avatar ? (
-    <Image source={{ uri: avatar }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#e5e7eb' }} />
+const FriendAvatar = ({ avatar, name }: { avatar?: string; name: string }) => {
+  const { colors } = useTheme();
+  return avatar ? (
+    <Image source={{ uri: avatar }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: colors.border }} />
   ) : (
-    <View style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ color: '#6b7280', fontWeight: 'bold', fontSize: 18 }}>{(name && name.length > 0) ? name[0].toUpperCase() : '?'}</Text>
+    <View style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, backgroundColor: colors.border, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: colors.muted, fontWeight: 'bold', fontSize: 18 }}>{(name && name.length > 0) ? name[0].toUpperCase() : '?'}</Text>
     </View>
-  )
-);
+  );
+};
 
 // Arkadaş listesini fetch eden yardımcı fonksiyon
 async function fetchFriendsList(userId: string | number | undefined): Promise<Friend[]> {
@@ -111,7 +113,6 @@ const priceRanges = [
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   header: {
     flexDirection: 'row',
@@ -119,14 +120,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
-    backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1f2937',
   },
   closeButton: {
     padding: 4,
@@ -136,7 +134,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   section: {
-    backgroundColor: 'white',
     borderRadius: 12,
     padding: 16,
     marginVertical: 8,
@@ -144,7 +141,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
     marginBottom: 16,
   },
   inputGroup: {
@@ -153,17 +149,14 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#374151',
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
-    backgroundColor: 'white',
   },
   textArea: {
     height: 80,
@@ -182,13 +175,9 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: 'white',
     minWidth: 80,
   },
   typeCardSelected: {
-    borderColor: '#059669',
-    backgroundColor: '#f0fdf4',
   },
   typeIcon: {
     fontSize: 24,
@@ -196,11 +185,9 @@ const styles = StyleSheet.create({
   },
   typeLabel: {
     fontSize: 12,
-    color: '#6b7280',
     textAlign: 'center',
   },
   typeLabelSelected: {
-    color: '#059669',
     fontWeight: '600',
   },
   amenitiesGrid: {
@@ -215,12 +202,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: 'white',
   },
   amenityChipSelected: {
-    borderColor: '#059669',
-    backgroundColor: '#f0fdf4',
   },
   amenityIcon: {
     fontSize: 16,
@@ -228,10 +211,8 @@ const styles = StyleSheet.create({
   },
   amenityLabel: {
     fontSize: 12,
-    color: '#6b7280',
   },
   amenityLabelSelected: {
-    color: '#059669',
     fontWeight: '600',
   },
   priceGrid: {
@@ -244,19 +225,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: 'white',
   },
   priceChipSelected: {
-    borderColor: '#059669',
-    backgroundColor: '#f0fdf4',
   },
   priceLabel: {
     fontSize: 12,
-    color: '#6b7280',
   },
   priceLabelSelected: {
-    color: '#059669',
     fontWeight: '600',
   },
   feeToggle: {
@@ -269,38 +244,29 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 4,
     borderWidth: 2,
-    borderColor: '#d1d5db',
     marginRight: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkboxChecked: {
-    borderColor: '#059669',
-    backgroundColor: '#059669',
   },
   checkmark: {
-    color: 'white',
     fontSize: 12,
     fontWeight: 'bold',
   },
   feeLabel: {
     fontSize: 14,
-    color: '#374151',
   },
   footer: {
     padding: 20,
-    backgroundColor: 'white',
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
   },
   submitButton: {
-    backgroundColor: '#059669',
     paddingVertical: 16,
     borderRadius: 8,
     alignItems: 'center',
   },
   submitButtonDisabled: {
-    backgroundColor: '#9ca3af',
   },
   submitButtonText: {
     color: 'white',
@@ -311,9 +277,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f0fdf4',
     borderWidth: 2,
-    borderColor: '#059669',
     borderStyle: 'dashed',
     borderRadius: 8,
     paddingVertical: 16,
@@ -322,16 +286,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   imagePickerButtonDisabled: {
-    backgroundColor: '#f9fafb',
-    borderColor: '#d1d5db',
   },
   imagePickerText: {
     fontSize: 14,
-    color: '#059669',
     fontWeight: '600',
   },
   imagePickerTextDisabled: {
-    color: '#9ca3af',
   },
   imageGrid: {
     flexDirection: 'row',
@@ -377,6 +337,7 @@ const styles = StyleSheet.create({
 });
 
 export default function AddCampingAreaModal({ visible, onClose, initialLocation, onSuccess, user, isGuest = false, remainingAreas = Infinity, guestLimit = 10 }: AddCampingAreaModalProps) {
+  const { colors } = useTheme();
   const isConnected = useNetworkStatus();
   const [userCommunityId, setUserCommunityId] = useState<number | undefined>(undefined);
   useEffect(() => {
@@ -984,49 +945,49 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={styles.container}>
-        <View style={styles.header}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle}>Yeni Kamp Alanı Ekle</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Yeni Kamp Alanı Ekle</Text>
             {isGuest && remainingAreas !== Infinity && (
-              <Text style={{ fontSize: 12, color: remainingAreas <= 3 ? '#dc2626' : '#6b7280', marginTop: 2 }}>
+              <Text style={{ fontSize: 12, color: remainingAreas <= 3 ? colors.danger : colors.muted, marginTop: 2 }}>
                 Kalan hak: {remainingAreas}/{guestLimit}
               </Text>
             )}
           </View>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <X size={24} color="#6b7280" />
+            <X size={24} color={colors.muted} />
           </TouchableOpacity>
         </View>
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* Temel Bilgiler */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Temel Bilgiler</Text>
+          <View style={[styles.section, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Temel Bilgiler</Text>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Alan Adı *</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Alan Adı *</Text>
               <TextInput
-                style={[styles.input, { color: '#222' }]}
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.name}
                 onChangeText={text => setFormData(prev => ({ ...prev, name: text }))}
                 placeholder="Örn: Göl Kenarı Kamp Alanı"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
               />
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Açıklama</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Açıklama</Text>
               <TextInput
-                style={[styles.input, styles.textArea, { color: '#222' }]}
+                style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.description}
                 onChangeText={text => setFormData(prev => ({ ...prev, description: text }))}
                 placeholder="Kamp alanı hakkında detaylı bilgi..."
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 multiline
                 numberOfLines={3}
               />
             </View>
             {/* Görünürlük Seçimi - Temel Bilgiler altında */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Görünürlük</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Görünürlük</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
                 <TouchableOpacity
                   style={{
@@ -1034,13 +995,13 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                     paddingVertical: 8,
                     borderRadius: 20,
                     borderWidth: 1,
-                    borderColor: formData.visibility === 'private' ? '#059669' : '#d1d5db',
-                    backgroundColor: formData.visibility === 'private' ? '#f0fdf4' : 'white',
+                    borderColor: formData.visibility === 'private' ? colors.primary : colors.border,
+                    backgroundColor: formData.visibility === 'private' ? colors.primaryLight : colors.surface,
                     marginBottom: 8,
                   }}
                   onPress={() => setFormData(prev => ({ ...prev, visibility: 'private' }))}
                 >
-                  <Text style={{ color: formData.visibility === 'private' ? '#059669' : '#6b7280', fontWeight: formData.visibility === 'private' ? '600' : '400' }}>
+                  <Text style={{ color: formData.visibility === 'private' ? colors.primary : colors.muted, fontWeight: formData.visibility === 'private' ? '600' : '400' }}>
                     Sadece Ben (Private)
                   </Text>
                 </TouchableOpacity>
@@ -1050,13 +1011,13 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                     paddingVertical: 8,
                     borderRadius: 20,
                     borderWidth: 1,
-                    borderColor: formData.visibility === 'public' ? '#059669' : '#d1d5db',
-                    backgroundColor: formData.visibility === 'public' ? '#f0fdf4' : 'white',
+                    borderColor: formData.visibility === 'public' ? colors.primary : colors.border,
+                    backgroundColor: formData.visibility === 'public' ? colors.primaryLight : colors.surface,
                     marginBottom: 8,
                   }}
                   onPress={() => setFormData(prev => ({ ...prev, visibility: 'public' }))}
                 >
-                  <Text style={{ color: formData.visibility === 'public' ? '#059669' : '#6b7280', fontWeight: formData.visibility === 'public' ? '600' : '400' }}>
+                  <Text style={{ color: formData.visibility === 'public' ? colors.primary : colors.muted, fontWeight: formData.visibility === 'public' ? '600' : '400' }}>
                     Herkes (Public)
                   </Text>
                 </TouchableOpacity>
@@ -1066,8 +1027,8 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                     paddingVertical: 8,
                     borderRadius: 20,
                     borderWidth: 1,
-                    borderColor: formData.visibility === 'community' ? '#059669' : '#d1d5db',
-                    backgroundColor: formData.visibility === 'community' ? '#f0fdf4' : 'white',
+                    borderColor: formData.visibility === 'community' ? colors.primary : colors.border,
+                    backgroundColor: formData.visibility === 'community' ? colors.primaryLight : colors.surface,
                     marginBottom: 8,
                     opacity: userCommunityId ? 1 : 0.5,
                   }}
@@ -1080,7 +1041,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                   }}
                   disabled={!userCommunityId}
                 >
-                  <Text style={{ color: formData.visibility === 'community' ? '#059669' : '#6b7280', fontWeight: formData.visibility === 'community' ? '600' : '400' }}>
+                  <Text style={{ color: formData.visibility === 'community' ? colors.primary : colors.muted, fontWeight: formData.visibility === 'community' ? '600' : '400' }}>
                     Topluluk (Community)
                   </Text>
                 </TouchableOpacity>
@@ -1090,13 +1051,13 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                     paddingVertical: 8,
                     borderRadius: 20,
                     borderWidth: 1,
-                    borderColor: formData.visibility === 'friends' ? '#059669' : '#d1d5db',
-                    backgroundColor: formData.visibility === 'friends' ? '#f0fdf4' : 'white',
+                    borderColor: formData.visibility === 'friends' ? colors.primary : colors.border,
+                    backgroundColor: formData.visibility === 'friends' ? colors.primaryLight : colors.surface,
                     marginBottom: 8,
                   }}
                   onPress={() => setFormData(prev => ({ ...prev, visibility: 'friends' }))}
                 >
-                  <Text style={{ color: formData.visibility === 'friends' ? '#059669' : '#6b7280', fontWeight: formData.visibility === 'friends' ? '600' : '400' }}>
+                  <Text style={{ color: formData.visibility === 'friends' ? colors.primary : colors.muted, fontWeight: formData.visibility === 'friends' ? '600' : '400' }}>
                     Arkadaşlar (Friends)
                   </Text>
                 </TouchableOpacity>
@@ -1104,15 +1065,15 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
               {/* Arkadaş seçimi alanı */}
               {formData.visibility === 'friends' && (
                 <View style={{ marginTop: 16 }}>
-                  <Text style={{ fontSize: 14, color: '#374151', fontWeight: '500', marginBottom: 8 }}>Paylaşılacak Arkadaşlar</Text>
+                  <Text style={{ fontSize: 14, color: colors.textSecondary, fontWeight: '500', marginBottom: 8 }}>Paylaşılacak Arkadaşlar</Text>
                   {loadingFriends ? (
-                    <ActivityIndicator size="small" color="#059669" />
+                    <ActivityIndicator size="small" color={colors.primary} />
                   ) : friendsError ? (
-                    <Text style={{ color: '#dc2626' }}>{friendsError}</Text>
+                    <Text style={{ color: colors.danger }}>{friendsError}</Text>
                   ) : allFriends.length === 0 ? (
-                    <Text style={{ color: '#6b7280' }}>Hiç arkadaşınız yok.</Text>
+                    <Text style={{ color: colors.muted }}>Hiç arkadaşınız yok.</Text>
                   ) : (
-                    <View style={{ height: Math.min(allFriends.length * FRIEND_ITEM_HEIGHT, MAX_VISIBLE_FRIENDS * FRIEND_ITEM_HEIGHT), borderRadius: 8, backgroundColor: '#f9fafb', overflow: 'hidden' }}>
+                    <View style={{ height: Math.min(allFriends.length * FRIEND_ITEM_HEIGHT, MAX_VISIBLE_FRIENDS * FRIEND_ITEM_HEIGHT), borderRadius: 8, backgroundColor: colors.surfaceVariant, overflow: 'hidden' }}>
                       <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
                         {allFriends.map((f, idx) => {
                           // API user_id veya id döndürebilir. Güvenilir ID: önce user_id, sonra id.
@@ -1123,25 +1084,25 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                             : String(idx);
                           const selected = Array.isArray(formData.friends) && formData.friends.includes(friendId);
                           return (
-                            <View key={friendId} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 4, backgroundColor: selected ? '#f0fdf4' : 'transparent', borderRadius: 8, marginBottom: 2 }}>
+                            <View key={friendId} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 4, backgroundColor: selected ? colors.primaryLight : 'transparent', borderRadius: 8, marginBottom: 2 }}>
                               <FriendAvatar avatar={f.avatar_url || f.avatar} name={f.name || f.first_name || f.email || ''} />
                               <View style={{ flex: 1 }}>
-                                <Text style={{ fontWeight: '600', color: '#374151' }}>{f.name || f.first_name || ''} {f.last_name || ''}</Text>
-                                <Text style={{ color: '#6b7280', fontSize: 13 }}>{f.email}</Text>
+                                <Text style={{ fontWeight: '600', color: colors.textSecondary }}>{f.name || f.first_name || ''} {f.last_name || ''}</Text>
+                                <Text style={{ color: colors.muted, fontSize: 13 }}>{f.email}</Text>
                               </View>
                               {selected ? (
                                 <TouchableOpacity
                                   onPress={() => setFormData(prev => ({ ...prev, friends: prev.friends.filter(id => id !== friendId) }))}
-                                  style={{ marginLeft: 8, backgroundColor: '#dcfce7', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#22c55e' }}
+                                  style={{ marginLeft: 8, backgroundColor: colors.success + '20', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.success }}
                                 >
-                                  <Text style={{ color: '#22c55e', fontWeight: 'bold', fontSize: 13 }}>✓ Ekli</Text>
+                                  <Text style={{ color: colors.success, fontWeight: 'bold', fontSize: 13 }}>✓ Ekli</Text>
                                 </TouchableOpacity>
                               ) : (
                                 <TouchableOpacity
                                   onPress={() => setFormData(prev => ({ ...prev, friends: [...prev.friends, friendId] }))}
-                                  style={{ marginLeft: 8, backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#d1d5db' }}
+                                  style={{ marginLeft: 8, backgroundColor: colors.surfaceVariant, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: colors.border }}
                                 >
-                                  <Text style={{ color: '#6b7280', fontWeight: 'bold', fontSize: 13 }}>Ekle</Text>
+                                  <Text style={{ color: colors.muted, fontWeight: 'bold', fontSize: 13 }}>Ekle</Text>
                                 </TouchableOpacity>
                               )}
                             </View>
@@ -1154,50 +1115,50 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
               )}
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Enlem</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Enlem</Text>
               <TextInput
-                style={[styles.input, { color: '#222' }]}
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.latitude}
                 onChangeText={text => setFormData(prev => ({ ...prev, latitude: text }))}
                 placeholder="Enlem"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 keyboardType="numeric"
               />
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Boylam</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Boylam</Text>
               <TextInput
-                style={[styles.input, { color: '#222' }]}
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.longitude}
                 onChangeText={text => setFormData(prev => ({ ...prev, longitude: text }))}
                 placeholder="Boylam"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 keyboardType="numeric"
               />
             </View>
           </View>
 
           {/* Fotoğraflar */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Fotoğraflar</Text>
+          <View style={[styles.section, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Fotoğraflar</Text>
             <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8 }}>
               <TouchableOpacity
-                style={[styles.imagePickerButton, imagePickerLoading && styles.imagePickerButtonDisabled]}
+                style={[styles.imagePickerButton, imagePickerLoading && styles.imagePickerButtonDisabled, { backgroundColor: colors.primaryLight, borderColor: colors.primary }, imagePickerLoading && { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}
                 onPress={pickImage}
                 disabled={imagePickerLoading || formData.images.length >= 5}
               >
-                <ImageIcon size={20} color={formData.images.length >= 5 ? "#9ca3af" : "#059669"} />
-                <Text style={[styles.imagePickerText, formData.images.length >= 5 && styles.imagePickerTextDisabled]}>
+                <ImageIcon size={20} color={formData.images.length >= 5 ? colors.muted : colors.primary} />
+                <Text style={[styles.imagePickerText, formData.images.length >= 5 && styles.imagePickerTextDisabled, { color: colors.primary }, formData.images.length >= 5 && { color: colors.muted }]}>
                   {imagePickerLoading ? 'Fotoğraf seçiliyor...' :
                    formData.images.length >= 5 ? 'Maksimum 5 fotoğraf eklenebilir' : 'Fotoğraf Ekle'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.imagePickerButton, imagePickerLoading && styles.imagePickerButtonDisabled]}
+                style={[styles.imagePickerButton, imagePickerLoading && styles.imagePickerButtonDisabled, { backgroundColor: colors.primaryLight, borderColor: colors.primary }, imagePickerLoading && { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}
                 onPress={takePhoto}
                 disabled={imagePickerLoading || formData.images.length >= 5}
               >
-                <Camera size={20} color={formData.images.length >= 5 ? "#9ca3af" : "#059669"} />
+                <Camera size={20} color={formData.images.length >= 5 ? colors.muted : colors.primary} />
                 <Text style={[styles.imagePickerText, formData.images.length >= 5 && styles.imagePickerTextDisabled]}>
                   {imagePickerLoading ? 'Kamera açılıyor...' :
                    formData.images.length >= 5 ? 'Maksimum 5 fotoğraf eklenebilir' : 'Kamera ile Çek'}
@@ -1226,7 +1187,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                         disabled={index === 0}
                         style={{ opacity: index === 0 ? 0.3 : 1, marginRight: 2 }}
                       >
-                        <ChevronUp size={18} color={index === 0 ? '#d1d5db' : '#580d0dff'} />
+                        <ChevronUp size={18} color={index === 0 ? colors.border : colors.text} />
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() => {
@@ -1243,12 +1204,12 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                         disabled={index === formData.images.length - 1}
                         style={{ opacity: index === formData.images.length - 1 ? 0.3 : 1 }}
                       >
-                        <ChevronDown size={18} color={index === formData.images.length - 1 ? '#d1d5db' : '#059669'} />
+                        <ChevronDown size={18} color={index === formData.images.length - 1 ? colors.border : colors.primary} />
                       </TouchableOpacity>
                     </View>
                     {/* Kapak Fotoğrafı Seç */}
                     <TouchableOpacity
-                      style={{ position: 'absolute', left: 4, bottom: 4, backgroundColor: index === 0 ? '#059669' : '#f3f4f6', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 }}
+                      style={{ position: 'absolute', left: 4, bottom: 4, backgroundColor: index === 0 ? colors.primary : colors.surfaceVariant, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 }}
                       onPress={() => {
                         if (index !== 0) {
                           setFormData(prev => {
@@ -1260,7 +1221,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                         }
                       }}
                     >
-                      <Text style={{ color: index === 0 ? 'white' : '#059669', fontWeight: 'bold', fontSize: 12 }}>{index === 0 ? 'Kapak' : 'Kapak Yap'}</Text>
+                      <Text style={{ color: index === 0 ? 'white' : colors.primary, fontWeight: 'bold', fontSize: 12 }}>{index === 0 ? 'Kapak' : 'Kapak Yap'}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.removeImageButton}
@@ -1274,12 +1235,12 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                       </View>
                     )}
                     {img.status === 'pending' && (
-                      <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: '#f59e0b', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
+                      <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: colors.warning, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
                         <Text style={{ color: 'white', fontSize: 10 }}>Hazır</Text>
                       </View>
                     )}
                     {img.status === 'failed' && (
-                      <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: '#dc2626', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
+                      <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: colors.danger, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
                         <Text style={{ color: 'white', fontSize: 10 }}>Hata</Text>
                       </View>
                     )}
@@ -1290,22 +1251,24 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
           </View>
 
           {/* Kamp Türü */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Kamp Türü</Text>
+          <View style={[styles.section, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Kamp Türü</Text>
             <View style={styles.typeGrid}>
               {campingTypes.map((type) => (
                 <TouchableOpacity
                   key={type.id}
                   style={[
                     styles.typeCard,
-                    formData.type === type.id && styles.typeCardSelected
+                    { borderColor: colors.border, backgroundColor: colors.surface },
+                    formData.type === type.id && { borderColor: colors.primary, backgroundColor: colors.primaryLight }
                   ]}
                   onPress={() => setFormData(prev => ({ ...prev, type: type.id as any }))}
                 >
-                  <SvgXml xml={getCampingTypeIcon(type.id)} width={24} height={24} style={styles.typeIcon} />
+                  <SvgXml xml={getCampingTypeIcon(type.id, { color: colors.text })} width={24} height={24} style={styles.typeIcon} />
                   <Text style={[
                     styles.typeLabel,
-                    formData.type === type.id && styles.typeLabelSelected
+                    { color: colors.muted },
+                    formData.type === type.id && { color: colors.primary, fontWeight: '600' }
                   ]}>
                     {getCampingTypeLabel(type.id)}
                   </Text>
@@ -1315,22 +1278,24 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
           </View>
 
           {/* Olanaklar */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Olanaklar</Text>
+          <View style={[styles.section, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Olanaklar</Text>
             <View style={styles.amenitiesGrid}>
               {availableAmenities.map((amenity) => (
                 <TouchableOpacity
                   key={amenity.id}
                   style={[
                     styles.amenityChip,
-                    formData.amenities.includes(amenity.id) && styles.amenityChipSelected
+                    { borderColor: colors.border, backgroundColor: colors.surface },
+                    formData.amenities.includes(amenity.id) && { borderColor: colors.primary, backgroundColor: colors.primaryLight }
                   ]}
                   onPress={() => toggleAmenity(amenity.id)}
                 >
                   <Text style={styles.amenityIcon}>{amenity.icon}</Text>
                   <Text style={[
                     styles.amenityLabel,
-                    formData.amenities.includes(amenity.id) && styles.amenityLabelSelected
+                    { color: colors.muted },
+                    formData.amenities.includes(amenity.id) && { color: colors.primary, fontWeight: '600' }
                   ]}>
                     {amenity.label}
                   </Text>
@@ -1340,71 +1305,71 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
           </View>
 
           {/* İletişim Bilgileri */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>İletişim Bilgileri</Text>
+          <View style={[styles.section, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>İletişim Bilgileri</Text>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Telefon</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Telefon</Text>
               <TextInput
-                style={[styles.input, { color: '#222' }]}
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.phone}
                 onChangeText={text => setFormData(prev => ({ ...prev, phone: text }))}
                 placeholder="+90 555 123 45 67"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 keyboardType="phone-pad"
               />
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>E-posta</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>E-posta</Text>
               <TextInput
-                style={[styles.input, { color: '#222' }]}
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.contact_email}
                 onChangeText={text => setFormData(prev => ({ ...prev, contact_email: text }))}
                 placeholder="info@kampalani.com"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 keyboardType="email-address"
               />
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Website</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Website</Text>
               <TextInput
-                style={[styles.input, { color: '#222' }]}
+                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.website}
                 onChangeText={text => setFormData(prev => ({ ...prev, website: text }))}
                 placeholder="https://www.kampalani.com"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 keyboardType="url"
               />
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Rezervasyon Linki</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Rezervasyon Linki</Text>
               <TextInput
-                style={[styles.input, { color: '#64748b' }]}
+                style={[styles.input, { color: colors.muted, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.booking_url}
                 onChangeText={text => setFormData(prev => ({ ...prev, booking_url: text }))}
                 placeholder="https://rezervasyon.com"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 keyboardType="url"
               />
             </View>
           </View>
 
           {/* Diğer Bilgiler */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Diğer Bilgiler</Text>
+          <View style={[styles.section, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Diğer Bilgiler</Text>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Açılış Saatleri</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Açılış Saatleri</Text>
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13, color: '#374151', marginBottom: 2 }}>Hafta İçi</Text>
-                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: Platform.OS === 'ios' ? 'visible' : 'hidden', backgroundColor: 'white' }}>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 2 }}>Hafta İçi</Text>
+                  <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: Platform.OS === 'ios' ? 'visible' : 'hidden', backgroundColor: colors.surface }}>
                     <Picker
                       selectedValue={JSON.stringify(formData.opening_hours.weekday)}
                       onValueChange={val => {
                         const obj = val ? JSON.parse(val) : { open: '', close: '' };
                         setFormData(prev => ({ ...prev, opening_hours: { ...prev.opening_hours, weekday: obj } }));
                       }}
-                      style={Platform.OS === 'ios' ? { color: '#64748b' } : { height: 55, color: '#64748b' }}
-                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15, color: '#64748b' } : undefined}
+                      style={Platform.OS === 'ios' ? { color: colors.text } : { height: 55, color: colors.text }}
+                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15, color: colors.text } : undefined}
                     >
                       {timeOptions.map(opt => (
                         <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
@@ -1414,16 +1379,16 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                 </View>
                 <View style={{ width: 12 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13, color: '#374151', marginBottom: 2 }}>Hafta Sonu</Text>
-                  <View style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, overflow: Platform.OS === 'ios' ? 'visible' : 'hidden', backgroundColor: 'white' }}>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 2 }}>Hafta Sonu</Text>
+                  <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: Platform.OS === 'ios' ? 'visible' : 'hidden', backgroundColor: colors.surface }}>
                     <Picker
                       selectedValue={JSON.stringify(formData.opening_hours.weekend)}
                       onValueChange={val => {
                         const obj = val ? JSON.parse(val) : { open: '', close: '' };
                         setFormData(prev => ({ ...prev, opening_hours: { ...prev.opening_hours, weekend: obj } }));
                       }}
-                      style={Platform.OS === 'ios' ? { color: '#64748b' } : { height: 55, color: '#64748b' }}
-                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15, color: '#64748b' } : undefined}
+                      style={Platform.OS === 'ios' ? { color: colors.text } : { height: 55, color: colors.text }}
+                      itemStyle={Platform.OS === 'ios' ? { height: 120, fontSize: 15, color: colors.text } : undefined}
                     >
                       {timeOptions.map(opt => (
                         <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
@@ -1432,30 +1397,31 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                   </View>
                 </View>
               </View>
-              <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+              <Text style={{ fontSize: 12, color: colors.muted, marginTop: 4 }}>
                 Sadece hazır saat dilimlerinden seçim yapabilirsiniz.
               </Text>
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Kapasite (kişi)</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Kapasite (kişi)</Text>
               <TextInput
-                style={[styles.input, { color: '#64748b' }]}
+                style={[styles.input, { color: colors.muted, borderColor: colors.border, backgroundColor: colors.surface }]}
                 value={formData.capacity}
                 onChangeText={text => setFormData(prev => ({ ...prev, capacity: text }))}
                 placeholder="100"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={colors.muted}
                 keyboardType="numeric"
               />
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Fiyat Aralığı</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Fiyat Aralığı</Text>
               <View style={styles.priceGrid}>
                 {priceRanges.map((price) => (
                   <TouchableOpacity
                     key={price.id}
                     style={[
                       styles.priceChip,
-                      formData.price_range === price.id && styles.priceChipSelected
+                      { borderColor: colors.border, backgroundColor: colors.surface },
+                      formData.price_range === price.id && { borderColor: colors.primary, backgroundColor: colors.primaryLight }
                     ]}
                     onPress={() => setFormData(prev => ({
                       ...prev,
@@ -1465,7 +1431,8 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                   >
                     <Text style={[
                       styles.priceLabel,
-                      formData.price_range === price.id && styles.priceLabelSelected
+                      { color: colors.muted },
+                      formData.price_range === price.id && { color: colors.primary, fontWeight: '600' }
                     ]}>
                       {price.label}
                     </Text>
@@ -1480,18 +1447,18 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
               }}
               disabled={!!formData.price_range}
             >
-              <View style={[styles.checkbox, formData.fee && styles.checkboxChecked]}>
-                {formData.fee && <Text style={styles.checkmark}>✓</Text>}
+              <View style={[styles.checkbox, { borderColor: colors.border }, formData.fee && { borderColor: colors.primary, backgroundColor: colors.primary }]}>
+                {formData.fee && <Text style={[styles.checkmark, { color: 'white' }]}>✓</Text>}
               </View>
-              <Text style={styles.feeLabel}>Ücretli alan</Text>
+              <Text style={[styles.feeLabel, { color: colors.textSecondary }]}>Ücretli alan</Text>
             </TouchableOpacity>
             {/* Görünürlük Seçimi kaldırıldı, Temel Bilgiler altına taşındı */}
           </View>
         </ScrollView>
-        <View style={styles.footer}>
+        <View style={[styles.footer, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
           {isGuest && remainingAreas !== Infinity && (
             <View style={{ 
-              backgroundColor: remainingAreas <= 3 ? '#fef2f2' : '#f0fdf4', 
+              backgroundColor: remainingAreas <= 3 ? colors.danger + '10' : colors.primaryLight, 
               padding: 12, 
               borderRadius: 8, 
               marginBottom: 12,
@@ -1502,20 +1469,20 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
               <View style={{ flex: 1 }}>
                 <Text style={{ 
                   fontSize: 13, 
-                  color: remainingAreas <= 3 ? '#dc2626' : '#059669',
+                  color: remainingAreas <= 3 ? colors.danger : colors.primary,
                   fontWeight: '600' 
                 }}>
                   {remainingAreas > 0 
                     ? `${remainingAreas} kamp alanı daha ekleyebilirsiniz` 
                     : 'Kamp alanı ekleme limitine ulaştınız'}
                 </Text>
-                <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                <Text style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>
                   Premium ile sınırsız kamp alanı oluşturun
                 </Text>
               </View>
               <TouchableOpacity
                 style={{
-                  backgroundColor: '#059669',
+                  backgroundColor: colors.primary,
                   paddingHorizontal: 12,
                   paddingVertical: 6,
                   borderRadius: 6,
@@ -1532,7 +1499,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
             </View>
           )}
           <TouchableOpacity
-            style={[styles.submitButton, (loading || imagePickerLoading) && styles.submitButtonDisabled]}
+            style={[styles.submitButton, { backgroundColor: colors.primary }, (loading || imagePickerLoading) && { backgroundColor: colors.muted }]}
             onPress={handleSubmit}
             disabled={loading || imagePickerLoading}
           >

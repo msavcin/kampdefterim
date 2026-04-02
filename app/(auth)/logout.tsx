@@ -7,9 +7,11 @@ import { useRouter } from 'expo-router';
 import { getMe } from '../../lib/userCommunityApi';
 import { syncPendingChanges } from '../../lib/syncPendingChanges';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react-native';
+import { useTheme } from '../../components/ThemeProvider';
 
 function LogoutProgress() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [steps, setSteps] = useState([
     { key: 'getMe', label: 'Kullanıcı bilgisi alınıyor', status: 'pending' },
     { key: 'sync', label: 'Bekleyen veriler gönderiliyor', status: 'pending' },
@@ -64,22 +66,22 @@ function LogoutProgress() {
     return () => { isMounted.current = false; };
   }, []);
   const getIcon = (status: string) => {
-    if (status === 'success') return <CheckCircle size={22} color="#22c55e" style={{ marginRight: 8 }} />;
-    if (status === 'error') return <XCircle size={22} color="#ef4444" style={{ marginRight: 8 }} />;
-    if (status === 'loading') return <Loader2 size={22} color="#6366f1" style={{ marginRight: 8 }} />;
-    return <Loader2 size={22} color="#a1a1aa" style={{ marginRight: 8, opacity: 0.5 }} />;
+    if (status === 'success') return <CheckCircle size={22} color={colors.success} style={{ marginRight: 8 }} />;
+    if (status === 'error') return <XCircle size={22} color={colors.danger} style={{ marginRight: 8 }} />;
+    if (status === 'loading') return <Loader2 size={22} color={colors.primary} style={{ marginRight: 8 }} />;
+    return <Loader2 size={22} color={colors.muted} style={{ marginRight: 8, opacity: 0.5 }} />;
   };
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc' }}>
-      <View style={{ width: 320, maxWidth: '90%', backgroundColor: '#fff', borderRadius: 14, padding: 24, shadowColor: '#6366f1', shadowOpacity: 0.10, shadowRadius: 12, elevation: 3 }}>
-        <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#3730a3', marginBottom: 18, textAlign: 'center' }}>Çıkış Yapılıyor</Text>
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+      <View style={{ width: 320, maxWidth: '90%', backgroundColor: colors.surface, borderRadius: 14, padding: 24, shadowColor: colors.primary, shadowOpacity: 0.10, shadowRadius: 12, elevation: 3 }}>
+        <Text style={{ fontSize: 20, fontWeight: 'bold', color: colors.primaryDark, marginBottom: 18, textAlign: 'center' }}>Çıkış Yapılıyor</Text>
         {steps.map(step => (
           <View key={step.key} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
             {getIcon(step.status)}
-            <Text style={{ fontSize: 15, color: step.status === 'error' ? '#ef4444' : '#222', fontWeight: step.status === 'success' ? 'bold' : 'normal' }}>{step.label}</Text>
+            <Text style={{ fontSize: 15, color: step.status === 'error' ? colors.danger : colors.text, fontWeight: step.status === 'success' ? 'bold' : 'normal' }}>{step.label}</Text>
           </View>
         ))}
-        {error && <Text style={{ color: '#ef4444', fontSize: 14, marginTop: 8, textAlign: 'center' }}>{error}</Text>}
+        {error && <Text style={{ color: colors.danger, fontSize: 14, marginTop: 8, textAlign: 'center' }}>{error}</Text>}
       </View>
     </View>
   );

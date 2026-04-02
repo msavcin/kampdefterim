@@ -4,6 +4,7 @@ import * as Location from 'expo-location';
 import { Navigation } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { eventBus } from '../lib/eventBus';
+import { useTheme } from './ThemeProvider';
 
 
 
@@ -15,6 +16,7 @@ interface LocationPermissionModalProps {
 
 
 function LocationPermissionModal({ visible, onClose, onPermissionGranted }: LocationPermissionModalProps) {
+  const { colors } = useTheme();
   const [isPremium, setIsPremium] = useState(false);
   const [doNotRemind, setDoNotRemind] = useState(false);
   const isMounted = useRef(true);
@@ -140,18 +142,18 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
       statusBarTranslucent
     >
       <View style={styles.overlay}>
-        <View style={styles.container}>
-          <View style={styles.iconContainer}>
-            <Navigation size={48} color="#059669" />
+        <View style={[styles.container, { backgroundColor: colors.surface }]}>
+          <View style={[styles.iconContainer, { backgroundColor: colors.primaryLight ?? '#f0fdf4' }]}>
+            <Navigation size={48} color={colors.success ?? '#059669'} />
           </View>
-          <Text style={styles.title}>Konum İzni Neden Gerekli?</Text>
-          <Text style={styles.description}>
+          <Text style={[styles.title, { color: colors.text }]}>Konum İzni Neden Gerekli?</Text>
+          <Text style={[styles.description, { color: colors.muted }]}>
             Kamp alanlarını haritada gösterebilmek ve size en yakın noktaları sunabilmek için konum iznine ihtiyacımız var.
           </Text>
-          <View style={styles.features}>
-            <Text style={styles.featureItem}>📍 Yakınımdaki kamp alanlarını göster</Text>
-            <Text style={styles.featureItem}>🗺️ Haritada konumumu göster</Text>
-            <Text style={styles.featureItem}>📏 Mesafe hesaplamalarını yap</Text>
+          <View style={[styles.features, { backgroundColor: colors.surfaceVariant ?? colors.background }]}>
+            <Text style={[styles.featureItem, { color: colors.text }]}>📍 Yakınımdaki kamp alanlarını göster</Text>
+            <Text style={[styles.featureItem, { color: colors.text }]}>🗺️ Haritada konumumu göster</Text>
+            <Text style={[styles.featureItem, { color: colors.text }]}>📏 Mesafe hesaplamalarını yap</Text>
           </View>
           <TouchableOpacity style={styles.button} onPress={handleRequestPermission}>
             <Text style={styles.buttonText}>{Platform.OS === 'ios' ? 'Devam Et' : 'Konum İzni Ver'}</Text>
@@ -171,7 +173,7 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
             if (!isMounted.current) return;
             onClose();
           }}>
-            <Text style={styles.closeButtonText}>Daha Sonra</Text>
+            <Text style={[styles.closeButtonText, { color: colors.muted }]}>Daha Sonra</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.checkboxContainer} 
@@ -183,9 +185,9 @@ function LocationPermissionModal({ visible, onClose, onPermissionGranted }: Loca
             <View style={[styles.checkbox, doNotRemind && styles.checkboxChecked]}>
               {doNotRemind && <Text style={styles.checkmark}>✓</Text>}
             </View>
-            <Text style={styles.checkboxLabel}>Bir daha hatırlatma</Text>
+            <Text style={[styles.checkboxLabel, { color: colors.muted }]}>Bir daha hatırlatma</Text>
           </TouchableOpacity>
-          <Text style={styles.hint}>Profil sayfasından tekrar açabilirsiniz</Text>
+          <Text style={[styles.hint, { color: colors.muted }]}>Profil sayfasından tekrar açabilirsiniz</Text>
         </View>
       </View>
     </Modal>
@@ -200,7 +202,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   container: {
-    backgroundColor: '#fff',
     borderRadius: 16,
     padding: 28,
     width: '85%',
@@ -216,7 +217,6 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#f0fdf4',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -224,27 +224,23 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#1f2937',
     marginBottom: 12,
     textAlign: 'center',
   },
   description: {
     fontSize: 16,
-    color: '#6b7280',
     textAlign: 'center',
     marginBottom: 20,
     lineHeight: 24,
   },
   features: {
     width: '100%',
-    backgroundColor: '#f9fafb',
     borderRadius: 12,
     padding: 16,
     marginBottom: 24,
   },
   featureItem: {
     fontSize: 14,
-    color: '#374151',
     marginBottom: 8,
     lineHeight: 20,
   },
@@ -272,7 +268,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   closeButtonText: {
-    color: '#6b7280',
     fontSize: 15,
   },
   checkboxContainer: {
@@ -302,11 +297,9 @@ const styles = StyleSheet.create({
   },
   checkboxLabel: {
     fontSize: 14,
-    color: '#6b7280',
   },
   hint: {
     fontSize: 12,
-    color: '#9ca3af',
     marginTop: 4,
     textAlign: 'center',
   },

@@ -9,9 +9,13 @@ import EditCampingAreaModal from '../../components/EditCampingAreaModal';
 import CampingAreaListView from '../../components/CampingAreaListView';
 import { getMe } from '../../lib/userCommunityApi';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { useTheme } from '../../components/ThemeProvider';
+import { createThemedStyles } from '../../constants/theme/sharedStyles';
 
 export default function FavoritesScreen() {
   const isConnected = useNetworkStatus();
+  const { colors } = useTheme();
+  const themed = createThemedStyles(colors);
   const [user, setUser] = useState<any>(null);
   const [favorites, setFavorites] = useState<CampingArea[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,19 +145,19 @@ export default function FavoritesScreen() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Favorilerim</Text>
-        <Text style={styles.headerSubtitle}>{favorites.length} favori kamp alanı</Text>
+    <SafeAreaView style={themed.screenContainer} edges={['left', 'right', 'bottom']}>
+      <View style={themed.screenHeader}>
+        <Text style={themed.screenHeaderTitle}>Favorilerim</Text>
+        <Text style={themed.screenHeaderSubtitle}>{favorites.length} favori kamp alanı</Text>
       </View>
 
       {favorites.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Heart size={48} color="#d1d5db" />
-          <Text style={styles.emptyTitle}>
+        <View style={themed.emptyState}>
+          <Heart size={48} color={colors.border} />
+          <Text style={themed.emptyStateTitle}>
             {loading ? 'Favoriler yükleniyor...' : 'Henüz favori alanınız yok'}
           </Text>
-          <Text style={styles.emptySubtitle}>
+          <Text style={themed.emptyStateSubtitle}>
             {loading ? 'Lütfen bekleyin...' : 'Beğendiğiniz kamp alanlarını favorilere ekleyin'}
           </Text>
         </View>
@@ -192,46 +196,3 @@ export default function FavoritesScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1f2937',
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 16,
-    color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-});

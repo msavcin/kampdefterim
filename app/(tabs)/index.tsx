@@ -78,12 +78,14 @@ import EditCampingAreaModal from '@/components/EditCampingAreaModal';
 import { getDatabase } from '@/lib/database';
 import { getToken } from '@/lib/auth';
 import type { CampingArea } from '@/lib/database';
+import { useTheme } from '@/components/ThemeProvider';
 import { Alert, ToastAndroid, Platform } from 'react-native';
 import { getCachedTile, cacheTile, precacheTilesForRegion, precacheRegionWithRadius } from '@/lib/mapTileCache';
 
 const { width, height } = Dimensions.get('window');
 
 export default function MapScreen() {
+    const { colors, scheme } = useTheme();
     // Son sorgulanan konumu saklamak için ref
     const lastQueriedLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
     // AppState'te alınan en son konum bilgisi (lokasyon butonu için hızlı erişim)
@@ -2502,7 +2504,8 @@ export default function MapScreen() {
         const radiusKm = user.offline_radius_km || 20;
         
         // Bölgeyi cache'le (çoklu zoom seviyelerinde)
-        const result = await precacheRegionWithRadius(lat, lng, radiusKm);
+        const tileStyle = scheme === 'dark' ? 'dark' : undefined;
+        const result = await precacheRegionWithRadius(lat, lng, radiusKm, tileStyle);
         
         if (__DEV__) {
           if (result.alreadyCached) {
@@ -2520,7 +2523,7 @@ export default function MapScreen() {
     const timeoutId = setTimeout(precacheTiles, 2000);
     
     return () => clearTimeout(timeoutId);
-  }, [isConnected, location, mapMoveQuery, user]);
+  }, [isConnected, location, mapMoveQuery, user, scheme]);
 
   // Her 1 dakikada bir sessiz senkronizasyon
   useEffect(() => {
@@ -2675,6 +2678,7 @@ export default function MapScreen() {
 
     // Guest kontrolü
     const isGuest = user?.role === 'guest';
+    const isDark = scheme === 'dark';
 
   const markers = filteredCampingAreas.map(area => {
     // tags alanı string ise doğrudan kullan, obje ise type içinden al
@@ -2750,19 +2754,19 @@ export default function MapScreen() {
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
         <style>
-          body { margin: 0; padding: 0; }
+          body { margin: 0; padding: 0; background: ${isDark ? '#1a1a2e' : '#fff'}; }
           #map { height: 100vh; width: 100vw; }
           .custom-popup {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
           }
           .popup-title {
             font-weight: 600;
-            color: #059669;
+            color: ${isDark ? '#34d399' : '#059669'};
             margin-bottom: 8px;
           }
           .popup-type {
-            background: #dcfce7;
-            color: #059669;
+            background: ${isDark ? '#064e3b' : '#dcfce7'};
+            color: ${isDark ? '#6ee7b7' : '#059669'};
             padding: 2px 8px;
             border-radius: 12px;
             font-size: 12px;
@@ -2770,6 +2774,26 @@ export default function MapScreen() {
           }
           .location-picker-cursor {
             cursor: crosshair !important;
+          }
+          .leaflet-popup-content-wrapper {
+            background: ${isDark ? '#1e293b' : '#fff'};
+            color: ${isDark ? '#e2e8f0' : '#222'};
+            border-radius: 12px;
+          }
+          .leaflet-popup-tip {
+            background: ${isDark ? '#1e293b' : '#fff'};
+          }
+          .leaflet-control-zoom a {
+            background: ${isDark ? '#334155' : '#fff'} !important;
+            color: ${isDark ? '#e2e8f0' : '#333'} !important;
+            border-color: ${isDark ? '#475569' : '#ccc'} !important;
+          }
+          .leaflet-control-attribution {
+            background: ${isDark ? 'rgba(30,41,59,0.8)' : 'rgba(255,255,255,0.8)'} !important;
+            color: ${isDark ? '#94a3b8' : '#333'} !important;
+          }
+          .leaflet-control-attribution a {
+            color: ${isDark ? '#60a5fa' : '#0078A8'} !important;
           }
         </style>
       </head>
@@ -2779,9 +2803,10 @@ export default function MapScreen() {
           var isOffline = ${!isConnected};
           
           // Offline modda cache'lenmiş zoom seviyeleri: 9, 10, 11, 12, 13
+          // minZoom/maxZoom haritadan kaldırıldı - tile layer'da minNativeZoom/maxNativeZoom ile yönetiliyor
           var mapOptions = {
-            minZoom: isOffline ? 9 : 1,
-            maxZoom: isOffline ? 13 : 18,
+            minZoom: 1,
+            maxZoom: 18,
             zoomSnap: isOffline ? 1 : 0.5,
             zoomDelta: isOffline ? 1 : 1
           };
@@ -2818,15 +2843,15 @@ export default function MapScreen() {
                       tile.src = base64Data;
                       if (done) done(null, tile);
                     } else {
-                      // Cache'de yok, açık gri placeholder tile göster (256x256)
+                      // Cache'de yok, placeholder tile göster (256x256)
                       var canvas = document.createElement('canvas');
                       canvas.width = 256;
                       canvas.height = 256;
                       var ctx = canvas.getContext('2d');
-                      ctx.fillStyle = '#e5e7eb';
+                      ctx.fillStyle = ${isDark} ? '#1e293b' : '#e5e7eb';
                       ctx.fillRect(0, 0, 256, 256);
                       // Çapraz çizgiler çiz
-                      ctx.strokeStyle = '#d1d5db';
+                      ctx.strokeStyle = ${isDark} ? '#334155' : '#d1d5db';
                       ctx.lineWidth = 1;
                       ctx.beginPath();
                       ctx.moveTo(0, 0);
@@ -2835,7 +2860,7 @@ export default function MapScreen() {
                       ctx.lineTo(0, 256);
                       ctx.stroke();
                       // Metin ekle
-                      ctx.fillStyle = '#9ca3af';
+                      ctx.fillStyle = ${isDark} ? '#64748b' : '#9ca3af';
                       ctx.font = '12px Arial';
                       ctx.textAlign = 'center';
                       ctx.fillText('Offline', 128, 120);
@@ -2855,9 +2880,9 @@ export default function MapScreen() {
                       canvas.width = 256;
                       canvas.height = 256;
                       var ctx = canvas.getContext('2d');
-                      ctx.fillStyle = '#f3f4f6';
+                      ctx.fillStyle = ${isDark} ? '#0f172a' : '#f3f4f6';
                       ctx.fillRect(0, 0, 256, 256);
-                      ctx.strokeStyle = '#e5e7eb';
+                      ctx.strokeStyle = ${isDark} ? '#1e293b' : '#e5e7eb';
                       ctx.lineWidth = 1;
                       ctx.strokeRect(0, 0, 256, 256);
                       tile.src = canvas.toDataURL();
@@ -2870,7 +2895,7 @@ export default function MapScreen() {
                   canvas.width = 256;
                   canvas.height = 256;
                   var ctx = canvas.getContext('2d');
-                  ctx.fillStyle = '#f3f4f6';
+                  ctx.fillStyle = ${isDark} ? '#0f172a' : '#f3f4f6';
                   ctx.fillRect(0, 0, 256, 256);
                   tile.src = canvas.toDataURL();
                   if (done) done(null, tile);
@@ -2881,19 +2906,19 @@ export default function MapScreen() {
             });
             
             tileLayer = new OfflineTileLayer('', {
-              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors (Offline)',
-              maxZoom: 13,
-              minZoom: 9,
+              attribution: '&copy; <a href="#">OpenStreetMap</a> contributors (Offline)',
               bounds: null,
               keepBuffer: 2,
-              updateWhenIdle: false,
-              updateWhenZooming: false
             });
           } else {
             // Online modda: Backend proxy üzerinden yükle
             // Version parametresi ile backend cache bypass (CartoDB'ye geçiş için)
-            tileLayer = L.tileLayer(window.API_URL + '/tiles/{z}/{x}/{y}.png?v=cartodb', {
-              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            // Theme-based cache bust token: light (lt) vs dark (dk) 
+            var tileStyleAndToken = ${isDark} ? '&style=dark&t=dk' : '&t=lt';
+            var tileUrl = window.API_URL + '/tiles/{z}/{x}/{y}.png?v=cartodb' + tileStyleAndToken;
+            console.log('[MapHTML] Tile URL:', tileUrl, 'isDark:', ${isDark}, 'token:', ${isDark} ? 'dk' : 'lt');
+            tileLayer = L.tileLayer(tileUrl, {
+              attribution: '&copy; <a href="#">OpenStreetMap</a> contributors &copy; <a href="#">CARTO</a>',
               errorTileUrl: '',
               maxZoom: 18,
               minZoom: 1
@@ -3058,7 +3083,7 @@ export default function MapScreen() {
               })
             }).addTo(map).bindPopup(\`
           <div class="custom-popup" style="display: flex; flex-direction: row; gap: 0; min-width: 320px; max-width: 380px; align-items: stretch;">
-            <div style="position: relative; flex: 0 0 45%; width: 45%; min-width: 90px; max-width: 160px; aspect-ratio: 1/1; border-radius: 0; background: #f3f4f6; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0; padding: 0; left: 0; top: 0; border: none;">
+            <div style="position: relative; flex: 0 0 45%; width: 45%; min-width: 90px; max-width: 160px; aspect-ratio: 1/1; border-radius: 0; background: ${isDark ? '#1e293b' : '#f3f4f6'}; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0; padding: 0; left: 0; top: 0; border: none;">
               ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center;"><svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 137.5 137.5'><g><path fill='none' d='M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z'/><path fill='#444444ff' d='M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z'/></g></svg></div>` : `<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
                 <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 137.5 137.5"><g><path fill="none" d="M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z"/><path fill="#444444ff" d="M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z"/></g></svg>
               </div>`}
@@ -3078,13 +3103,13 @@ export default function MapScreen() {
                   ${marker.name.replace(/'/g, "\\'")}
                 </div>
                 <span class="popup-type" style="margin-bottom: 2px;">${marker.typeLabel}</span>
-                ${marker.isUserSubmitted ? '<div style="font-size: 12px; color: #8b5cf6;">⭐ Kullanıcı Ekledi</div>' : ''}
-                ${marker.distance && marker.distance !== '' ? '<div style="font-size: 12px; color: #6b7280;">📍 ' + marker.distance + '</div>' : ''}
+                ${marker.isUserSubmitted ? '<div style="font-size: 12px; color: ' + (isDark ? '#a78bfa' : '#8b5cf6') + ';">⭐ Kullanıcı Ekledi</div>' : ''}
+                ${marker.distance && marker.distance !== '' ? '<div style="font-size: 12px; color: ' + (isDark ? '#94a3b8' : '#6b7280') + ';">📍 ' + marker.distance + '</div>' : ''}
               </div>
               <!-- Olanaklar (amenities) ikonları alt satırda -->
               <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 4px 0 0 0; min-height: 24px;">
                 ${(marker.amenities && Array.isArray(marker.amenities) && marker.amenities.length > 0) ? marker.amenities.map(am => `
-                  <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: #f3f4f6; margin-right: 2px; font-size: 16px;" title="${am}">
+                  <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: ${isDark ? '#334155' : '#f3f4f6'}; margin-right: 2px; font-size: 16px;" title="${am}">
                     ${marker.getAmenityIcon(am)}
                   </span>
                 `).join('') : ''}
@@ -3092,21 +3117,21 @@ export default function MapScreen() {
               <!-- Alt aksiyonlar (mercek ve harita) -->
               <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 8px;">
                   <div style="font-size: 0; color: #059669; flex: 1; display: flex; align-items: center; justify-content: flex-start; cursor:pointer;" onclick="openCampingAreaDetail(${marker.lat}, ${marker.lng})">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5a5a5aff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-plus-icon lucide-circle-plus"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>  
-                    <span style="font-size: 13px; color: #222; margin-left: 5px">Detaylı Bilgi</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${isDark ? '#94a3b8' : '#5a5a5a'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-plus-icon lucide-circle-plus"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>  
+                    <span style="font-size: 13px; color: ${isDark ? '#e2e8f0' : '#222'}; margin-left: 5px">Detaylı Bilgi</span>
                   </div>
                   <div style="position: relative; display: flex; align-items: center;">
                     <div style="width: 24px; height: 24px; background: none; border-radius: 8%; display: flex; align-items: center; justify-content: center; position: relative; cursor:pointer;" onclick="toggleMapMenu(this, ${marker.lat}, ${marker.lng})">
                       ${getSVGIcon('navigation', { width: 18, height: 18 })}
                     </div>
-                    <div class="map-menu" style="display: none; position: absolute; top: 55px; left: -85px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); padding: 6px 0; min-width: 120px; z-index: 999;">
+                    <div class="map-menu" style="display: none; position: absolute; top: 55px; left: -85px; background: ${isDark ? '#1e293b' : '#fff'}; border: 1px solid ${isDark ? '#334155' : '#e5e7eb'}; border-radius: 8px; box-shadow: 0 2px 8px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.12)'}; padding: 6px 0; min-width: 120px; z-index: 999;">
                     <div style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; cursor: pointer;" onclick="openGoogleMaps(${marker.lat}, ${marker.lng}); hideMapMenu(this);">
                       <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/><path d="M1 1h22v22H1z" fill="none"/></svg>
-                      <span style="font-size: 13px; color: #222;">Google Haritalar</span>
+                      <span style="font-size: 13px; color: ${isDark ? '#e2e8f0' : '#222'};">Google Haritalar</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; cursor: pointer;" onclick="openYandexMaps(${marker.lat}, ${marker.lng}); hideMapMenu(this);">
                       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="44" fill="none" viewBox="0 0 26 26"><path fill="#F8604A" d="M26 13c0-7.18-5.82-13-13-13S0 5.82 0 13s5.82 13 13 13 13-5.82 13-13Z"></path><path fill="#fff" d="M13.353 14.343c.76 1.664 1.013 2.243 1.013 4.241v2.65h-2.714v-4.467L6.534 5.634h2.83l3.989 8.71Zm3.346-8.709-3.32 7.542h2.759l3.328-7.542h-2.767Z"></path></svg>
-                      <span style="font-size: 13px; color: #222;">Yandex Haritalar</span>
+                      <span style="font-size: 13px; color: ${isDark ? '#e2e8f0' : '#222'};">Yandex Haritalar</span>
                     </div>
                   </div>
                   
@@ -3244,7 +3269,7 @@ export default function MapScreen() {
   // HTML çıktısını memoize et - gereksiz re-render'ları önle
   const mapHTML = useMemo(() => {
     return generateMapHTML();
-  }, [location, filteredCampingAreas, mapMoveQuery, isLocationPickerMode, selectForPlanMode, isConnected, favorites]);
+  }, [location, filteredCampingAreas, mapMoveQuery, isLocationPickerMode, selectForPlanMode, isConnected, favorites, scheme]);
 
   const handleWebViewMessage = (event: any) => {
     try {
@@ -3362,9 +3387,10 @@ export default function MapScreen() {
         setShowMapPopup(false);
       } else if (data.type === 'requestCachedTile') {
         // Offline modda cache'den tile iste
+        const tileStyle = scheme === 'dark' ? 'dark' : undefined;
         (async () => {
           try {
-            const cachedTile = await getCachedTile(data.z, data.x, data.y);
+            const cachedTile = await getCachedTile(data.z, data.x, data.y, tileStyle);
             // WebView'a yanıt gönder - hızlıca callback tetikle
             if (isMounted.current && webViewRef.current) {
               const script = `
@@ -3390,11 +3416,12 @@ export default function MapScreen() {
           }
         })();
       } else if (data.type === 'cacheTile') {
-        // Online modda tile'ı cache'le
+        // Online modda tile'ı cache'le (dualMode=true: karşı temayı da arka planda kaydet)
         if (isConnected) {
+          const tileStyle = scheme === 'dark' ? 'dark' : undefined;
           (async () => {
             try {
-              await cacheTile(data.z, data.x, data.y);
+              await cacheTile(data.z, data.x, data.y, tileStyle, true);
             } catch (error) {
               if (__DEV__) console.error('[MapTileCache] Cache yazma hatası:', error);
             }
@@ -3694,11 +3721,11 @@ export default function MapScreen() {
 
   if (error) {
     return (
-      <SafeAreaView style={styles.container} edges={['left','right']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left','right']}>
         <View style={styles.loadingContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={refreshData}>
-            <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+          <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+          <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={refreshData}>
+            <Text style={[styles.retryButtonText, { color: '#fff' }]}>Tekrar Dene</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -3707,18 +3734,18 @@ export default function MapScreen() {
 
   // Yükleme sırasında sayfa yarı saydam değil, dokunma engeli yok
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <HelpModal visible={helpVisible} onClose={() => {
         if (isMounted.current) setHelpVisible(false);
       }} />
       
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Kamp Alanları</Text>
+      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Kamp Alanları</Text>
         <View style={styles.headerActions}>
           {/* Görünüm Değiştirme Butonu */}
           <TouchableOpacity
-            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
             onPress={() => {
               if (syncProgress.isLoading) {
                 return;
@@ -3749,13 +3776,13 @@ export default function MapScreen() {
             disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
           >
             {viewMode === 'map' ? (
-              <List size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
+              <List size={20} color={(!isConnected && !user?.offline_enabled) ? colors.muted : colors.primary} />
             ) : (
-              <Map size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
+              <Map size={20} color={(!isConnected && !user?.offline_enabled) ? colors.muted : colors.primary} />
             )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
             onPress={async () => {
               if (syncProgress.isLoading) {
                 return;
@@ -3790,16 +3817,16 @@ export default function MapScreen() {
             }}
             disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
           >
-            <Feather name="search" size={20} color={(!isConnected && !user?.offline_enabled) ? "#9ca3af" : "#059669"} />
+            <Feather name="search" size={20} color={(!isConnected && !user?.offline_enabled) ? colors.muted : colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 },
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 },
               (() => {
                 const isFilterActive =
                   turkeyWideKeys.length > 0 ||
                   selectedTags.length < campingTypes.length ||
                   selectedFilters.length < FILTERS.filter(f => f.visible).length;
-                return isFilterActive ? { backgroundColor: '#059669' } : undefined;
+                return isFilterActive ? { backgroundColor: colors.primary } : undefined;
               })()
             ]}
             onPress={() => {
@@ -3833,13 +3860,13 @@ export default function MapScreen() {
                 selectedFilters.length < FILTERS.filter(f => f.visible).length;
               return (
                 <View style={{ position: 'relative' }}>
-                  <Filter size={20} color={disabled ? '#9ca3af' : isFilterActive ? '#fff' : '#059669'} />
+                  <Filter size={20} color={disabled ? colors.muted : isFilterActive ? '#fff' : colors.primary} />
                   {isFilterActive && !disabled && (
                     <View style={{
                       position: 'absolute', top: -4, right: -4,
                       width: 8, height: 8, borderRadius: 4,
-                      backgroundColor: '#f97316',
-                      borderWidth: 1, borderColor: '#fff',
+                      backgroundColor: colors.warning,
+                      borderWidth: 1, borderColor: colors.surface,
                     }} />
                   )}
                 </View>
@@ -3849,6 +3876,7 @@ export default function MapScreen() {
           <TouchableOpacity
             style={[
               styles.actionButton,
+              { backgroundColor: colors.primaryLight },
               (isFullSyncInProgressRef.current || syncProgress.isLoading) && { opacity: 0.4 }
             ]}
             onPress={
@@ -3861,13 +3889,13 @@ export default function MapScreen() {
           >
             {isBusy || isFullSyncInProgressRef.current || syncProgress.isLoading ? (
               <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                <RefreshCw size={20} color="#ef4444" />
+                <RefreshCw size={20} color={colors.danger} />
               </Animated.View>
             ) : (
               !isConnected ? (
-                <OfflineSyncIcon width={24} height={24} color="#010101" />
+                <OfflineSyncIcon width={24} height={24} color={colors.text} />
               ) : (
-                <RefreshCw size={20} color="#059669" />
+                <RefreshCw size={20} color={colors.primary} />
               )
             )}
           </TouchableOpacity>
@@ -3876,7 +3904,7 @@ export default function MapScreen() {
 
       {/* Filters */}
       {showFilters && (
-        <View style={styles.filtersContainer}>
+        <View style={[styles.filtersContainer, { backgroundColor: colors.surface }]}>
           <CampingAreaFilters
             userFilters={FILTERS}
             selectedUserFilters={selectedFilters}
@@ -3903,14 +3931,14 @@ export default function MapScreen() {
           opacity: notificationBarAnim,
           backgroundColor:
             notifications[notificationIndex]?.type === 'announcement'
-              ? '#2563eb'
+              ? colors.info
               : notifications[notificationIndex]?.type === 'friend_request'
-                ? '#059669'
+                ? colors.primary
                 : notifications[notificationIndex]?.type === 'checklist_share'
-                  ? '#f59e42'
+                  ? colors.warning
                   : notifications[notificationIndex]?.type === 'camping_area_share'
                     ? '#8b5cf6'
-                    : '#f59e42',
+                    : colors.warning,
         }]}> 
           <TouchableOpacity style={styles.notificationContent} onPress={() => notifications[notificationIndex]?.goto()}>
             {notifications[notificationIndex]?.type === 'friend_request' ? (
@@ -3934,22 +3962,22 @@ export default function MapScreen() {
         return null;
       })()}
       {syncProgress.isLoading && syncProgress.total > 0 && (
-        <View style={styles.progressBarContainer}>
-          <View style={styles.progressBarBackground}>
+        <View style={[styles.progressBarContainer, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <View style={[styles.progressBarBackground, { backgroundColor: colors.border }]}>
             <Animated.View 
               style={[
                 styles.progressBarFill,
-                { width: `${Math.min((syncProgress.current / syncProgress.total) * 100, 100)}%` }
+                { width: `${Math.min((syncProgress.current / syncProgress.total) * 100, 100)}%`, backgroundColor: colors.primary }
               ]} 
             />
           </View>
-          <Text style={styles.progressText}>
+          <Text style={[styles.progressText, { color: colors.muted }]}>
             {syncProgress.total > 100 
               ? `${syncProgress.current} / ${syncProgress.total} kamp alanı yükleniyor...`
               : 'Senkronizasyon tamamlanıyor'}
           </Text>
           {syncProgress.total > 100 && (
-            <Text style={styles.progressSubText}>
+            <Text style={[styles.progressSubText, { color: colors.muted }]}>
                Pasif sekmeler eşitleme sonrası aktif olacaktır.
             </Text>
           )}
@@ -3957,35 +3985,35 @@ export default function MapScreen() {
       )}
       {/* Senkronizasyon sırasında üstte uyarı banner'ı (sadece ekrana dokunulunca 2sn görünür) */}
       {showSyncBanner && (
-        <View style={styles.syncBanner}>
-          <Text style={styles.syncBannerText}>🔄 Lütfen senkronizasyonun tamamlanmasını bekleyin</Text>
+        <View style={[styles.syncBanner, { backgroundColor: colors.danger + '20', borderBottomColor: colors.danger }]}>
+          <Text style={[styles.syncBannerText, { color: colors.danger }]}>🔄 Lütfen senkronizasyonun tamamlanmasını bekleyin</Text>
         </View>
       )}
       {/* Offline Mode Banner */}
       {!isConnected && (
-        <View style={[styles.offlineBanner, !user?.offline_enabled && { paddingVertical: 12 }]}>
-          <Text style={styles.offlineBannerText}>
+        <View style={[styles.offlineBanner, !user?.offline_enabled && { paddingVertical: 12 }, { backgroundColor: colors.warning + '20', borderBottomColor: colors.warning }]}>
+          <Text style={[styles.offlineBannerText, { color: colors.warning }]}>
             {user?.offline_enabled 
               ? '📵 Offline Mod - Cache\'lenmiş harita gösteriliyor' 
               : <>📵 Offline mod için <Text style={{fontWeight: 'bold', fontStyle: 'italic'}}>Premium</Text> aboneliği gerekmektedir.</>}
           </Text>
           {!user?.offline_enabled && (
             <TouchableOpacity
-              style={styles.premiumButton}
+              style={[styles.premiumButton, { backgroundColor: colors.primary }]}
               onPress={() => router.push('/premium' as any)}
             >
-              <Text style={styles.premiumButtonText}>Premium Ol!</Text>
+              <Text style={[styles.premiumButtonText, { color: '#fff' }]}>Premium Ol!</Text>
             </TouchableOpacity>
           )}
         </View>
       )}
       {/* Location Picker Mode Banner */}
       {isLocationPickerMode && (
-        <View style={styles.locationPickerBanner} pointerEvents={isBusy ? 'none' : 'auto'}>
+        <View style={[styles.locationPickerBanner, { backgroundColor: colors.warning + '20', borderBottomColor: colors.warning }]} pointerEvents={isBusy ? 'none' : 'auto'}>
           <View style={{ flex: 1, flexDirection: 'column' }}>
-            <Text style={styles.locationPickerText}>📍 Haritada konum seçmek için tıklayın</Text>
+            <Text style={[styles.locationPickerText, { color: colors.warning }]}>📍 Haritada konum seçmek için tıklayın</Text>
             {isGuest && (
-              <Text style={{ fontSize: 12, color: remainingAreas <= 3 ? '#dc2626' : '#6b7280', marginTop: 6 }}>
+              <Text style={{ fontSize: 12, color: remainingAreas <= 3 ? colors.danger : colors.muted, marginTop: 6 }}>
                 Kalan kamp alanı hakkı: {remainingAreas}/{GUEST_LIMIT}
               </Text>
             )}
@@ -3993,7 +4021,7 @@ export default function MapScreen() {
           {isGuest && (
             <TouchableOpacity
               style={{
-                backgroundColor: '#059669',
+                backgroundColor: colors.primary,
                 paddingHorizontal: 12,
                 paddingVertical: 6,
                 borderRadius: 6,
@@ -4008,11 +4036,11 @@ export default function MapScreen() {
             </TouchableOpacity>
           )}
           <TouchableOpacity 
-            style={styles.cancelLocationPicker}
+            style={[styles.cancelLocationPicker, { backgroundColor: colors.warning }]}
             onPress={cancelLocationPicker}
                        disabled={isBusy}
           >
-            <Text style={styles.cancelLocationPickerText}>İptal</Text>
+            <Text style={[styles.cancelLocationPickerText, { color: '#fff' }]}>İptal</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -4020,7 +4048,7 @@ export default function MapScreen() {
       {/* Ana İçerik - Harita, Liste veya Arama Görünümü */}
       {viewMode === 'search' ? (
         /* Arama Görünümü */
-        <View style={{ flex: 1, backgroundColor: '#f8fafc' }}>
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
           <CampingAreaSearchBar
             campingAreas={searchAllAreas}
             campTypeFilter={selectForPlanMode ? (selectedTags?.[0] ?? null) : null}
@@ -4059,7 +4087,7 @@ export default function MapScreen() {
           />
           <TouchableOpacity onPress={() => {
             if (isMounted.current) changeViewMode('map');
-          }} style={{ alignSelf: 'center', marginTop: 16, backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 24, paddingVertical: 12 }}>
+          }} style={{ alignSelf: 'center', marginTop: 16, backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 24, paddingVertical: 12 }}>
             <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Haritaya Dön</Text>
           </TouchableOpacity>
         </View>
@@ -4068,7 +4096,7 @@ export default function MapScreen() {
           {/* Map */}
           <View style={styles.mapContainer} pointerEvents="auto">
             <WebView
-              key={`map-${mapKey}`}
+              key={`map-${mapKey}-${scheme}`}
               ref={webViewRef}
               source={{ html: mapHTML }}
               style={styles.map}
@@ -4121,7 +4149,8 @@ export default function MapScreen() {
                 <TouchableOpacity 
                   style={[
                     styles.fab, 
-                    styles.fabBinoculars, 
+                    styles.fabBinoculars,
+                    { backgroundColor: colors.primary },
                     (!user?.offline_enabled && !isConnected) && { opacity: 0.4 },
                     syncProgress.isLoading && { opacity: 0.4 }
                   ]} 
@@ -4158,7 +4187,7 @@ export default function MapScreen() {
           {!isLocationPickerMode && !showMapPopup && (
             <View style={styles.fabContainer} pointerEvents={(isBusy || syncProgress.isLoading) ? 'none' : 'auto'}>
               <TouchableOpacity
-                style={[styles.fab, styles.fabSecondary, (isBusy || syncProgress.isLoading) ? { opacity: 0.45 } : {}]}
+                style={[styles.fab, styles.fabSecondary, { backgroundColor: colors.accent }, (isBusy || syncProgress.isLoading) ? { opacity: 0.45 } : {}]}
                 onPress={() => {
                   if (isMounted.current && !syncProgress.isLoading) setIsLocationPickerMode(true);
                 }}
@@ -4167,7 +4196,7 @@ export default function MapScreen() {
                 <Plus size={28} color="white" />
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.fab, (isBusy || syncProgress.isLoading) ? { opacity: 0.45 } : {}]}
+                style={[styles.fab, { backgroundColor: colors.primary }, (isBusy || syncProgress.isLoading) ? { opacity: 0.45 } : {}]}
                 onPress={handleShowCurrentLocation}
                 disabled={isBusy || syncProgress.isLoading}
               >
@@ -4190,10 +4219,10 @@ export default function MapScreen() {
                     })();
                   }}
                 >
-                  <ArrowLeft size={18} color="#374151" />
+                  <ArrowLeft size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
 
-                <Text style={styles.compactTitle}>Adım 3 / 5 — Kamp Alanı Seçimi</Text>
+                <Text style={[styles.compactTitle, { color: colors.text }]}>Adım 3 / 5 — Kamp Alanı Seçimi</Text>
 
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <TouchableOpacity
@@ -4208,7 +4237,7 @@ export default function MapScreen() {
                       })();
                     }}
                   >
-                    <ArrowRight size={18} color="#374151" />
+                    <ArrowRight size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.compactBtn}
@@ -4242,7 +4271,7 @@ export default function MapScreen() {
                         })();
                     }}
                   >
-                    <X size={18} color="#374151" />
+                    <X size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -4257,7 +4286,7 @@ export default function MapScreen() {
           }), hasLocationPermission === false && !isLocationPickerMode && !showMapPopup) && (
             <View style={styles.locationPermissionContainer} pointerEvents="box-none">
               <TouchableOpacity
-                style={styles.locationPermissionButton}
+                style={[styles.locationPermissionButton, { backgroundColor: colors.primary }]}
                 onPress={() => {
                   console.log('[DEBUG] Konum izni butonu tıklandı, modal açılıyor');
                   setUserDismissedPermissionModal(false); // Kullanıcı tekrar izin istiyor
@@ -4267,53 +4296,53 @@ export default function MapScreen() {
                 activeOpacity={0.7}
               >
                 <Navigation size={20} color="white" style={{ marginRight: 8 }} />
-                <Text style={styles.locationPermissionText}>Konum İznini Aç</Text>
+                <Text style={[styles.locationPermissionText, { color: '#fff' }]}>Konum İznini Aç</Text>
               </TouchableOpacity>
             </View>
           )}
 
           {/* Info Panel */}
           {!isLocationPickerMode && (
-            <View style={styles.infoPanel} pointerEvents={(isBusy || syncProgress.isLoading) ? 'none' : 'auto'}>
+            <View style={[styles.infoPanel, { backgroundColor: colors.surface }]} pointerEvents={(isBusy || syncProgress.isLoading) ? 'none' : 'auto'}>
               <View style={styles.infoPanelHeader}>
-                <MapPin size={16} color="#059669" />
-                <Text style={styles.infoPanelTitle}>
+                <MapPin size={16} color={colors.primary} />
+                <Text style={[styles.infoPanelTitle, { color: colors.text }]}>
                   {Array.isArray(filteredCampingAreas) ? filteredCampingAreas.length : 0} kamp alanı yakınınızda
                 </Text>
               </View>
               <View style={styles.infoPanelContent}>
-                <Text style={styles.infoPanelSubtitle}>
+                <Text style={[styles.infoPanelSubtitle, { color: colors.muted }]}>
                   {location ? 'Haritadaki işaretlere dokunarak detayları görün' : 'Konum bilgisi alınıyor...'}
             </Text>
             {location && (
               <View style={styles.buttonContainer}>
                 <TouchableOpacity 
-                  style={[styles.planCampButton, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
+                  style={[styles.planCampButton, { backgroundColor: '#f3e8ff', borderColor: '#7c3aed' }, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
                   onPress={handlePlanCamp}
                   disabled={isBusy || syncProgress.isLoading}
                 >
-                  {hasDraftPlan && <View style={styles.draftDot} />}
+                  {hasDraftPlan && <View style={[styles.draftDot, { backgroundColor: colors.danger }]} />}
                   <Calendar size={14} color="#7c3aed" />
-                  <Text style={styles.planCampButtonText}>Kamp Planla</Text>
+                  <Text style={[styles.planCampButtonText, { color: '#7c3aed' }]}>Kamp Planla</Text>
                   {planCount > 0 && (
-                    <View style={styles.planBadge}>
-                      <Text style={styles.planBadgeText}>{planCount > 99 ? '99+' : String(planCount)}</Text>
+                    <View style={[styles.planBadge, { backgroundColor: colors.danger }]}>
+                      <Text style={[styles.planBadgeText, { color: '#fff' }]}>{planCount > 99 ? '99+' : String(planCount)}</Text>
                     </View>
                   )}
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={[styles.currentLocationButton, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
+                  style={[styles.currentLocationButton, { backgroundColor: colors.primaryLight, borderColor: colors.primary }, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
                   onPress={addCampingAreaAtCurrentLocation}
                   disabled={isBusy || syncProgress.isLoading}
                 >
-                  <Plus size={14} color="#059669" />
-                  <Text style={styles.currentLocationButtonText}>Mevcut Konuma Ekle</Text>
+                  <Plus size={14} color={colors.primary} />
+                  <Text style={[styles.currentLocationButtonText, { color: colors.primary }]}>Mevcut Konuma Ekle</Text>
                 </TouchableOpacity>
               </View>
             )}
           </View>
           {__DEV__ && (
-            <Text style={styles.debugText}>Debug modu aktif</Text>
+            <Text style={[styles.debugText, { color: colors.muted }]}>Debug modu aktif</Text>
           )}
         </View>
       )}
@@ -4524,9 +4553,7 @@ export default function MapScreen() {
 
 const styles = StyleSheet.create({
   notificationBar: {
-    backgroundColor: '#f0fdf4',
     borderBottomWidth: 1,
-    borderBottomColor: '#dcfce7',
     paddingVertical: 8,
     paddingHorizontal: 16,
     flexDirection: 'row',
@@ -4541,7 +4568,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   notificationText: {
-    color: '#059669',
     fontWeight: 'bold',
     fontSize: 15,
     flex: 1,
@@ -4552,7 +4578,6 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   notificationNavText: {
-    color: '#059669',
     fontWeight: 'bold',
     fontSize: 14,
     marginHorizontal: 4,
@@ -4571,7 +4596,6 @@ const styles = StyleSheet.create({
   planOverlayTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#0f172a',
     backgroundColor: 'rgba(255,255,255,0.92)',
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -4603,7 +4627,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#64748b',
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 10,
@@ -4613,14 +4636,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#059669',
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 10,
     minWidth: 120,
   },
   planOverlayBtnText: {
-    color: '#fff',
     fontWeight: '700',
     fontSize: 15,
   },
@@ -4654,10 +4675,8 @@ const styles = StyleSheet.create({
   compactTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#0f172a',
   },
   fabBinoculars: {
-    backgroundColor: '#059669',
     width: 56,
     height: 56,
     borderRadius: 28,
@@ -4679,7 +4698,6 @@ const styles = StyleSheet.create({
     zIndex: 200,
   },
   mapMoveButton: {
-    backgroundColor: '#059669',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 24,
@@ -4690,13 +4708,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   mapMoveButtonText: {
-    color: 'white',
     fontSize: 15,
     fontWeight: '600',
   },
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   loadingContainer: {
     flex: 1,
@@ -4706,7 +4722,6 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: '#6b7280',
     textAlign: 'center',
   },
   header: {
@@ -4715,14 +4730,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
-    backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1f2937',
   },
   headerActions: {
     flexDirection: 'row',
@@ -4732,17 +4744,15 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#f0fdf4',
     justifyContent: 'center',
     alignItems: 'center',
   },
   filtersContainer: {
     position: 'absolute',
-    top: 60, // Header yüksekliği kadar
+    top: 60,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'white',
     zIndex: 1000,
     paddingHorizontal: 20,
     paddingVertical: 16,
@@ -4760,36 +4770,28 @@ const styles = StyleSheet.create({
   filterChip: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#f0fdf4',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#059669',
   },
   filterChipActive: {
-    backgroundColor: '#059669',
   },
   filterText: {
     fontSize: 14,
-    color: '#059669',
     fontWeight: '500',
   },
   filterTextActive: {
-    color: '#ffffff',
   },
   errorText: {
     fontSize: 16,
-    color: '#ef4444',
     textAlign: 'center',
     marginBottom: 16,
   },
   retryButton: {
-    backgroundColor: '#059669',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
   },
   retryButtonText: {
-    color: 'white',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -4810,7 +4812,6 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#059669',
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
@@ -4820,14 +4821,12 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   fabSecondary: {
-    backgroundColor: '#10b981',
   },
   infoPanel: {
     position: 'absolute',
     bottom: 20,
     left: 20,
     right: 20,
-    backgroundColor: 'white',
     padding: 16,
     borderRadius: 12,
     elevation: 4,
@@ -4845,7 +4844,6 @@ const styles = StyleSheet.create({
   infoPanelTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
   },
   infoPanelContent: {
     flexDirection: 'row',
@@ -4854,7 +4852,6 @@ const styles = StyleSheet.create({
   },
   infoPanelSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
     lineHeight: 20,
     flex: 1,
   },
@@ -4866,37 +4863,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#f3e8ff',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#7c3aed',
   },
   planCampButtonText: {
     fontSize: 12,
-    color: '#7c3aed',
     fontWeight: '600',
   },
   draftDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#dc2626',
     marginRight: 4,
   },
   planBadge: {
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#ef4444',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
     paddingHorizontal: 4,
   },
   planBadgeText: {
-    color: '#fff',
     fontSize: 11,
     fontWeight: '700',
   },
@@ -4904,16 +4895,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#f0fdf4',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#059669',
   },
   currentLocationButtonText: {
     fontSize: 12,
-    color: '#059669',
     fontWeight: '600',
   },
   locationPermissionContainer: {
@@ -4928,7 +4916,6 @@ const styles = StyleSheet.create({
   locationPermissionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#059669',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 24,
@@ -4939,14 +4926,11 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
   },
   locationPermissionText: {
-    color: 'white',
     fontSize: 16,
     fontWeight: '600',
   },
   locationPickerBanner: {
-    backgroundColor: '#fef3c7',
     borderBottomWidth: 1,
-    borderBottomColor: '#f59e0b',
     paddingHorizontal: 20,
     paddingVertical: 12,
     flexDirection: 'row',
@@ -4955,24 +4939,19 @@ const styles = StyleSheet.create({
   },
   locationPickerText: {
     fontSize: 14,
-    color: '#92400e',
     fontWeight: '600',
   },
   cancelLocationPicker: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#f59e0b',
     borderRadius: 6,
   },
   cancelLocationPickerText: {
     fontSize: 12,
-    color: 'white',
     fontWeight: '600',
   },
   syncBanner: {
-    backgroundColor: '#fee2e2',
     borderBottomWidth: 1,
-    borderBottomColor: '#ef4444',
     paddingHorizontal: 20,
     paddingVertical: 12,
     flexDirection: 'row',
@@ -4982,15 +4961,12 @@ const styles = StyleSheet.create({
   },
   syncBannerText: {
     fontSize: 14,
-    color: '#b91c1c',
     fontWeight: '700',
     flex: 1,
     textAlign: 'center',
   },
   offlineBanner: {
-    backgroundColor: '#fef3c7',
     borderBottomWidth: 1,
-    borderBottomColor: '#f59e0b',
     paddingHorizontal: 20,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -5002,54 +4978,44 @@ const styles = StyleSheet.create({
   },
   offlineBannerText: {
     fontSize: 13,
-    color: '#92400e',
     fontWeight: '600',
     textAlign: 'center',
   },
   premiumButton: {
-    backgroundColor: '#059669',
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 16,
     marginLeft: 8,
   },
   premiumButtonText: {
-    color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
   },
   debugText: {
     fontSize: 12,
-    color: '#6b7280',
     marginTop: 8,
   },
   progressBarContainer: {
-    backgroundColor: '#ffffff',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   progressBarBackground: {
     height: 4,
-    backgroundColor: '#e5e7eb',
     borderRadius: 2,
     overflow: 'hidden',
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#059669',
     borderRadius: 2,
   },
   progressText: {
     fontSize: 11,
-    color: '#6b7280',
     marginTop: 4,
     textAlign: 'center',
   },
   progressSubText: {
     fontSize: 10,
-    color: '#9ca3af',
     marginTop: 2,
     textAlign: 'center',
     fontStyle: 'italic',

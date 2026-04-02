@@ -5,9 +5,13 @@ import { registerUser, listCommunities, joinCommunity, loginUser } from '../../l
 import { API_URL } from '../../lib/config';
 import { saveToken } from '../../lib/auth';
 import { useRouter } from 'expo-router';
+import { useTheme } from '../../components/ThemeProvider';
+import { createThemedStyles } from '../../constants/theme/sharedStyles';
 // Picker kaldırıldı, autocomplete için TextInput + FlatList kullanılacak
 
 export default function RegisterScreen() {
+    const { colors } = useTheme();
+    const themed = createThemedStyles(colors);
     // E-posta doğrulama kodu için state
     const [verificationModal, setVerificationModal] = useState(false);
     const [verificationCode, setVerificationCode] = useState('');
@@ -182,45 +186,45 @@ export default function RegisterScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Kayıt Ol</Text>
+    <View style={[styles.container, { backgroundColor: colors.surface }]}>
+      <Text style={[styles.title, { color: colors.text }]}>Kayıt Ol</Text>
       <TextInput
-        style={styles.input}
+        style={[themed.input, { marginBottom: 16 }]}
         placeholder="Adınız"
         value={name}
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.muted}
         onChangeText={setName}
       />
       {errors.name ? <Text style={styles.error}>{errors.name}</Text> : null}
       <TextInput
-        style={styles.input}
+        style={[themed.input, { marginBottom: 16 }]}
         placeholder="Kullanıcı Adı"
         value={username}
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.muted}
         onChangeText={setUsername}
         autoCapitalize="none"
       />
       {errors.username ? <Text style={styles.error}>{errors.username}</Text> : null}
       <TextInput
-        style={styles.input}
+        style={[themed.input, { marginBottom: 16 }]}
         placeholder="E-posta"
         autoCapitalize="none"
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.muted}
         keyboardType="email-address"
         value={email}
         onChangeText={setEmail}
       />
       {errors.email ? <Text style={styles.error}>{errors.email}</Text> : null}
       <TextInput
-        style={styles.input}
+        style={[themed.input, { marginBottom: 16 }]}
         placeholder="Şifre"
         secureTextEntry
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.muted}
         value={password}
         onChangeText={setPassword}
       />
       {errors.password ? <Text style={styles.error}>{errors.password}</Text> : null}
-      <Text style={{ marginBottom: 8, marginTop: 8 }}>Topluluk Seçimi (isteğe bağlı)</Text>
+      <Text style={{ marginBottom: 8, marginTop: 8, color: colors.textSecondary }}>Topluluk Seçimi (isteğe bağlı)</Text>
       {/* Topluluk seçimi alanı */}
       {loadingCommunities ? (
         <ActivityIndicator />
@@ -228,23 +232,23 @@ export default function RegisterScreen() {
         <View style={{ marginBottom: 16 }}>
           {communityId ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-              <View style={{ backgroundColor: '#e0f2fe', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
-                <Text style={{ color: '#0369a1', fontWeight: 'bold', marginRight: 6 }}>{communityNameInput}</Text>
+              <View style={{ backgroundColor: colors.primaryLight, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
+                <Text style={{ color: colors.primary, fontWeight: 'bold', marginRight: 6 }}>{communityNameInput}</Text>
                 <TouchableOpacity onPress={() => {
                   setCommunityId(undefined);
                   setCommunityNameInput('');
                 }}>
-                  <Text style={{ color: '#0369a1', fontWeight: 'bold', fontSize: 16 }}>×</Text>
+                  <Text style={{ color: colors.primary, fontWeight: 'bold', fontSize: 16 }}>×</Text>
                 </TouchableOpacity>
               </View>
             </View>
           ) : (
             <>
               <TextInput
-                style={styles.input}
+                style={[themed.input, { marginBottom: 16 }]}
                 placeholder="Topluluk adı ile ara..."
                 value={communityNameInput}
-                    placeholderTextColor="#64748b"
+                    placeholderTextColor={colors.muted}
                 onChangeText={text => {
                   setCommunityNameInput(text);
                   setCommunityId(undefined);
@@ -255,11 +259,11 @@ export default function RegisterScreen() {
                 }}
               />
               {showCommunitySuggestions && filteredCommunities.length > 0 && (
-                <View style={{ maxHeight: 150, backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, marginTop: -12, zIndex: 10 }}>
+                <View style={{ maxHeight: 150, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginTop: -12, zIndex: 10 }}>
                   {filteredCommunities.map((c: any) => (
                     <TouchableOpacity
                       key={c.id}
-                      style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: '#eee' }}
+                      style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: colors.surfaceVariant }}
                       onPress={() => {
                         setCommunityNameInput(c.name);
                         setCommunityId(c.id);
@@ -279,25 +283,25 @@ export default function RegisterScreen() {
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
           <TouchableOpacity
             onPress={() => setAgreementChecked(!agreementChecked)}
-            style={{ width: 24, height: 24, borderWidth: 2, borderColor: agreementChecked ? '#0e7490' : '#94a3b8', borderRadius: 6, marginRight: 10, backgroundColor: agreementChecked ? '#0e7490' : '#fff', justifyContent: 'center', alignItems: 'center' }}
+            style={{ width: 24, height: 24, borderWidth: 2, borderColor: agreementChecked ? colors.primary : colors.muted, borderRadius: 6, marginRight: 10, backgroundColor: agreementChecked ? colors.primary : colors.surface, justifyContent: 'center', alignItems: 'center' }}
           >
             {agreementChecked ? <Text style={{ color: '#fff', fontWeight: 'bold' }}>✓</Text> : null}
           </TouchableOpacity>
         <Text style={{ flex: 1, fontSize: 13 }}>
           <Text>Üyelik kaydı ile </Text>
-          <Text style={{ color: '#0e7490', textDecorationLine: 'underline' }} onPress={() => {
+          <Text style={{ color: colors.primary, textDecorationLine: 'underline' }} onPress={() => {
             setModalType('gizlilik');
             setModalVisible(true);
           }}>Gizlilik Politikası</Text>
           <Text> ve </Text>
-          <Text style={{ color: '#0e7490', textDecorationLine: 'underline' }} onPress={() => {
+          <Text style={{ color: colors.primary, textDecorationLine: 'underline' }} onPress={() => {
             setModalType('kvkk');
             setModalVisible(true);
           }}>KVKK Metni</Text>
           <Text>'ni okuduğunuzu ve kabul ettiğinizi onaylıyorsunuz.</Text>
         </Text>
       </View>
-      {errors.agreementChecked ? <Text style={{ color: 'red', marginBottom: 8, marginLeft: 4 }}>{errors.agreementChecked}</Text> : null}
+      {errors.agreementChecked ? <Text style={{ color: colors.danger, marginBottom: 8, marginLeft: 4 }}>{errors.agreementChecked}</Text> : null}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -305,8 +309,8 @@ export default function RegisterScreen() {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.18)', justifyContent: 'center', alignItems: 'center' }}>
-          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 0, minWidth: 320, maxWidth: 380, maxHeight: '80%', overflow: 'hidden' }}>
-            <Text style={{ fontWeight: 'bold', fontSize: 16, marginTop: 12, marginBottom: 0, color: '#0e7490', textAlign: 'center' }}>
+          <View style={{ backgroundColor: colors.surface, borderRadius: 16, padding: 0, minWidth: 320, maxWidth: 380, maxHeight: '80%', overflow: 'hidden' }}>
+            <Text style={{ fontWeight: 'bold', fontSize: 16, marginTop: 12, marginBottom: 0, color: colors.primary, textAlign: 'center' }}>
               {modalType === 'gizlilik' ? 'Gizlilik Politikası' : 'KVKK Metni'}
             </Text>
             <WebView
@@ -316,7 +320,7 @@ export default function RegisterScreen() {
               startInLoadingState={true}
             />
             <TouchableOpacity onPress={() => setModalVisible(false)} style={{ alignSelf: 'center', marginVertical: 8 }}>
-              <Text style={{ color: '#0e7490', fontWeight: 'bold', fontSize: 15 }}>Kapat</Text>
+              <Text style={{ color: colors.primary, fontWeight: 'bold', fontSize: 15 }}>Kapat</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -350,11 +354,11 @@ export default function RegisterScreen() {
               onRequestClose={() => setVerificationModal(false)}
             >
               <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.18)', justifyContent: 'center', alignItems: 'center' }}>
-                <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, minWidth: 260, alignItems: 'center', elevation: 4 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 18, color: '#0e7490' }}>E-posta Doğrulama</Text>
-                  <Text style={{ marginBottom: 12, color: '#64748b', textAlign: 'center' }}>E-posta adresinize gönderilen 6 haneli kodu giriniz.</Text>
+                <View style={{ backgroundColor: colors.surface, borderRadius: 16, padding: 24, minWidth: 260, alignItems: 'center', elevation: 4 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 18, color: colors.primary }}>E-posta Doğrulama</Text>
+                  <Text style={{ marginBottom: 12, color: colors.muted, textAlign: 'center' }}>E-posta adresinize gönderilen 6 haneli kodu giriniz.</Text>
                   <TextInput
-                    style={[styles.input, { textAlign: 'center', letterSpacing: 4, fontSize: 20, width: 160 }]}
+                    style={[themed.input, { textAlign: 'center', letterSpacing: 4, fontSize: 20, width: 160 }]}
                     placeholder="- - - - - -"
                     keyboardType="number-pad"
                     maxLength={6}
@@ -362,23 +366,23 @@ export default function RegisterScreen() {
                     onChangeText={setVerificationCode}
                     autoFocus
                   />
-                  {codeError ? <Text style={{ color: 'red', marginTop: 8 }}>{codeError}</Text> : null}
+                  {codeError ? <Text style={{ color: colors.danger, marginTop: 8 }}>{codeError}</Text> : null}
                   <View style={{ flexDirection: 'row', marginTop: 18 }}>
-                    <TouchableOpacity onPress={handleVerifyCode} style={{ backgroundColor: '#0e7490', borderRadius: 8, paddingHorizontal: 24, paddingVertical: 10, marginRight: 10 }} disabled={verificationLoading}>
+                    <TouchableOpacity onPress={handleVerifyCode} style={{ backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 24, paddingVertical: 10, marginRight: 10 }} disabled={verificationLoading}>
                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{verificationLoading ? 'Doğrulanıyor...' : 'Doğrula'}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => setVerificationModal(false)} style={{ padding: 10 }}>
-                      <Text style={{ color: '#64748b', fontWeight: 'bold' }}>Vazgeç</Text>
+                      <Text style={{ color: colors.muted, fontWeight: 'bold' }}>Vazgeç</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               </View>
             </Modal>
       <TouchableOpacity onPress={() => router.replace('/(auth)/login')} style={styles.linkContainer}>
-        <Text style={styles.link}>Zaten hesabınız var mı? Giriş yap</Text>
+        <Text style={[styles.link, { color: colors.info }]}>Zaten hesabınız var mı? Giriş yap</Text>
       </TouchableOpacity>
       {/* Kayıt sonrası bilgilendirme */}
-      <Text style={{ fontSize: 12, color: '#64748b', textAlign: 'center', marginTop: 8 }}>
+      <Text style={{ fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 8 }}>
         Üyelik kaydı ile Gizlilik Sözleşmesi ve KVKK maddelerini kabul etmiş oluyorsunuz.
       </Text>
     </View>
@@ -386,11 +390,10 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
+  container: { flex: 1, justifyContent: 'center', padding: 24 },
   title: { fontSize: 28, fontWeight: 'bold', marginBottom: 24, textAlign: 'center' },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 16 },
   linkContainer: { marginTop: 16, alignItems: 'center' },
-  link: { color: '#007AFF', fontWeight: '500' },
+  link: { fontWeight: '500' },
   error: { color: 'red', marginBottom: 8, marginLeft: 4 },
   customButton: {
     paddingVertical: 8,
@@ -410,7 +413,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   customButtonTextDisabled: {
-    color: '#cbd5e1', // silik gri
+    color: '#cbd5e1',
     fontWeight: 'bold',
     fontSize: 14,
   },

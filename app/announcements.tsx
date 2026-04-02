@@ -74,26 +74,32 @@ import { getSVGIcon } from './icons/svgIcons';
 import Svg, { SvgXml } from 'react-native-svg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { WebView } from 'react-native-webview';
+import { useTheme } from '../components/ThemeProvider';
 
 function capitalizeTurkish(str: string) {
   if (!str) return '';
   return str.charAt(0).toLocaleUpperCase('tr-TR') + str.slice(1);
 }
 
-const keywordIcon = (keyword: string) => {
+const keywordIcon = (keyword: string, colors?: any) => {
+  const warn = colors?.warning || '#f59e0b';
+  const prim = colors?.primary || '#059669';
+  const inf = colors?.info || '#2563eb';
+  const mut = colors?.muted || '#6b7280';
   switch (keyword.toLowerCase()) {
     case 'deprem':
-      return <AlertTriangle size={16} color="#f59e0b" style={{marginRight:2}} />;
+      return <AlertTriangle size={16} color={warn} style={{marginRight:2}} />;
     case 'gönüllü':
-      return <Shield size={16} color="#059669" style={{marginRight:2}} />;
+      return <Shield size={16} color={prim} style={{marginRight:2}} />;
     case 'yardım':
-      return <Info size={16} color="#2563eb" style={{marginRight:2}} />;
+      return <Info size={16} color={inf} style={{marginRight:2}} />;
     default:
-      return <Tag size={16} color="#6b7280" style={{marginRight:2}} />;
+      return <Tag size={16} color={mut} style={{marginRight:2}} />;
   }
 };
 
 export default function AnnouncementsScreen() {
+  const { colors } = useTheme();
   const navigation = useNavigation();
 
   // Swipe-back gesture ve geri tuşunu devre dışı bırak
@@ -551,25 +557,25 @@ export default function AnnouncementsScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#f8fafc' }} edges={['left', 'right', 'bottom']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['left', 'right', 'bottom']}>
       <ScrollView
         style={{ flex: 1 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={refreshAnnouncements}
-            colors={["#6366f1"]}
-            tintColor="#6366f1"
+            colors={[colors.primary]}
+            tintColor={colors.primary}
           />
         }
       >
         <View style={{ padding: 16 }}>
           {/* Başlık */}
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 18 }}>
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center', marginRight: 14, shadowColor: '#6366f1', shadowOpacity: 0.12, shadowRadius: 6, elevation: 2 }}>
-              <Bell size={22} color="#6366f1" />
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryLight, justifyContent: 'center', alignItems: 'center', marginRight: 14, shadowColor: colors.primary, shadowOpacity: 0.12, shadowRadius: 6, elevation: 2 }}>
+              <Bell size={22} color={colors.primary} />
             </View>
-            <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#3730a3', letterSpacing: 0.2, flex: 1 }}>Duyurular</Text>
+            <Text style={{ fontSize: 22, fontWeight: 'bold', color: colors.primaryDark, letterSpacing: 0.2, flex: 1 }}>Duyurular</Text>
           </View>
           
           {/* Butonlar */}
@@ -577,7 +583,7 @@ export default function AnnouncementsScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 18, gap: 8 }}>
               {(user?.role === 'leader' || user?.role === 'superadmin') && (
                 <TouchableOpacity
-                  style={{ backgroundColor: '#6366f1', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', shadowColor: '#6366f1', shadowOpacity: 0.10, shadowRadius: 4, elevation: 1 }}
+                  style={{ backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', shadowColor: colors.primary, shadowOpacity: 0.10, shadowRadius: 4, elevation: 1 }}
                   onPress={() => setCreateModalVisible(true)}
                   activeOpacity={0.85}
                 >
@@ -588,16 +594,16 @@ export default function AnnouncementsScreen() {
           )}
           {/* Superadmin için filtreleme ve arama alanı */}
           {user?.role === 'superadmin' && (
-            <View style={{ marginBottom: 18, backgroundColor: '#f1f5f9', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#e0e7ff' }}>
+            <View style={{ marginBottom: 18, backgroundColor: colors.surfaceVariant, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: colors.primaryLight }}>
               {/* Arama metni */}
               <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontWeight: 'bold', color: '#6366f1', marginBottom: 4 }}>Başlık/İçerik Ara</Text>
+                <Text style={{ fontWeight: 'bold', color: colors.primary, marginBottom: 4 }}>Başlık/İçerik Ara</Text>
                 <TextInput
-                  style={{ height: 40, fontSize: 15, color: '#222', backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e7ff', paddingHorizontal: 10, marginBottom: 0 }}
+                  style={{ height: 40, fontSize: 15, color: colors.text, backgroundColor: colors.surface, borderRadius: 8, borderWidth: 1, borderColor: colors.primaryLight, paddingHorizontal: 10, marginBottom: 0 }}
                   value={searchText}
                   onChangeText={setSearchText}
                   placeholder="Başlık veya içerik ara..."
-                  placeholderTextColor="#a1a1aa"
+                  placeholderTextColor={colors.muted}
                   autoCorrect={false}
                   autoCapitalize="none"
                   underlineColorAndroid="transparent"
@@ -605,13 +611,13 @@ export default function AnnouncementsScreen() {
               </View>
               {/* İl seçici */}
               <View style={{ marginBottom: 8 }}>
-                <Text style={{ fontWeight: 'bold', color: '#6366f1', marginBottom: 4 }}>İl'e Göre Filtrele</Text>
+                <Text style={{ fontWeight: 'bold', color: colors.primary, marginBottom: 4 }}>İl'e Göre Filtrele</Text>
                 <TextInput
-                  style={{ height: 40, fontSize: 15, color: '#222', backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e7ff', paddingHorizontal: 10, marginBottom: 0 }}
+                  style={{ height: 40, fontSize: 15, color: colors.text, backgroundColor: colors.surface, borderRadius: 8, borderWidth: 1, borderColor: colors.primaryLight, paddingHorizontal: 10, marginBottom: 0 }}
                   value={selectedProvince}
                   onChangeText={setSelectedProvince}
                   placeholder="İl adı..."
-                  placeholderTextColor="#a1a1aa"
+                  placeholderTextColor={colors.muted}
                   autoCorrect={false}
                   autoCapitalize="words"
                   underlineColorAndroid="transparent"
@@ -619,13 +625,13 @@ export default function AnnouncementsScreen() {
               </View>
               {/* Tag arama */}
               <View style={{ marginBottom: 4 }}>
-                <Text style={{ fontWeight: 'bold', color: '#6366f1', marginBottom: 4 }}>Tag'e Göre Filtrele</Text>
+                <Text style={{ fontWeight: 'bold', color: colors.primary, marginBottom: 4 }}>Tag'e Göre Filtrele</Text>
                 <TextInput
-                  style={{ height: 40, fontSize: 15, color: '#222', backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e7ff', paddingHorizontal: 10, marginBottom: 0 }}
+                  style={{ height: 40, fontSize: 15, color: colors.text, backgroundColor: colors.surface, borderRadius: 8, borderWidth: 1, borderColor: colors.primaryLight, paddingHorizontal: 10, marginBottom: 0 }}
                   value={tagText}
                   onChangeText={setTagText}
                   placeholder="Etiket ara..."
-                  placeholderTextColor="#a1a1aa"
+                  placeholderTextColor={colors.muted}
                   autoCorrect={false}
                   autoCapitalize="none"
                   underlineColorAndroid="transparent"
@@ -635,11 +641,11 @@ export default function AnnouncementsScreen() {
           )}
           {(announcementsLoading || localLoading || apiLoading) ? (
             <View style={{ marginTop: 32, alignItems: 'center' }}>
-              <ActivityIndicator color="#6366f1" size="large" />
-              <Text style={{ color: '#6366f1', fontSize: 16, marginTop: 12, fontStyle: 'italic' }}>Duyurular yükleniyor...</Text>
+              <ActivityIndicator color={colors.primary} size="large" />
+              <Text style={{ color: colors.primary, fontSize: 16, marginTop: 12, fontStyle: 'italic' }}>Duyurular yükleniyor...</Text>
             </View>
           ) : announcements.length === 0 ? (
-            <Text style={{ color: '#64748b', fontSize: 16, textAlign: 'center', marginTop: 32, fontStyle: 'italic' }}>Duyurular bulunamadı.</Text>
+            <Text style={{ color: colors.muted, fontSize: 16, textAlign: 'center', marginTop: 32, fontStyle: 'italic' }}>Duyurular bulunamadı.</Text>
           ) : (
             // Filtreleme motoru: sadece superadmin için filtre uygula, diğerleri için doğrudan göster
             (user?.role === 'superadmin' ? announcements.filter(a => {
@@ -729,8 +735,8 @@ export default function AnnouncementsScreen() {
               const isCommunityAnnouncement = a.community_id !== 0 || parseInt(a.created_by) > 0;
               // Superadmin duyurusu: community_id = 0 ve created_by > 0
               const isSuperadminAnnouncement = a.community_id === 0 && parseInt(a.created_by) > 0;
-              const cardBgColor = isSuperadminAnnouncement ? '#fef3c7' : isCommunityAnnouncement ? '#f1f5f9' : '#fff';
-              const cardBorderColor = isSuperadminAnnouncement ? '#fde68a' : isCommunityAnnouncement ? '#f1f5f9' : '#fff';
+              const cardBgColor = isSuperadminAnnouncement ? (colors.warning + '20') : isCommunityAnnouncement ? colors.surfaceVariant : colors.surface;
+              const cardBorderColor = isSuperadminAnnouncement ? (colors.warning + '40') : isCommunityAnnouncement ? colors.surfaceVariant : colors.surface;
               // Sadece detaylı bilgi butonu ile açılabilen kart (valilik duyurusu ise kart tıklanamaz)
               const CardContent = (
                 <>
@@ -767,7 +773,7 @@ export default function AnnouncementsScreen() {
                             <Image
                               key={idx}
                               source={{ uri: url }}
-                              style={{ width: '100%', height: 180, borderRadius: 10, backgroundColor: '#e5e7eb', marginBottom: 6 }}
+                              style={{ width: '100%', height: 180, borderRadius: 10, backgroundColor: colors.border, marginBottom: 6 }}
                               resizeMode="cover"
                             />
                           ))}
@@ -777,38 +783,44 @@ export default function AnnouncementsScreen() {
                     return null;
                   })()}
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                    <Bell size={16} color="#6366f1" style={{ marginRight: 8 }} />
-                    <Text style={{ fontWeight: 'bold', color: '#3730a3', fontSize: 16, flex: 1 }}>{a.title}</Text>
+                    <Bell size={16} color={colors.primary} style={{ marginRight: 8 }} />
+                    <Text style={{ fontWeight: 'bold', color: colors.primaryDark, fontSize: 16, flex: 1 }}>{a.title}</Text>
                   </View>
                   {a.etkinlik_turu && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8, marginTop: 2 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginRight: 8 }}>
-                        <SvgXml xml={getSVGIcon('etkinlik_turu', { width: 20, height: 20 })} width={20} height={20} />
-                        <Text style={{ fontSize: 14, color: '#3f3f3fff', fontWeight: 'bold' }}>{a.etkinlik_turu}</Text>
+                        <SvgXml xml={getSVGIcon('etkinlik_turu', { width: 20, height: 20, stroke: colors.text })} width={20} height={20} />
+                        <Text style={{ fontSize: 14, color: colors.text, fontWeight: 'bold' }}>{a.etkinlik_turu}</Text>
                       </View>
                       {a.zorluk_seviyesi && (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginRight: 8 }}>
-                          <SvgXml xml={getSVGIcon('zorluk_seviyesi', { width: 20, height: 20 })} width={20} height={20} />
-                          <Text style={{ fontSize: 14, color: '#3f3f3fff', fontWeight: 'bold' }}>{a.zorluk_seviyesi}</Text>
+                          <SvgXml xml={getSVGIcon('zorluk_seviyesi', { width: 20, height: 20, stroke: colors.text })} width={20} height={20} />
+                          <Text style={{ fontSize: 14, color: colors.text, fontWeight: 'bold' }}>{a.zorluk_seviyesi}</Text>
                         </View>
                       )}
                       {a.etkinlik_suresi && (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                          <SvgXml xml={getSVGIcon('etkinlik_suresi', { width: 20, height: 20 })} width={20} height={20} />
-                          <Text style={{ fontSize: 14, color: '#3f3f3fff', fontWeight: 'bold' }}>{a.etkinlik_suresi}</Text>
+                          <SvgXml xml={getSVGIcon('etkinlik_suresi', { width: 20, height: 20, stroke: colors.text })} width={20} height={20} />
+                          <Text style={{ fontSize: 14, color: colors.text, fontWeight: 'bold' }}>{a.etkinlik_suresi}</Text>
+                        </View>
+                      )}
+                      {a.etkinlik_yeri && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <SvgXml xml={getSVGIcon('etkinlik_yeri', { width: 20, height: 20, stroke: colors.text })} width={20} height={20} />
+                          <Text style={{ fontSize: 14, color: colors.text, fontWeight: 'bold' }}>{a.etkinlik_yeri}</Text>
                         </View>
                       )}
                     </View>
                   )}
                   {a.community_id === 0 && valilikText ? (
-                    <Text style={{ fontSize: 13, color: '#2563eb', fontWeight: '600', marginBottom: 4 }}>{valilikText}</Text>
+                    <Text style={{ fontSize: 13, color: colors.info, fontWeight: '600', marginBottom: 4 }}>{valilikText}</Text>
                   ) : null}
                   {a.community_id === 0 && keywords.length > 0 && (
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
                       {keywords.map((kw, j) => (
-                        <View key={j} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4, marginRight: 8, marginBottom: 4 }}>
-                          {keywordIcon(kw)}
-                          <Text style={{ fontSize: 13, color: '#374151', marginLeft: 2 }}>{kw}</Text>
+                        <View key={j} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceVariant, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4, marginRight: 8, marginBottom: 4 }}>
+                          {keywordIcon(kw, colors)}
+                          <Text style={{ fontSize: 13, color: colors.textSecondary, marginLeft: 2 }}>{kw}</Text>
                         </View>
                       ))}
                     </View>
@@ -822,12 +834,12 @@ export default function AnnouncementsScreen() {
                     const words = text.split(' ');
                     const limited = words.length > 20 ? words.slice(0, 20).join(' ') + '...' : text;
                     return (
-                      <Text style={{ color: '#334155', fontSize: 15, marginTop: 2, marginBottom: 6, lineHeight: 21 }}>{limited}</Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 15, marginTop: 2, marginBottom: 6, lineHeight: 21 }}>{limited}</Text>
                     );
                   })()}
                   {a.link && typeof a.link === 'string' && a.link.trim() !== '' && (
                     <TouchableOpacity
-                      style={{ backgroundColor: '#6366f1', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, alignSelf: 'flex-start', marginTop: 6, marginBottom: 2 }}
+                      style={{ backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, alignSelf: 'flex-start', marginTop: 6, marginBottom: 2 }}
                       onPress={() => {
                         let url = a.link;
                         if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
@@ -838,28 +850,28 @@ export default function AnnouncementsScreen() {
                     </TouchableOpacity>
                   )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
-                    <Text style={{ color: '#6366f1', fontSize: 13, fontWeight: '600' }}>Ekleyen: </Text>
-                    <Text style={{ color: '#64748b', fontSize: 13, marginRight: 8 }}>{leaderName || a.author_name || 'Bilinmiyor'}</Text>
-                    <Text style={{ color: '#a1a1aa', fontSize: 12, flex: 1 }}>{a.created_at ? new Date(a.created_at).toLocaleString('tr-TR') : ''}</Text>
+                    <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '600' }}>Ekleyen: </Text>
+                    <Text style={{ color: colors.muted, fontSize: 13, marginRight: 8 }}>{leaderName || a.author_name || 'Bilinmiyor'}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 12, flex: 1 }}>{a.created_at ? new Date(a.created_at).toLocaleString('tr-TR') : ''}</Text>
                   </View>
                   {canDelete && (
                     <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
                       <TouchableOpacity
-                        style={{ backgroundColor: '#f1f5f9', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#e0e7ff', shadowColor: '#6366f1', shadowOpacity: 0.08, shadowRadius: 4, elevation: 1 }}
+                        style={{ backgroundColor: colors.surfaceVariant, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: colors.primaryLight, shadowColor: colors.primary, shadowOpacity: 0.08, shadowRadius: 4, elevation: 1 }}
                         onPress={() => {
                           setEditAnnouncementId(a.id);
                           setEditModalVisible(true);
                         }}
                         activeOpacity={0.85}
                       >
-                        <Text style={{ color: '#6366f1', fontWeight: 'bold', fontSize: 12 }}>Düzenle</Text>
+                        <Text style={{ color: colors.primary, fontWeight: 'bold', fontSize: 12 }}>Düzenle</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={{ backgroundColor: '#f1f5f9', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#e0e7ff', shadowColor: '#6366f1', shadowOpacity: 0.08, shadowRadius: 4, elevation: 1 }}
+                        style={{ backgroundColor: colors.surfaceVariant, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: colors.primaryLight, shadowColor: colors.primary, shadowOpacity: 0.08, shadowRadius: 4, elevation: 1 }}
                         onPress={() => handleDelete(a.id)}
                         activeOpacity={0.85}
                       >
-                        <Text style={{ color: '#6366f1', fontWeight: 'bold', fontSize: 12 }}>Sil</Text>
+                        <Text style={{ color: colors.primary, fontWeight: 'bold', fontSize: 12 }}>Sil</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -877,7 +889,7 @@ export default function AnnouncementsScreen() {
                       padding: 18,
                       borderWidth: 1,
                       borderColor: cardBorderColor,
-                      shadowColor: '#6366f1',
+                      shadowColor: colors.primary,
                       shadowOpacity: 0.08,
                       shadowRadius: 8,
                       elevation: 2,
@@ -904,7 +916,7 @@ export default function AnnouncementsScreen() {
                     padding: 18,
                     borderWidth: 1,
                     borderColor: cardBorderColor,
-                    shadowColor: '#6366f1',
+                    shadowColor: colors.primary,
                     shadowOpacity: 0.08,
                     shadowRadius: 8,
                     elevation: 2,
@@ -960,8 +972,8 @@ export default function AnnouncementsScreen() {
         transparent={true}
       >
         <View style={{ flex: 1, backgroundColor: 'rgba(30,41,59,0.85)', justifyContent: 'center', alignItems: 'center' }}>
-          <View style={{ width: '94%', height: Platform.OS === 'web' ? '80%' : '85%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 12, elevation: 8 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#6366f1', padding: 10 }}>
+          <View style={{ width: '94%', height: Platform.OS === 'web' ? '80%' : '85%', backgroundColor: colors.surface, borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 12, elevation: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.primary, padding: 10 }}>
               <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Detaylı Bilgi</Text>
               <TouchableOpacity onPress={() => setWebModalVisible(false)}>
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 18 }}>Kapat</Text>
@@ -974,7 +986,7 @@ export default function AnnouncementsScreen() {
                 startInLoadingState={true}
                 renderLoading={() => (
                   <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <ActivityIndicator color="#6366f1" size="large" />
+                    <ActivityIndicator color={colors.primary} size="large" />
                   </View>
                 )}
                 allowsBackForwardNavigationGestures
