@@ -50,7 +50,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   isCampPlanMode = false,
 }) => {
   const router = useRouter();
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const themed = createThemedStyles(colors);
   const [loadingImages, setLoadingImages] = useState<Set<string | number>>(new Set());
 
@@ -262,7 +262,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
       >
         <View style={[styles.imageContainer, { backgroundColor: colors.surfaceVariant }]}>
           <Image
-            source={coverImage ? { uri: coverImage } : require('../assets/images/image-placeholder.png')}
+            source={coverImage ? { uri: coverImage } : (scheme === 'dark' ? require('../assets/images/image-placeholder_B.png') : require('../assets/images/image-placeholder.png'))}
             style={coverImage ? styles.coverImage : styles.placeholderCoverImage}
             resizeMode={coverImage ? 'cover' : 'contain'}
             onLoadStart={coverImage ? handleImageLoadStart : undefined}

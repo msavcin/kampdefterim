@@ -51,7 +51,7 @@ export function prepareCampingAreaPayload(area: any) {
 
 // Local cache ile görsel gösteren yardımcı bileşen
 const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: string, source_id?: any, onPress?: () => void, refreshKey?: number }) => {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -129,8 +129,8 @@ const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: s
   }
   if (error || !uri) {
     return (
-      <View style={[styles.galleryImageWrapper, { width: 260, height: 180, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.border, borderRadius: 12 }]}>
-        <Image source={require('../assets/images/image-placeholder.png')} style={{ width: 180, height: 140, resizeMode: 'contain' }} />
+      <View style={[styles.galleryImageWrapper, { width: 260, height: 180, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.border, borderRadius: 12 }]}> 
+        <Image source={scheme === 'dark' ? require('../assets/images/image-placeholder_B.png') : require('../assets/images/image-placeholder.png')} style={{ width: 180, height: 140, resizeMode: 'contain' }} />
       </View>
     );
   }
@@ -162,7 +162,6 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
-const defaultImage = require('../assets/images/image-placeholder.png');
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle, Share2 } from 'lucide-react-native';
 import { CampingArea, getDatabase } from '@/lib/database';
@@ -489,7 +488,7 @@ export default function CampingAreaDetailModal({
   isSuperAdmin = false,
   currentUserId
 }: CampingAreaDetailModalProps & { isSuperAdmin?: boolean; currentUserId?: string | number }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
 
   // Modal açıldığında görselleri yeniden kontrol et
@@ -1018,7 +1017,7 @@ export default function CampingAreaDetailModal({
           ) : (
             <View style={[styles.galleryContainer, { justifyContent: 'center', alignItems: 'center' }]}>
               <Image
-                source={defaultImage}
+                source={scheme === 'dark' ? require('../assets/images/image-placeholder_B.png') : require('../assets/images/image-placeholder.png')}
                 style={{ width: '80%', height: 160, resizeMode: 'contain' }}
               />
             </View>

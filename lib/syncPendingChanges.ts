@@ -10,7 +10,7 @@ import { getDatabase } from '@/lib/database';
 let isSyncing = false;
 
 // currentUserId parametresi eklendi
-export async function syncPendingChanges(currentUserId?: string | number, onProgress?: (current: number, total: number) => void) {
+export async function syncPendingChanges(currentUserId?: string | number, onProgress?: (current: number, total: number) => void, options?: { skipDeltaSync?: boolean }) {
   // Eğer zaten bir sync çalışıyorsa, yeni çağrıyı atla
   if (isSyncing) {
     console.log('[syncPendingChanges] Zaten bir sync çalışıyor, yeni çağrı atlandı.');
@@ -19,13 +19,13 @@ export async function syncPendingChanges(currentUserId?: string | number, onProg
   
   isSyncing = true;
   try {
-    await _syncPendingChanges(currentUserId, onProgress);
+    await _syncPendingChanges(currentUserId, onProgress, options);
   } finally {
     isSyncing = false;
   }
 }
 
-async function _syncPendingChanges(currentUserId?: string | number, onProgress?: (current: number, total: number) => void) {
+async function _syncPendingChanges(currentUserId?: string | number, onProgress?: (current: number, total: number) => void, options?: { skipDeltaSync?: boolean }) {
   console.log('[syncPendingChanges] başlatıldı');
   
   // DEBUG: Localde adı 'B7' geçen kamp alanı var mı?
@@ -277,9 +277,10 @@ async function _syncPendingChanges(currentUserId?: string | number, onProgress?:
     console.log('[syncPendingChanges] Döngü sonu:', (change as any).id);
   }
   
-  if (syncedCount > 0) {
+  if (syncedCount > 0 && !options?.skipDeltaSync) {
     try {
       // Sync sonrası local veritabanını güncelle (Delta Sync ile sadece değişenleri çek)
+      // NOT: syncAll üzerinden çağrıldığında skipDeltaSync=true olur, çünkü syncAll zaten syncCampingAreas çağırır
       console.log('[syncPendingChanges] Tüm değişiklikler işlendi, local veritabanı güncelleniyor...');
       const db = getDatabase();
       await db.fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, onProgress, userId: currentUserId !== undefined ? String(currentUserId) : undefined });

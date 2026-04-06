@@ -13,7 +13,7 @@ import { useTheme } from '../../components/ThemeProvider';
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(true); // Default true, false ise duyurular disabled
+  const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(true);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
@@ -46,23 +46,23 @@ export default function TabLayout() {
       } finally {
         setLoading(false);
       }
-      
-      // Initial sync durumunu kontrol et
-      const checkInitialSync = async () => {
-        const syncComplete = await SecureStore.getItemAsync('isInitialSyncComplete');
-        setIsInitialSyncComplete(syncComplete === 'true');
-      };
-      await checkInitialSync();
-
-      // SecureStore değişikliklerini dinle (polling ile)
-      const interval = setInterval(async () => {
-        const syncComplete = await SecureStore.getItemAsync('isInitialSyncComplete');
-        setIsInitialSyncComplete(syncComplete === 'true');
-      }, 1000);
-
-      return () => clearInterval(interval);
+      // İlk açılışta sync durumunu kontrol et
+      const syncFlag = await SecureStore.getItemAsync('isInitialSyncComplete');
+      setIsInitialSyncComplete(syncFlag === 'true');
     })();
   }, []);
+
+  // Full sync tamamlanana kadar polling ile kontrol et
+  useEffect(() => {
+    if (isInitialSyncComplete) return;
+    const interval = setInterval(async () => {
+      const flag = await SecureStore.getItemAsync('isInitialSyncComplete');
+      if (flag === 'true') {
+        setIsInitialSyncComplete(true);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isInitialSyncComplete]);
 
   // Guest ise erişilemeyen sekmeler
   const guestDisabled = userRole === 'guest';

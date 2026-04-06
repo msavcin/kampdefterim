@@ -55,7 +55,7 @@ import { getValilikIdFromProvinceName, getProvinceFromDistrict } from '@/lib/pro
 // If getValilikIdFromProvinceName is the default export, use:
 // import getValilikIdFromProvinceName from '@/lib/provinceMap';
 // Or, if it is not exported at all, you need to export it from '@/lib/provinceMap.ts'
-import { getProvinceFromOSM } from '../../lib/osmReverseGeocode';
+import { getLocationNameFromOSM } from '../../lib/osmReverseGeocode';
 import { getMe, listCommunityMembers } from '@/lib/userCommunityApi';
 import { API_URL } from '@/lib/config';
 import { UserPlus } from 'lucide-react-native';
@@ -141,6 +141,7 @@ export default function MapScreen() {
   const [isWebViewReady, setIsWebViewReady] = useState(false);
   const refreshDataRef = useRef<(() => void) | null>(null);
   const appStateTimeoutRef = useRef<number | null>(null);
+  const lastAppStateCampingSyncRef = useRef<number>(0); // AppState'den tetiklenen son camping sync zamanı
   // Harita WebView'ı yeniden render etmek için bir key
   const [mapKey, setMapKey] = useState(0);
   
@@ -227,6 +228,31 @@ export default function MapScreen() {
   
   // Misafir kullanıcı bilgilendirme modalı
   const [guestInfoModalVisible, setGuestInfoModalVisible] = useState(false);
+  
+  // Dark mode harita stili: 'default' (CartoDB Dark), 'soft' (Voyager + CSS filter), 'bright' (Dark + brightness)
+  const [darkMapStyle, setDarkMapStyle] = useState<'default' | 'soft' | 'bright'>('soft');
+  
+  // Dark map stili tercihini yükle
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await AsyncStorage.getItem('darkMapStyle');
+        if (saved === 'default' || saved === 'soft' || saved === 'bright') {
+          if (isMounted.current) setDarkMapStyle(saved);
+        }
+      } catch {}
+    })();
+  }, []);
+  
+  const changeDarkMapStyle = async (style: 'default' | 'soft' | 'bright') => {
+    if (!isMounted.current) return;
+    setDarkMapStyle(style);
+    try {
+      await AsyncStorage.setItem('darkMapStyle', style);
+    } catch {}
+    // Haritayı yeniden yükle
+    setMapKey(prev => prev + 1);
+  };
   
   // İlk mount'ta sistem konum iznini kontrol et (sadece kontrol, native izin ekranı açılmaz)
   useEffect(() => {
@@ -666,14 +692,16 @@ export default function MapScreen() {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 2000));
           const location = await Promise.race([locationPromise, timeoutPromise]) as any;
           if (location && location.coords) {
-            const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
-            if (provinceName) {
+            const locationName = await getLocationNameFromOSM(location.coords.latitude, location.coords.longitude);
+            if (locationName) {
+              let provincePart = locationName;
+              if (locationName.includes(',')) provincePart = locationName.split(',')[0].trim();
               const { getValilikIdFromProvinceName } = require('@/lib/provinceMap');
               // getValilikIdFromProvinceName fonksiyonu: il adı → valilik_id, ilçe → il → valilik_id fallback'i yapar
-              matchedValilikIdLocal = getValilikIdFromProvinceName(provinceName);
+              matchedValilikIdLocal = getValilikIdFromProvinceName(provincePart);
               if (matchedValilikIdLocal) {
                 await SecureStore.setItemAsync('matchedValilikId', String(matchedValilikIdLocal));
-                if (__DEV__) console.log('[ANNOUNCEMENT] Konum servisi:', provinceName, ' → Valilik ID kaydedildi:', matchedValilikIdLocal);
+                if (__DEV__) console.log('[ANNOUNCEMENT] Konum servisi:', provincePart, ' → Valilik ID kaydedildi:', matchedValilikIdLocal);
               }
             }
           }
@@ -1072,7 +1100,6 @@ export default function MapScreen() {
       console.error('[DEBUG] handleShowCurrentLocation hatası:', e);
     }
   };
-  const [showSyncBanner, setShowSyncBanner] = useState(false);
     // DEBUG: Veritabanındaki tags/type dağılımını logla (sadece ana kamp türleri)
     useEffect(() => {
       (async () => {
@@ -1170,6 +1197,8 @@ export default function MapScreen() {
           if (!isMounted.current) return;
           if (__DEV__) console.log('[DEBUG][PROGRESS] Sync tamamlandı');
           setSyncProgress({ current: 0, total: 0, isLoading: false });
+          // Dedup guard'ı atlayarak zorla yenile — sync yeni alan eklemiş olabilir
+          if (forceRefreshRef.current && isMounted.current) forceRefreshRef.current();
         } else {
         }
       }
@@ -1210,6 +1239,8 @@ export default function MapScreen() {
         await SecureStore.setItemAsync('isInitialSyncComplete', 'true');
         isFullSyncInProgressRef.current = false;
         setSyncProgress({ current: 0, total: 0, isLoading: false });
+        // Dedup guard'ı atlayarak zorla yenile
+        if (forceRefreshRef.current && isMounted.current) forceRefreshRef.current();
         flushPendingNotifications();
         if (__DEV__) console.log('[trigger:initialFullSync] tamamlandı, kayıt sayısı:', count);
       } catch (e) {
@@ -1602,6 +1633,8 @@ export default function MapScreen() {
 
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
 
+  // İl filtreleri (valilik plaka kodları)
+  const [selectedProvinces, setSelectedProvinces] = useState<number[]>([]);
   // FILTERS güncellendiğinde selectedFilters'ı yeniden initialize et
   useEffect(() => {
     setSelectedFilters(FILTERS.map(f => f.key));
@@ -1685,7 +1718,7 @@ export default function MapScreen() {
   // Sadece kullanıcıya ait private ve tüm public alanları kapsayacak şekilde sorgu
 
   // Varsayılan olarak konumdan başlat, harita hareket ettirilirse mapMoveQuery ile güncelle
-  const { campingAreas, loading, error, location, refreshData, getCurrentLocation } = useCampingAreas({
+  const { campingAreas, loading, error, location, refreshData, forceRefresh, getCurrentLocation } = useCampingAreas({
     tags: selectedTags,
     radius: mapMoveQuery ? 20 : 30, // default 10 : 20
     latitude: mapMoveQuery ? mapMoveQuery.latitude : undefined,
@@ -1695,10 +1728,12 @@ export default function MapScreen() {
     hasLocationPermission, // Konum izni durumu (modal conflict önleme)
   });
 
-  // refreshData'yı ref'te sakla (stale closure önleme)
+  // refreshData ve forceRefresh'i ref'te sakla (stale closure önleme)
+  const forceRefreshRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     refreshDataRef.current = refreshData;
-  }, [refreshData]);
+    forceRefreshRef.current = forceRefresh;
+  }, [refreshData, forceRefresh]);
 
   // Harita senkronizasyonundan sonra da yeni duyuru bildirimi tetiklensin
   // Konum veya harita merkezi değiştiğinde de duyuruları güncelle
@@ -1855,18 +1890,24 @@ export default function MapScreen() {
               if (__DEV__) console.warn('[AppState] Duyuru delta sync hatası:', err);
             }
 
-            // Kamp alanları için delta sync yap
-            try {
-              if (__DEV__) console.log('[AppState] Kamp alanları için delta sync başlatılıyor...');
-              const dbInst = getDatabase();
-              const count = await dbInst.fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, userId: user?.id !== undefined ? String(user.id) : undefined });
-              if (__DEV__) console.log('[AppState] Kamp alanları delta sync tamamlandı, güncellenen:', count);
-              if (user?.id) { try { await dbInst.cleanupRevokedFriendAreas(String(user.id)); } catch {} }
-              if (count && count > 0 && refreshDataRef.current && isMounted.current) {
-                refreshDataRef.current();
+            // Kamp alanları için delta sync yap (2 dakika cooldown ile)
+            const MIN_CAMPING_SYNC_INTERVAL = 2 * 60 * 1000; // 2 dakika
+            const timeSinceLastCampingSync = Date.now() - lastAppStateCampingSyncRef.current;
+            if (timeSinceLastCampingSync < MIN_CAMPING_SYNC_INTERVAL) {
+              if (__DEV__) console.log(`[AppState] Kamp alanı sync atlandı — son sync ${Math.round(timeSinceLastCampingSync / 1000)}s önce yapıldı (min: ${MIN_CAMPING_SYNC_INTERVAL / 1000}s)`);
+            } else {
+              try {
+                if (__DEV__) console.log('[AppState] Kamp alanları için delta sync başlatılıyor...');
+                lastAppStateCampingSyncRef.current = Date.now();
+                const dbInst = getDatabase();
+                const count = await dbInst.fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false, userId: user?.id !== undefined ? String(user.id) : undefined });
+                if (__DEV__) console.log('[AppState] Kamp alanları delta sync tamamlandı, güncellenen:', count);
+                if (user?.id) { try { await dbInst.cleanupRevokedFriendAreas(String(user.id)); } catch {} }
+                // Her zaman forceRefresh — count=0 olsa bile yeni eklenen alan gözükmeye başlayabilir
+                if (forceRefreshRef.current && isMounted.current) forceRefreshRef.current();
+              } catch (err) {
+                if (__DEV__) console.warn('[AppState] Kamp alanı delta sync hatası:', err);
               }
-            } catch (err) {
-              if (__DEV__) console.warn('[AppState] Kamp alanı delta sync hatası:', err);
             }
           } else {
             // Offline ise sadece local kontrol
@@ -2212,8 +2253,16 @@ export default function MapScreen() {
       }
     }
 
+    // İl filtresi uygulanıyorsa sadece seçili illeri dahil et
+    if (selectedProvinces && selectedProvinces.length > 0) {
+      filtered = filtered.filter(a => {
+        const vid = (a as any).valilik_id;
+        return vid && selectedProvinces.includes(Number(vid));
+      });
+    }
+
     return filtered;
-  }, [campingAreas, user, isGuest, selectedFilters, selectedTags, turkeyWideAreas, turkeyWideKeys]);
+  }, [campingAreas, user, isGuest, selectedFilters, selectedTags, turkeyWideAreas, turkeyWideKeys, selectedProvinces]);
 
   // Türkiye geneli filtre aktifken haritayı tüm markerları kapsayacak şekilde zoom out yap
   useEffect(() => {
@@ -2441,25 +2490,40 @@ export default function MapScreen() {
   }, [mapMoveQuery, location]);
 
   // Konum değiştiğinde valilik_id'yi güncelle (announcements için)
+  const lastValilikLocationRef = React.useRef<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
     if (!location?.coords) return;
+
+    // Konum 5km'den az değiştiyse tekrar OSM çağrısı yapma (aynı il içinde)
+    const curLat = location.coords.latitude;
+    const curLng = location.coords.longitude;
+    if (lastValilikLocationRef.current) {
+      const dlat = curLat - lastValilikLocationRef.current.lat;
+      const dlng = curLng - lastValilikLocationRef.current.lng;
+      // Yaklaşık km: 1 derece ≈ 111 km
+      const approxKm = Math.sqrt(dlat * dlat + dlng * dlng) * 111;
+      if (approxKm < 5) return; // 5km altında il değişmez, atla
+    }
+    lastValilikLocationRef.current = { lat: curLat, lng: curLng };
     
     const updateValilikId = async () => {
       try {
-        const provinceName = await getProvinceFromOSM(location.coords.latitude, location.coords.longitude);
-        if (provinceName) {
+        const locationName = await getLocationNameFromOSM(curLat, curLng);
+        if (locationName) {
+          let provincePart = locationName;
+          if (locationName.includes(',')) provincePart = locationName.split(',')[0].trim();
           const { getValilikIdFromProvinceName } = require('@/lib/provinceMap');
-          const newValilikId = getValilikIdFromProvinceName(provinceName);
-          
+          const newValilikId = getValilikIdFromProvinceName(provincePart);
+
           // Mevcut valilik_id'yi oku
           const storedValilikId = await SecureStore.getItemAsync('matchedValilikId');
           const storedValilikIdNum = storedValilikId ? parseInt(storedValilikId) : null;
-          
+
           // Değiştiyse güncelle ve event bus ile bildir
           if (newValilikId && newValilikId !== storedValilikIdNum) {
             await SecureStore.setItemAsync('matchedValilikId', String(newValilikId));
-            console.log('[VALILIK UPDATE] Konum:', provinceName, '→ Valilik ID:', storedValilikIdNum, '->', newValilikId);
-            
+            console.log('[VALILIK UPDATE] Konum:', provincePart, '→ Valilik ID:', storedValilikIdNum, '->', newValilikId);
+
             // Event bus ile duyuruları güncelleme sinyali gönder
             const { eventBus } = require('@/lib/eventBus');
             eventBus.emit('valilikIdChanged', newValilikId);
@@ -2504,7 +2568,8 @@ export default function MapScreen() {
         const radiusKm = user.offline_radius_km || 20;
         
         // Bölgeyi cache'le (çoklu zoom seviyelerinde)
-        const tileStyle = scheme === 'dark' ? 'dark' : undefined;
+        // 'soft' modda light tile kullanılıyor (CSS filter ile dark yapılıyor)
+        const tileStyle = (scheme === 'dark' && darkMapStyle !== 'soft') ? 'dark' : undefined;
         const result = await precacheRegionWithRadius(lat, lng, radiusKm, tileStyle);
         
         if (__DEV__) {
@@ -2637,6 +2702,9 @@ export default function MapScreen() {
     }
   };;
 
+  const toggleProvince = (id: number) => {
+    setSelectedProvinces(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
   // Marker rengi: owner_id ve visibility'ye göre belirlenir
   const getMarkerColor = (area: { owner_id?: string | null, visibility?: string, type?: string }, isUserSubmitted: boolean) => {
     if (isUserSubmitted) {
@@ -2756,6 +2824,16 @@ export default function MapScreen() {
         <style>
           body { margin: 0; padding: 0; background: ${isDark ? '#1a1a2e' : '#fff'}; }
           #map { height: 100vh; width: 100vw; }
+          ${isDark && darkMapStyle === 'soft' ? `
+          .leaflet-tile-pane {
+            filter: invert(1) hue-rotate(220deg) brightness(2.5) contrast(0.95) sepia(0.8);
+          }
+          ` : ''}
+          ${isDark && darkMapStyle === 'bright' ? `
+          .leaflet-tile-pane {
+            filter: brightness(1.4) contrast(1.1);
+          }
+          ` : ''}
           .custom-popup {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
           }
@@ -2913,10 +2991,12 @@ export default function MapScreen() {
           } else {
             // Online modda: Backend proxy üzerinden yükle
             // Version parametresi ile backend cache bypass (CartoDB'ye geçiş için)
-            // Theme-based cache bust token: light (lt) vs dark (dk) 
-            var tileStyleAndToken = ${isDark} ? '&style=dark&t=dk' : '&t=lt';
+            // Theme-based cache bust token: light (lt) vs dark (dk)
+            // 'soft' modda light tile kullan (CSS filter ile dark yapılacak)
+            var useDarkTiles = ${isDark} && '${darkMapStyle}' !== 'soft';
+            var tileStyleAndToken = useDarkTiles ? '&style=dark&t=dk' : '&t=lt';
             var tileUrl = window.API_URL + '/tiles/{z}/{x}/{y}.png?v=cartodb' + tileStyleAndToken;
-            console.log('[MapHTML] Tile URL:', tileUrl, 'isDark:', ${isDark}, 'token:', ${isDark} ? 'dk' : 'lt');
+            console.log('[MapHTML] Tile URL:', tileUrl, 'isDark:', ${isDark}, 'darkMapStyle:', '${darkMapStyle}');
             tileLayer = L.tileLayer(tileUrl, {
               attribution: '&copy; <a href="#">OpenStreetMap</a> contributors &copy; <a href="#">CARTO</a>',
               errorTileUrl: '',
@@ -3084,8 +3164,8 @@ export default function MapScreen() {
             }).addTo(map).bindPopup(\`
           <div class="custom-popup" style="display: flex; flex-direction: row; gap: 0; min-width: 320px; max-width: 380px; align-items: stretch;">
             <div style="position: relative; flex: 0 0 45%; width: 45%; min-width: 90px; max-width: 160px; aspect-ratio: 1/1; border-radius: 0; background: ${isDark ? '#1e293b' : '#f3f4f6'}; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0; padding: 0; left: 0; top: 0; border: none;">
-              ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center;"><svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 137.5 137.5'><g><path fill='none' d='M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z'/><path fill='#444444ff' d='M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z'/></g></svg></div>` : `<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
-                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 137.5 137.5"><g><path fill="none" d="M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z"/><path fill="#444444ff" d="M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z"/></g></svg>
+              ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center;"><svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 137.5 137.5'><g><path fill='none' d='M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z'/><path fill='${isDark ? "#ffffff" : "#444444ff"}' d='M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z'/></g></svg></div>` : `<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 137.5 137.5"><g><path fill="none" d="M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z"/><path fill="${isDark ? '#ffffff' : '#444444ff'}" d="M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z"/></g></svg>
               </div>`}
               <!-- Favori butonu sol üstte, fotoğraf üzerinde -->
               <div style="position: absolute; top: 6px; left: 6px; z-index: 3;">
@@ -3269,7 +3349,7 @@ export default function MapScreen() {
   // HTML çıktısını memoize et - gereksiz re-render'ları önle
   const mapHTML = useMemo(() => {
     return generateMapHTML();
-  }, [location, filteredCampingAreas, mapMoveQuery, isLocationPickerMode, selectForPlanMode, isConnected, favorites, scheme]);
+  }, [location, filteredCampingAreas, mapMoveQuery, isLocationPickerMode, selectForPlanMode, isConnected, favorites, scheme, darkMapStyle]);
 
   const handleWebViewMessage = (event: any) => {
     try {
@@ -3329,7 +3409,7 @@ export default function MapScreen() {
           longitude: data.longitude
         });
         setIsLocationPickerMode(false);
-        if (isMounted.current && !syncProgress.isLoading) setShowAddModal(true);
+        if (isMounted.current) setShowAddModal(true);
       } else if (data.type === 'addCampingAreaAtCurrentLocation') {
         // Guest kullanıcı için limit kontrolü
         if (isGuest && !canAddMoreAreas) {
@@ -3352,7 +3432,7 @@ export default function MapScreen() {
           latitude: data.latitude,
           longitude: data.longitude
         });
-        if (isMounted.current && !syncProgress.isLoading) setShowAddModal(true);
+        if (isMounted.current) setShowAddModal(true);
       } else if (data.type === 'campingAreaClicked') {
         const area = filteredCampingAreas.find((a: any) =>
           Math.abs(a.latitude - data.latitude) < 0.0001 &&
@@ -3387,7 +3467,8 @@ export default function MapScreen() {
         setShowMapPopup(false);
       } else if (data.type === 'requestCachedTile') {
         // Offline modda cache'den tile iste
-        const tileStyle = scheme === 'dark' ? 'dark' : undefined;
+        // 'soft' modda light tile kullanılıyor (CSS filter ile dark yapılıyor)
+        const tileStyle = (scheme === 'dark' && darkMapStyle !== 'soft') ? 'dark' : undefined;
         (async () => {
           try {
             const cachedTile = await getCachedTile(data.z, data.x, data.y, tileStyle);
@@ -3418,7 +3499,7 @@ export default function MapScreen() {
       } else if (data.type === 'cacheTile') {
         // Online modda tile'ı cache'le (dualMode=true: karşı temayı da arka planda kaydet)
         if (isConnected) {
-          const tileStyle = scheme === 'dark' ? 'dark' : undefined;
+          const tileStyle = (scheme === 'dark' && darkMapStyle !== 'soft') ? 'dark' : undefined;
           (async () => {
             try {
               await cacheTile(data.z, data.x, data.y, tileStyle, true);
@@ -3490,7 +3571,7 @@ export default function MapScreen() {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude
       });
-      if (!syncProgress.isLoading) setShowAddModal(true);
+      setShowAddModal(true);
     }
   };
 
@@ -3588,7 +3669,8 @@ export default function MapScreen() {
 
 
   // Yükleme sırasında tüm işlemleri devre dışı bırakmak için bir state
-  const isBusy = loading;
+  // Sadece ilk konum alınana kadar pasif (sync sırasında refreshData tetikli loading butonları etkilemesin)
+  const isBusy = loading && !location;
 
   // Loader animasyonu için
   const spinAnim = useRef(new Animated.Value(0)).current;
@@ -3598,7 +3680,7 @@ export default function MapScreen() {
 
   useEffect(() => {
     let loopAnim: Animated.CompositeAnimation | null = null;
-    if (isBusy) {
+    if (isBusy || syncProgress.isLoading) {
       loopAnim = Animated.loop(
         Animated.timing(spinAnim, {
           toValue: 1,
@@ -3615,7 +3697,7 @@ export default function MapScreen() {
     return () => {
       if (loopAnim) loopAnim.stop();
     };
-  }, [isBusy]);
+  }, [isBusy, syncProgress.isLoading]);
 
   const spin = spinAnim.interpolate({
     inputRange: [0, 1],
@@ -3745,11 +3827,8 @@ export default function MapScreen() {
         <View style={styles.headerActions}>
           {/* Görünüm Değiştirme Butonu */}
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
             onPress={() => {
-              if (syncProgress.isLoading) {
-                return;
-              }
               if (!isConnected && !user?.offline_enabled) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
@@ -3773,7 +3852,7 @@ export default function MapScreen() {
                 changeViewMode(viewMode === 'map' ? 'list' : 'map');
               }
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
           >
             {viewMode === 'map' ? (
               <List size={20} color={(!isConnected && !user?.offline_enabled) ? colors.muted : colors.primary} />
@@ -3782,11 +3861,8 @@ export default function MapScreen() {
             )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 }]}
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
             onPress={async () => {
-              if (syncProgress.isLoading) {
-                return;
-              }
               if (!isConnected && !user?.offline_enabled) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
@@ -3815,12 +3891,12 @@ export default function MapScreen() {
                 }
               }
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
           >
             <Feather name="search" size={20} color={(!isConnected && !user?.offline_enabled) ? colors.muted : colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }, syncProgress.isLoading && { opacity: 0.4 },
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 },
               (() => {
                 const isFilterActive =
                   turkeyWideKeys.length > 0 ||
@@ -3830,9 +3906,6 @@ export default function MapScreen() {
               })()
             ]}
             onPress={() => {
-              if (syncProgress.isLoading) {
-                return;
-              }
               if (!isConnected && !user?.offline_enabled) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
@@ -3850,7 +3923,7 @@ export default function MapScreen() {
               }
               if (isMounted.current) setShowFilters(!showFilters);
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
+            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
           >
             {(() => {
               const disabled = !isConnected && !user?.offline_enabled;
@@ -3922,6 +3995,8 @@ export default function MapScreen() {
             onTurkeyWideToggle={toggleTurkeyWide}
             isOffline={!isConnected}
             isPremium={!!(user?.isPremium || user?.offline_enabled)}
+            selectedProvinces={selectedProvinces}
+            onProvinceToggle={toggleProvince}
           />
         </View>
       )}
@@ -3973,20 +4048,9 @@ export default function MapScreen() {
           </View>
           <Text style={[styles.progressText, { color: colors.muted }]}>
             {syncProgress.total > 100 
-              ? `${syncProgress.current} / ${syncProgress.total} kamp alanı yükleniyor...`
+              ? `${syncProgress.current} / ${syncProgress.total} senkronize ediliyor...`
               : 'Senkronizasyon tamamlanıyor'}
           </Text>
-          {syncProgress.total > 100 && (
-            <Text style={[styles.progressSubText, { color: colors.muted }]}>
-               Pasif sekmeler eşitleme sonrası aktif olacaktır.
-            </Text>
-          )}
-        </View>
-      )}
-      {/* Senkronizasyon sırasında üstte uyarı banner'ı (sadece ekrana dokunulunca 2sn görünür) */}
-      {showSyncBanner && (
-        <View style={[styles.syncBanner, { backgroundColor: colors.danger + '20', borderBottomColor: colors.danger }]}>
-          <Text style={[styles.syncBannerText, { color: colors.danger }]}>🔄 Lütfen senkronizasyonun tamamlanmasını bekleyin</Text>
         </View>
       )}
       {/* Offline Mode Banner */}
@@ -4096,7 +4160,7 @@ export default function MapScreen() {
           {/* Map */}
           <View style={styles.mapContainer} pointerEvents="auto">
             <WebView
-              key={`map-${mapKey}-${scheme}`}
+              key={`map-${mapKey}-${scheme}-${darkMapStyle}`}
               ref={webViewRef}
               source={{ html: mapHTML }}
               style={styles.map}
@@ -4151,13 +4215,9 @@ export default function MapScreen() {
                     styles.fab, 
                     styles.fabBinoculars,
                     { backgroundColor: colors.primary },
-                    (!user?.offline_enabled && !isConnected) && { opacity: 0.4 },
-                    syncProgress.isLoading && { opacity: 0.4 }
+                    (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }
                   ]} 
                   onPress={() => {
-                    if (syncProgress.isLoading) {
-                      return;
-                    }
                     if (!isConnected && !user?.offline_enabled) {
                       Alert.alert(
                         'Offline Özellik Gerekli',
@@ -4175,7 +4235,7 @@ export default function MapScreen() {
                     }
                     handleShowMapMoveResults();
                   }}
-                  disabled={(!isConnected && !user?.offline_enabled) || syncProgress.isLoading}
+                  disabled={(!isConnected && !user?.offline_enabled)}
                 >
                   <Binoculars size={24} color="#fff" />
                 </TouchableOpacity>
@@ -4183,22 +4243,59 @@ export default function MapScreen() {
             )}
           </View>
 
+          {/* Dark mode harita stili butonu — zoom kontrolünün altında sol kenarda */}
+          {scheme === 'dark' && !isLocationPickerMode && !showMapPopup && !selectForPlanMode && (
+            <TouchableOpacity
+              style={[{
+                position: 'absolute',
+                left: 10,
+                top: 155,
+                width: 33,
+                height: 33,
+                borderRadius: 4,
+                backgroundColor: colors.surface,
+                borderWidth: 2,
+                borderColor: colors.border,
+                justifyContent: 'center',
+                alignItems: 'center',
+                elevation: 4,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.3,
+                shadowRadius: 2,
+              }, isBusy ? { opacity: 0.45 } : {}]}
+              onPress={() => {
+                const styles_order: Array<'soft' | 'bright' | 'default'> = ['soft', 'bright', 'default'];
+                const currentIdx = styles_order.indexOf(darkMapStyle);
+                const next = styles_order[(currentIdx + 1) % styles_order.length];
+                changeDarkMapStyle(next);
+              }}
+              disabled={isBusy}
+            >
+              <Text style={{ fontSize: 14, lineHeight: 18 }}>
+                {darkMapStyle === 'soft' ? '🌙' : darkMapStyle === 'bright' ? '🔆' : '🌑'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {/* Floating Action Buttons */}
           {!isLocationPickerMode && !showMapPopup && (
-            <View style={styles.fabContainer} pointerEvents={(isBusy || syncProgress.isLoading) ? 'none' : 'auto'}>
+            <View style={styles.fabContainer} pointerEvents={isBusy ? 'none' : 'auto'}>
+              {!selectForPlanMode && (
+                <TouchableOpacity
+                  style={[styles.fab, styles.fabSecondary, { backgroundColor: colors.primary }, isBusy ? { opacity: 0.45 } : {}]}
+                  onPress={() => {
+                    if (isMounted.current) setIsLocationPickerMode(true);
+                  }}
+                  disabled={isBusy}
+                >
+                  <Plus size={28} color="white" />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
-                style={[styles.fab, styles.fabSecondary, { backgroundColor: colors.accent }, (isBusy || syncProgress.isLoading) ? { opacity: 0.45 } : {}]}
-                onPress={() => {
-                  if (isMounted.current && !syncProgress.isLoading) setIsLocationPickerMode(true);
-                }}
-                disabled={isBusy || syncProgress.isLoading}
-              >
-                <Plus size={28} color="white" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.fab, { backgroundColor: colors.primary }, (isBusy || syncProgress.isLoading) ? { opacity: 0.45 } : {}]}
+                style={[styles.fab, { backgroundColor: colors.primary }, isBusy ? { opacity: 0.45 } : {}]}
                 onPress={handleShowCurrentLocation}
-                disabled={isBusy || syncProgress.isLoading}
+                disabled={isBusy}
               >
                 <LocateFixed size={24} color="white" />
               </TouchableOpacity>
@@ -4207,7 +4304,7 @@ export default function MapScreen() {
 
             {/* Camp Plan compact overlay: small back/next/close and step title under header */}
             {selectForPlanMode && (
-              <View style={styles.planOverlayCompact} pointerEvents="box-none">
+              <View style={[styles.planOverlayCompact, { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.primary }]} pointerEvents="box-none">
                 <TouchableOpacity
                   style={styles.compactBtn}
                   onPress={() => {
@@ -4303,7 +4400,7 @@ export default function MapScreen() {
 
           {/* Info Panel */}
           {!isLocationPickerMode && (
-            <View style={[styles.infoPanel, { backgroundColor: colors.surface }]} pointerEvents={(isBusy || syncProgress.isLoading) ? 'none' : 'auto'}>
+            <View style={[styles.infoPanel, { backgroundColor: colors.surface }]} pointerEvents={isBusy ? 'none' : 'auto'}>
               <View style={styles.infoPanelHeader}>
                 <MapPin size={16} color={colors.primary} />
                 <Text style={[styles.infoPanelTitle, { color: colors.text }]}>
@@ -4317,9 +4414,9 @@ export default function MapScreen() {
             {location && (
               <View style={styles.buttonContainer}>
                 <TouchableOpacity 
-                  style={[styles.planCampButton, { backgroundColor: '#f3e8ff', borderColor: '#7c3aed' }, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
+                  style={[styles.planCampButton, { backgroundColor: '#f3e8ff', borderColor: '#7c3aed' }, isBusy ? { opacity: 0.6 } : {}]}
                   onPress={handlePlanCamp}
-                  disabled={isBusy || syncProgress.isLoading}
+                  disabled={isBusy}
                 >
                   {hasDraftPlan && <View style={[styles.draftDot, { backgroundColor: colors.danger }]} />}
                   <Calendar size={14} color="#7c3aed" />
@@ -4330,14 +4427,16 @@ export default function MapScreen() {
                     </View>
                   )}
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.currentLocationButton, { backgroundColor: colors.primaryLight, borderColor: colors.primary }, (isBusy || syncProgress.isLoading) ? { opacity: 0.6 } : {}]}
-                  onPress={addCampingAreaAtCurrentLocation}
-                  disabled={isBusy || syncProgress.isLoading}
-                >
-                  <Plus size={14} color={colors.primary} />
-                  <Text style={[styles.currentLocationButtonText, { color: colors.primary }]}>Mevcut Konuma Ekle</Text>
-                </TouchableOpacity>
+                {!selectForPlanMode && (
+                  <TouchableOpacity 
+                    style={[styles.currentLocationButton, { backgroundColor: colors.surfaceVariant, borderColor: colors.primary }, isBusy ? { opacity: 0.6 } : {}]}
+                    onPress={addCampingAreaAtCurrentLocation}
+                    disabled={isBusy}
+                  >
+                    <Plus size={14} color={colors.primary} />
+                    <Text style={[styles.currentLocationButtonText, { color: colors.primary }]}>Mevcut Konuma Ekle</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
@@ -4355,7 +4454,6 @@ export default function MapScreen() {
             isCampPlanMode={selectForPlanMode}
             onSelectArea={(area) => {
               if (!isMounted.current) return;
-              if (syncProgress.isLoading) return;
               // Bildirim kaynaklı özel liste açık ise kapat
               if (notificationCampingAreas) setNotificationCampingAreas(null);
               setSelectedCampingArea(area);
@@ -4365,7 +4463,7 @@ export default function MapScreen() {
             currentLocation={location?.coords}
             favorites={favorites}
             onToggleFavorite={handleToggleFavorite}
-            disabled={syncProgress.isLoading}
+            disabled={false}
             isGuest={isGuest}
             isConnected={isConnected}
           />
@@ -4652,7 +4750,6 @@ const styles = StyleSheet.create({
     top: 85,
     zIndex: 1300,
     height: 48,
-    backgroundColor: 'rgba(255,255,255,0.96)',
     borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',

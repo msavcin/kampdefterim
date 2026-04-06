@@ -880,43 +880,45 @@ export class DatabaseManager {
     apiUrl: string = API_URL + '/campgrounds',
     options: { forceFull?: boolean; userId?: string; onProgress?: (current: number, total: number) => void } = {}
   ): Promise<number> {
-    // Merkezi queue ile tüm yazma işlemleri sıraya alınır
-    return DatabaseManager.enqueue(async () => {
-      try {
-        // Delta Sync: Son senkronizasyon zamanını al
-        const lastSync = options.forceFull ? null : await getLastCampingAreaSync();
-        const isDeltaSync = !!lastSync;
-        
-        // updated_after parametresi varsa ekle
-        let url = apiUrl;
-        if (lastSync) {
-          const separator = apiUrl.includes('?') ? '&' : '?';
-          // Delta Sync'te silinen kayıtları da dahil et
-          url = `${apiUrl}${separator}updated_after=${encodeURIComponent(lastSync)}&include_deleted=true`;
-          console.log('[fetchAndStoreCampingAreasFromAPI] 🔄 Delta Sync aktif, son sync:', lastSync);
-        } else {
-          console.log('[fetchAndStoreCampingAreasFromAPI] 📥 Full Sync (ilk senkronizasyon veya force)');
+    // 1. ADIM: Network çağrısını enqueue DIŞINDA yap — queue'yu ağ gecikmesi boyunca bloklamaz
+    // (Announcements sync ile aynı pattern)
+    try {
+      // Delta Sync: Son senkronizasyon zamanını al
+      const lastSync = options.forceFull ? null : await getLastCampingAreaSync();
+      const isDeltaSync = !!lastSync;
+      
+      // updated_after parametresi varsa ekle
+      let url = apiUrl;
+      if (lastSync) {
+        const separator = apiUrl.includes('?') ? '&' : '?';
+        // Delta Sync'te silinen kayıtları da dahil et
+        url = `${apiUrl}${separator}updated_after=${encodeURIComponent(lastSync)}&include_deleted=true`;
+        console.log('[fetchAndStoreCampingAreasFromAPI] 🔄 Delta Sync aktif, son sync:', lastSync);
+      } else {
+        console.log('[fetchAndStoreCampingAreasFromAPI] 📥 Full Sync (ilk senkronizasyon veya force)');
+      }
+      
+      console.log('[fetchAndStoreCampingAreasFromAPI] BAŞLANGIÇ - URL:', url);
+      const headers: Record<string, string> = {};
+      const token = await getToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await apiFetch(url, { headers });
+      if (!response.ok) throw new Error('API yanıtı başarısız: ' + response.status);
+      const data = await response.json();
+      console.log('[fetchAndStoreCampingAreasFromAPI] API response örnek:', Array.isArray(data) && data.length > 0 ? data[0] : data);
+      if (Array.isArray(data)) {
+        const found1472 = data.find((item) => String(item.id) === '1472' || String(item.external_id) === '1472');
+        if (found1472) {
+          console.log('[fetchAndStoreCampingAreasFromAPI] external_id:1472 API\'den gelen fee:', found1472.fee, 'tipi:', typeof found1472.fee);
         }
-        
-        console.log('[fetchAndStoreCampingAreasFromAPI] BAŞLANGIÇ - URL:', url);
-        const headers: Record<string, string> = {};
-        const token = await getToken();
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-        const response = await apiFetch(url, { headers });
-        if (!response.ok) throw new Error('API yanıtı başarısız: ' + response.status);
-        const data = await response.json();
-        console.log('[fetchAndStoreCampingAreasFromAPI] API response örnek:', Array.isArray(data) && data.length > 0 ? data[0] : data);
-        if (Array.isArray(data)) {
-          const found1472 = data.find((item) => String(item.id) === '1472' || String(item.external_id) === '1472');
-          if (found1472) {
-            console.log('[fetchAndStoreCampingAreasFromAPI] external_id:1472 API\'den gelen fee:', found1472.fee, 'tipi:', typeof found1472.fee);
-          }
-        }
-        console.log('[fetchAndStoreCampingAreasFromAPI] API veri boyutu:', Array.isArray(data) ? data.length : typeof data);
-        if (!Array.isArray(data)) throw new Error('API beklenen formatta veri döndürmedi');
+      }
+      console.log('[fetchAndStoreCampingAreasFromAPI] API veri boyutu:', Array.isArray(data) ? data.length : typeof data);
+      if (!Array.isArray(data)) throw new Error('API beklenen formatta veri döndürmedi');
 
+      // 2. ADIM: DB yazma işlemlerini enqueue içinde yap
+      return DatabaseManager.enqueue(async () => {
         // Progress callback - başlangıç
         if (options.onProgress && data.length > 0) {
           if (__DEV__) console.log('[DB][PROGRESS] Başlangıç callback:', 0, '/', data.length);
@@ -977,6 +979,26 @@ export class DatabaseManager {
 
         let processed = 0;
         let deletedByServerCount = 0;
+
+        // Prepared statements — döngü dışında bir kez hazırla, N kez executeAsync çağır
+        // (Her runAsync çağrısı dahili prepare+execute+finalize yapar — N kayıt için N×overhead)
+        // (prepareAsync ile 1×prepare + N×execute + 1×finalize — çok daha hızlı)
+        const updateStmt = await this.db!.prepareAsync(
+          `UPDATE camping_areas SET 
+            name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
+            capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
+            social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
+            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?
+           WHERE external_id = ?`
+        );
+        const insertStmt = await this.db!.prepareAsync(
+          `INSERT INTO camping_areas (
+            name, latitude, longitude, type, description, website, phone, opening_hours, capacity, fee, status, rating, review_count, price_range,
+            facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images, friend_user_ids, community_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+
+        try {
         for (const item of data) {
           processed++;
           
@@ -1060,14 +1082,7 @@ export class DatabaseManager {
               }
             }
             // [DEBUG][API->LOCAL] Güncellenen alan owner_id: logu kaldırıldı
-            updateResult = await this.db!.runAsync(
-              `UPDATE camping_areas SET 
-                name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
-                capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
-                social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
-                source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?
-               WHERE external_id = ?`,
-              [
+            updateResult = await updateStmt.executeAsync([
                 item.name ?? '',
                 item.latitude ?? 0,
                 item.longitude ?? 0,
@@ -1122,14 +1137,7 @@ export class DatabaseManager {
                   [item.external_id, existingRow.id]
                 );
                 // Tekrar update dene
-                updateResult = await this.db!.runAsync(
-                  `UPDATE camping_areas SET 
-                    name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
-                    capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
-                    social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
-                    source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?
-                   WHERE external_id = ?`,
-                  [
+                updateResult = await updateStmt.executeAsync([
                     item.name ?? '',
                     item.latitude ?? 0,
                     item.longitude ?? 0,
@@ -1178,14 +1186,7 @@ export class DatabaseManager {
                     'UPDATE camping_areas SET external_id = ? WHERE id = ?',
                     [item.external_id, existingByName.id]
                   );
-                  updateResult = await this.db!.runAsync(
-                    `UPDATE camping_areas SET 
-                      name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
-                      capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
-                      social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
-                      source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?
-                     WHERE external_id = ?`,
-                    [
+                  updateResult = await updateStmt.executeAsync([
                       item.name ?? '',
                       item.latitude ?? 0,
                       item.longitude ?? 0,
@@ -1223,12 +1224,7 @@ export class DatabaseManager {
             }
           }
           if (!item.external_id || updateResult.changes === 0) {
-            const insertResult = await this.db!.runAsync(
-              `INSERT INTO camping_areas (
-                name, latitude, longitude, type, description, website, phone, opening_hours, capacity, fee, status, rating, review_count, price_range,
-                facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images, friend_user_ids, community_id
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
+            const insertResult = await insertStmt.executeAsync([
                 item.name ?? '',
                 item.latitude ?? 0,
                 item.longitude ?? 0,
@@ -1276,6 +1272,11 @@ export class DatabaseManager {
           console.error('Kamp alanı ekleme/güncelleme hatası:', err, item);
         }
       }
+        } finally {
+          // Prepared statements'ı her durumda finalize et (bellek sızıntısını önle)
+          await updateStmt.finalizeAsync();
+          await insertStmt.finalizeAsync();
+        }
   // ...existing code...
       
       // Sunucuda olmayan lokal kamp alanlarını sil (çoklu cihaz senkronizasyonu için)
@@ -1341,16 +1342,16 @@ export class DatabaseManager {
       const allAreas = await this.getAllCampingAreas();
   // ...existing code...
         return insertCount;
-      } catch (error) {
-        // Network hatası durumunda sessizce pas geç
-        if (error instanceof Error && (error.message.includes('Network') || error.message.includes('fetch failed'))) {
-          console.warn('[fetchAndStoreCampingAreasFromAPI] ⚠️ Network hatası (offline olabilir), API senkronizasyonu atlandı.');
-          return 0; // Offline mod, hata vermeden 0 döndür
-        }
-        console.error('API veri çekme/ekleme hatası:', error);
-        throw error;
+      });
+    } catch (error) {
+      // Network hatası durumunda sessizce pas geç
+      if (error instanceof Error && (error.message.includes('Network') || error.message.includes('fetch failed'))) {
+        console.warn('[fetchAndStoreCampingAreasFromAPI] ⚠️ Network hatası (offline olabilir), API senkronizasyonu atlandı.');
+        return 0; // Offline mod, hata vermeden 0 döndür
       }
-    });
+      console.error('API veri çekme/ekleme hatası:', error);
+      throw error;
+    }
   }
   /**
    * Arkadaş paylaşımından çıkartılan kullanıcının cihazındaki erişimi iptal edilmiş
@@ -1682,6 +1683,7 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_camping_areas_type ON camping_areas(type);
       CREATE INDEX IF NOT EXISTS idx_camping_areas_status ON camping_areas(status);
       CREATE INDEX IF NOT EXISTS idx_camping_areas_rating ON camping_areas(rating);
+      CREATE INDEX IF NOT EXISTS idx_camping_areas_external_id ON camping_areas(external_id);
     `);
 
     // Create favorites table if it doesn't exist
@@ -1947,10 +1949,24 @@ export class DatabaseManager {
   ): Promise<CampingArea[]> {
     if (!this.db) await this.init();
 
+    // Bounding box hesapla — SQL tarafında kaba filtreleme (tam Haversine'dan çok daha hızlı)
+    // 1 derece enlem ≈ 111 km, 1 derece boylam ≈ 111 km × cos(enlem)
+    const latDelta = radiusKm / 111.0;
+    const lngDelta = radiusKm / (111.0 * Math.cos(latitude * Math.PI / 180));
+    const minLat = latitude - latDelta;
+    const maxLat = latitude + latDelta;
+    const minLng = longitude - lngDelta;
+    const maxLng = longitude + lngDelta;
+
     // Build WHERE clause - show areas that match type filter AND other conditions
     let whereClause = `status = 'active' AND deleted = 0`;
     let params: any[] = [];
     const mainConditions: string[] = [];
+
+    // Bounding box filtresi — SQL tarafında 2052 → ~100 satıra düşürür
+    whereClause += ` AND latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?`;
+    params.push(minLat, maxLat, minLng, maxLng);
+
     // Superadmin ise visibility filtresi uygulanmaz
     if (!isSuperAdmin) {
       if (currentUserId !== undefined && currentUserId !== null && currentUserId !== '') {
@@ -2002,32 +2018,40 @@ export class DatabaseManager {
     console.log('[DB][searchCampingAreasByLocation] Params:', params);
     try {
       const result = await this.db!.getAllAsync(query, params);
-      console.log('[DB][searchCampingAreasByLocation] Result count:', result.length);
-      // Kullanıcı tarafından eklenen alanları ayrıca logla
-      const userSubmitted = (result as any[]).filter(row => {
-        let tagsObj = row.tags;
-        if (typeof tagsObj === 'string') {
-          try { tagsObj = JSON.parse(tagsObj); } catch { tagsObj = {}; }
-        }
-        return tagsObj && tagsObj.user_submitted === 'yes';
-      });
-      console.log('[DB][searchCampingAreasByLocation] User submitted count:', userSubmitted.length, userSubmitted.map(r => r.id || r.name));
+      if (__DEV__) console.log('[DB][searchCampingAreasByLocation] Result count:', result.length);
+      // Kullanıcı tarafından eklenen alanları ayrıca logla (hafif string kontrolü — JSON.parse yok)
+      if (__DEV__) {
+        const userSubmitted = (result as any[]).filter(row =>
+          typeof row.tags === 'string' && row.tags.includes('user_submitted')
+        );
+        console.log('[DB][searchCampingAreasByLocation] User submitted count:', userSubmitted.length, userSubmitted.map(r => r.id || r.name));
+      }
 
       const distanceRefLat = typeof distanceFromLatitude === 'number' ? distanceFromLatitude : latitude;
       const distanceRefLng = typeof distanceFromLongitude === 'number' ? distanceFromLongitude : longitude;
 
-      // Calculate distance in JavaScript using Haversine formula
-      const areasWithDistance = (result as any[]).map(row => {
+      // 1. ADIM: Önce sadece mesafe hesapla ve radius filtresi uygula (hafif — JSON parse yok)
+      // Bounding box kaba filtredir, dairesel radius için Haversine gerekir
+      const preFiltered: { row: any; searchDistance: number; displayDistance: number }[] = [];
+      for (const row of result as any[]) {
         const searchDistance = this.calculateDistance(latitude, longitude, row.latitude, row.longitude);
+        if (searchDistance > radiusKm) continue; // Radius dışında → atla (JSON parse yapma)
         const displayDistance = this.calculateDistance(distanceRefLat, distanceRefLng, row.latitude, row.longitude);
-        // Display distance is intentionally scaled (e.g., route or actual driving distance estimation)
+        preFiltered.push({ row, searchDistance, displayDistance });
+      }
+
+      // Mesafeye göre sırala ve max 250 kayıt al
+      preFiltered.sort((a, b) => a.searchDistance - b.searchDistance);
+      const topResults = preFiltered.slice(0, 250);
+
+      // 2. ADIM: Sadece radius içinde kalan kayıtlara JSON parse uygula
+      const filteredAreas = topResults.map(({ row, searchDistance, displayDistance }) => {
         const scaledDistance = displayDistance * 1.25;
         return {
           ...row,
           owner_id: row.owner_id !== undefined && row.owner_id !== null ? String(row.owner_id) : '',
           community_id: row.community_id !== undefined && row.community_id !== null ? row.community_id : undefined,
           distance_km: scaledDistance,
-          _search_distance_km: searchDistance,
           amenities: (() => {
             if (typeof row.amenities === 'string') {
               try { return JSON.parse(row.amenities || '[]'); } catch { return []; }
@@ -2045,7 +2069,6 @@ export class DatabaseManager {
                   return {};
                 }
               } else {
-                // Not a JSON string, treat as empty object
                 return {};
               }
             }
@@ -2085,7 +2108,6 @@ export class DatabaseManager {
             if (typeof row.friend_user_ids === 'string') {
               try { return JSON.parse(row.friend_user_ids || '[]'); } catch { return []; }
             }
-            // null/undefined ise boş dizi döndür (istemci filtrelerinin yanlış engellemesini önler)
             return Array.isArray(row.friend_user_ids) ? row.friend_user_ids : [];
           })(),
           opening_hours: (() => {
@@ -2095,19 +2117,8 @@ export class DatabaseManager {
             return row.opening_hours;
           })(),
           fee: row.fee === null ? null : Boolean(row.fee),
-        };
+        } as CampingArea;
       });
-
-      // Filter by radius and sort by distance (use search distance for filtering/sorting)
-      const filteredAreas = areasWithDistance
-        .filter(area => (area as any)._search_distance_km <= radiusKm)
-        .sort((a, b) => ((a as any)._search_distance_km - (b as any)._search_distance_km))
-        .slice(0, 250)
-        .map(area => {
-          // Remove internal search distance field before returning
-          const { _search_distance_km, ...rest } = area as any;
-          return rest as CampingArea;
-        }) as CampingArea[];
       
       // ...existing code...
       

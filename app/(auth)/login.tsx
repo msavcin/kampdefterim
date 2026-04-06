@@ -11,9 +11,9 @@ import { useTheme } from '../../components/ThemeProvider';
 import { createThemedStyles } from '../../constants/theme/sharedStyles';
 
 export default function LoginScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const themed = createThemedStyles(colors);
-  const isDarkMode = colors.text === '#ffffff' || colors.text === '#f0f0f0'; // Dark mode tespiti
+  const isDarkMode = scheme === 'dark';
   const [identifier, setIdentifier] = useState(''); // email veya username
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);

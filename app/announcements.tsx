@@ -234,10 +234,9 @@ export default function AnnouncementsScreen() {
         }
         
         lastRefreshTimeRef.current = now;
-    setAnnouncementsLoading(true);
-    setRefreshing(true);
-    setLocalLoading(true);
-    setApiLoading(false);
+      setAnnouncementsLoading(true);
+      setLocalLoading(true);
+      setApiLoading(false);
     try {
     const db = getDatabase();
     
@@ -562,11 +561,11 @@ export default function AnnouncementsScreen() {
         style={{ flex: 1 }}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refreshAnnouncements}
-            colors={[colors.primary]}
-            tintColor={colors.primary}
-          />
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); refreshAnnouncements(); }}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
         }
       >
         <View style={{ padding: 16 }}>

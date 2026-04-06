@@ -179,6 +179,9 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
       });
       
       setLocation(currentLocation);
+      // GPS konum alındığında dedup guard'ı sıfırla — cache konumla yapılan ilk aramanın
+      // blokladığı GPS-hassas aramayı zorla çalıştır (cache ≈ GPS olsa bile)
+      lastQueryRef.current = null;
       try {
         await setLastKnownLocationAsync(currentLocation.coords.latitude, currentLocation.coords.longitude);
       } catch (storageError) {
@@ -322,6 +325,18 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
     }
   };
 
+  // Dedup guard'ı atlayarak zorla yenile (sync sonrası DB güncellemelerini anında yansıtmak için)
+  const forceRefresh = () => {
+    lastQueryRef.current = null;
+    const lat = latitude || location?.coords.latitude;
+    const lng = longitude || location?.coords.longitude;
+    if (lat && lng) {
+      fetchCampingAreas(lat, lng, radius, tags);
+    } else {
+      getCurrentLocation();
+    }
+  };
+
   const syncFromOverpass = async (bounds?: string) => {
     try {
       setLoading(true);
@@ -434,6 +449,7 @@ out center meta;`;
     error,
     location,
     refreshData,
+    forceRefresh,
     fetchCampingAreas,
     getCurrentLocation,
     syncFromOverpass,

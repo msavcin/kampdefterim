@@ -20,6 +20,7 @@ export interface TileInfo {
   y: number;
   timestamp: number;
   size: number;
+  style?: string;
 }
 
 export interface CachedRegion {
@@ -64,6 +65,33 @@ async function loadTileIndex(): Promise<TileIndex> {
       await clearTileCache();
       return { version: TILE_CACHE_VERSION, tiles: {}, totalSize: 0 };
     }
+    // Validate index: remove entries whose files are missing
+    try {
+      const keys = Object.keys(index.tiles || {});
+      let changed = false;
+      for (const k of keys) {
+        const t: TileInfo = index.tiles[k];
+        const style = k.startsWith('dark_') ? 'dark' : undefined;
+        const path = getTilePath(t.z, t.x, t.y, style);
+        try {
+          const info = await FileSystem.getInfoAsync(path);
+          if (!info.exists) {
+            // remove entry
+            index.totalSize = Math.max(0, (index.totalSize || 0) - (t.size || 0));
+            delete index.tiles[k];
+            changed = true;
+          }
+        } catch (e) {
+          // ignore per-file errors, remove entry conservatively
+          index.totalSize = Math.max(0, (index.totalSize || 0) - (t.size || 0));
+          delete index.tiles[k];
+          changed = true;
+        }
+      }
+      if (changed) await saveTileIndex(index);
+    } catch (e) {
+      // ignore validation errors
+    }
     return index;
   } catch {
     return { version: TILE_CACHE_VERSION, tiles: {}, totalSize: 0 };
@@ -104,11 +132,29 @@ export async function getCachedTile(z: number, x: number, y: number, style?: str
     const fileInfo = await FileSystem.getInfoAsync(path);
     
     if (fileInfo.exists) {
-      // Dosya varsa, base64 olarak döndür
-      const base64 = await FileSystem.readAsStringAsync(path, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      return `data:image/png;base64,${base64}`;
+      // Dosya varsa, base64 olarak döndür (okuma hatalarını yakala)
+      try {
+        const base64 = await FileSystem.readAsStringAsync(path, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        return `data:image/png;base64,${base64}`;
+      } catch (readErr) {
+        console.error('[MapTileCache] Tile okuma hatası (okunamadı):', readErr);
+        // Eğer dosya okunamıyorsa index'ten temizle ve dosyayı silmeye çalış
+        try {
+          const index = await loadTileIndex();
+          const key = getTileKey(z, x, y, style);
+          if (index.tiles && index.tiles[key]) {
+            index.totalSize = Math.max(0, (index.totalSize || 0) - (index.tiles[key].size || 0));
+            delete index.tiles[key];
+            await saveTileIndex(index);
+          }
+        } catch (e) {
+          // ignore
+        }
+        try { await FileSystem.deleteAsync(path, { idempotent: true }); } catch (e) {}
+        return null;
+      }
     }
     
     return null;
@@ -147,10 +193,26 @@ export async function cacheTile(z: number, x: number, y: number, style?: string,
     const key = getTileKey(z, x, y, style);
     
     // Tile'ı indir
-    const downloadResult = await FileSystem.downloadAsync(url, path);
-    
+    const tmpPath = path + '.tmp';
+    const downloadResult = await FileSystem.downloadAsync(url, tmpPath);
+
     if (downloadResult.status !== 200) {
+      try { await FileSystem.deleteAsync(tmpPath, { idempotent: true }); } catch {}
       return false;
+    }
+
+    // Taşıma (atomic write benzeri davranış)
+    try {
+      await FileSystem.moveAsync({ from: tmpPath, to: path });
+    } catch (moveErr) {
+      // Eğer move başarısızsa, fallback olarak tmp'yi kopyala
+      try {
+        await FileSystem.copyAsync({ from: tmpPath, to: path });
+        await FileSystem.deleteAsync(tmpPath, { idempotent: true });
+      } catch (finalErr) {
+        try { await FileSystem.deleteAsync(tmpPath, { idempotent: true }); } catch {}
+        throw finalErr;
+      }
     }
     
     // Index'i güncelle
@@ -206,15 +268,15 @@ async function enforceMaxCacheSize(index: TileIndex) {
   
   for (const key of tilesToDelete) {
     const tile = index.tiles[key];
-    const path = getTilePath(tile.z, tile.x, tile.y);
-    
+    const style = String(key).startsWith('dark_') ? 'dark' : undefined;
+    const path = getTilePath(tile.z, tile.x, tile.y, style);
     try {
       await FileSystem.deleteAsync(path, { idempotent: true });
-      index.totalSize -= tile.size;
-      delete index.tiles[key];
     } catch {
-      // Hata olsa bile devam et
+      // ignore
     }
+    index.totalSize = Math.max(0, index.totalSize - (tile.size || 0));
+    delete index.tiles[key];
   }
 }
 
