@@ -1,3 +1,8 @@
+import { API_URL } from './config';
+import { getToken } from './auth';
+import { apiFetch } from './apiFetch';
+import { getProvinceInfoFromOSM } from './osmReverseGeocode';
+
 // Spec: docs/API/campground_api_spec.md
 // Dizi/obje alanları için gerçek dizi/obje gönder (spec: "frontend için diziler tercih edin")
 
@@ -19,6 +24,12 @@ function toObject(value: any): Record<string, any> {
     try { const p = JSON.parse(value); return (p && typeof p === 'object' && !Array.isArray(p)) ? p : {}; } catch { return {}; }
   }
   return {};
+}
+
+function sanitizeSources(value: any): string[] {
+  return toArray(value)
+    .map((item: any) => String(item).trim())
+    .filter((item: string) => ['google', 'website', 'tourism_portals'].includes(item));
 }
 
 // API'ya gönderilecek veriyi temizle (sanitize) fonksiyonu
@@ -111,10 +122,22 @@ export function sanitizeCampingAreaData(data: any) {
   if (data.images        !== undefined) sanitized.images        = toArray(data.images);
   // photo_links: backend TEXT sütunu — JSON-encoded string olarak göndermek zorunlu
   if (data.photo_links   !== undefined) sanitized.photo_links   = JSON.stringify(toArray(data.photo_links));
+  if (data.sources      !== undefined) sanitized.sources      = sanitizeSources(data.sources);
 
   // ── Obje alanlar — gerçek object gönder ────────────────────────────────
   if (data.social_media !== undefined) sanitized.social_media = toObject(data.social_media);
   if (data.tags         !== undefined) sanitized.tags         = toObject(data.tags);
+
+  // province: object veya JSON string kabul et
+  if (data.province !== undefined) {
+    if (typeof data.province === 'string') {
+      try { sanitized.province = JSON.parse(data.province); } catch { sanitized.province = data.province; }
+    } else if (typeof data.province === 'object') {
+      sanitized.province = data.province;
+    } else {
+      sanitized.province = data.province;
+    }
+  }
 
   return sanitized;
 }
@@ -122,6 +145,16 @@ export function sanitizeCampingAreaData(data: any) {
 export async function updateCampingAreaOnServer(id: string | number, data: any) {
   const token = await getToken();
     const sanitized = sanitizeCampingAreaData(data);
+    // Eğer province yoksa, koordinatlardan il/ilçe/plaka bilgisini alıp ekle
+    try {
+      if ((!sanitized.province || sanitized.province === '') && sanitized.latitude && sanitized.longitude) {
+        const { getProvinceInfoFromOSM } = require('./osmReverseGeocode');
+        const prov = await getProvinceInfoFromOSM(Number(sanitized.latitude), Number(sanitized.longitude));
+        if (prov) sanitized.province = prov;
+      }
+    } catch (e) {
+      console.warn('[updateCampingAreaOnServer] province lookup failed', e);
+    }
     // API'ya gönderilen body'yi logla
     console.log('[updateCampingAreaOnServer] API request body:', data);
   // Her zaman external_id ile güncelleme yapılacaksa by parametresi zorunlu
@@ -167,13 +200,45 @@ export async function deleteCampingAreaOnServer(id: string | number, by?: 'exter
   console.log('[API][DELETE][SUCCESS]', { id, by, status: res.status, json });
   return json;
 }
-import { API_URL } from './config';
-import { getToken } from './auth';
-import { apiFetch } from './apiFetch';
 
+export async function enrichCampingAreaOnServer(id: string | number, options?: { sources?: any[] }) {
+  const token = await getToken();
+  const payload: any = {};
+  if (options?.sources !== undefined) {
+    const sources = sanitizeSources(options.sources);
+    if (sources.length > 0) {
+      payload.sources = sources;
+    }
+  }
+
+  console.log('[API][POST] /campgrounds/' + id + '/enrich', payload);
+  const res = await apiFetch(`${API_URL}/campgrounds/${id}/enrich`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error('API Hatası: ' + err);
+  }
+  return res.json();
+}
 export async function createCampingAreaOnServer(data: any) {
   const token = await getToken();
     const sanitized = sanitizeCampingAreaData(data);
+    // Eğer province yoksa, koordinatlardan il/ilçe/plaka bilgisini alıp ekle
+    try {
+      if ((!sanitized.province || sanitized.province === '') && sanitized.latitude && sanitized.longitude) {
+        const prov = await getProvinceInfoFromOSM(Number(sanitized.latitude), Number(sanitized.longitude));
+        if (prov) sanitized.province = prov;
+      }
+    } catch (e) {
+      console.warn('[createCampingAreaOnServer] province lookup failed', e);
+    }
     // API'ya gönderilen body'yi logla
     console.log('[createCampingAreaOnServer] API request body:', data);
   console.log('[API][POST] /campgrounds', sanitized);

@@ -8,11 +8,12 @@ import {
   ScrollView,
   ImageBackground,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../app/icons';
 import WeatherIcon from './WeatherIcon';
-import { useTheme } from './ThemeProvider';
+import { useTheme, defaultCategoryMap, DEFAULT_CATEGORY_ACCENTS } from './ThemeProvider';
 import type {
   AIEvaluationResponse,
   EvalStructuredData, EvalCategory, EvalItem, EvalSeverity, EvalStat,
@@ -184,45 +185,13 @@ function convertItem(item: EvalItem): ParsedItem {
   }
 }
 
-// ─── Category Map ───
-
-const CATEGORY_MAP: Record<string, { icon: string; severity: Severity }> = {
-  'hava durumu': { icon: 'CloudSun', severity: 'info' },
-  'hava': { icon: 'CloudSun', severity: 'info' },
-  'sıcaklık': { icon: 'Thermometer', severity: 'info' },
-  'weather': { icon: 'CloudSun', severity: 'info' },
-  'rüzgar': { icon: 'Wind', severity: 'warning' },
-  'yağış': { icon: 'CloudRain', severity: 'warning' },
-  'yağmur': { icon: 'CloudRain', severity: 'warning' },
-  'güvenlik': { icon: 'ShieldCheck', severity: 'danger' },
-  'uyarı': { icon: 'AlertTriangle', severity: 'danger' },
-  'dikkat': { icon: 'AlertTriangle', severity: 'danger' },
-  'duyuru': { icon: 'Megaphone', severity: 'warning' },
-  'ekipman': { icon: 'Backpack', severity: 'info' },
-  'malzeme': { icon: 'Package', severity: 'info' },
-  'kamp alanı': { icon: 'Tent', severity: 'good' },
-  'kamp': { icon: 'Tent', severity: 'good' },
-  'konum': { icon: 'MapPin', severity: 'good' },
-  'lokasyon': { icon: 'MapPin', severity: 'good' },
-  'ulaşım': { icon: 'Route', severity: 'info' },
-  'yol': { icon: 'Route', severity: 'info' },
-  'genel': { icon: 'ClipboardList', severity: 'info' },
-  'özet': { icon: 'BarChart3', severity: 'good' },
-  'sonuç': { icon: 'CheckCircle2', severity: 'good' },
-  'öneri': { icon: 'Lightbulb', severity: 'info' },
-  'not': { icon: 'StickyNote', severity: 'info' },
-  'puan': { icon: 'Star', severity: 'good' },
-  'skor': { icon: 'Star', severity: 'good' },
-  'değerlendirme': { icon: 'Sparkles', severity: 'good' },
-  'yakın': { icon: 'Compass', severity: 'info' },
-  'alternatif': { icon: 'ArrowRightLeft', severity: 'info' },
-  'alternatif kamp': { icon: 'MapPin', severity: 'info' },
-};
+// Use centralized category map from ThemeProvider
+const CATEGORY_MAP = defaultCategoryMap;
 
 function matchCategory(title: string): { icon: string; severity: Severity } {
   const lower = title.toLowerCase();
   for (const [key, val] of Object.entries(CATEGORY_MAP)) {
-    if (lower.includes(key)) return val;
+    if (lower.includes(key)) return val as any;
   }
   return { icon: 'Info', severity: 'info' };
 }
@@ -377,7 +346,7 @@ function parseEvaluation(markdown: string): ParsedCategory[] {
 
   if (categories.length === 0 && markdown.trim()) {
     categories.push({
-      icon: 'Sparkles', title: 'AI Değerlendirmesi',
+      icon: 'Sparkles', title: 'Kamp Defterim Değerlendirmesi',
       items: [{ type: 'bullet', text: markdown.replace(/[#*_]/g, '').trim() }],
       severity: 'info',
     });
@@ -500,19 +469,30 @@ function AlertBox({ item, isDark, theme }: { item: ParsedItem; isDark: boolean; 
 
 // ─── Kategori Kartı ───
 
-function CategoryCard({ category, theme, isDark }: {
+function CategoryCard({ category, theme, isDark, destinationLat, destinationLng, onOpenCampingAreaDetails }: {
   category: ParsedCategory; theme: any; isDark: boolean;
+  destinationLat?: number | null;
+  destinationLng?: number | null;
+  onOpenCampingAreaDetails?: () => void;
 }) {
   const cardBg  = isDark ? theme.colors.surfaceVariant : undefined;
   const cardBdr = isDark ? theme.colors.border : undefined;
+  const severityKey = (category.severity ?? 'info') as any;
+  const base = DEFAULT_CATEGORY_ACCENTS[severityKey] ?? DEFAULT_CATEGORY_ACCENTS.info;
   const sc = {
-    good:    { accent: isDark ? '#4ADE80' : '#059669', bg: cardBg ?? '#F0FDF4', border: cardBdr ?? '#BBF7D0', leftBar: isDark ? '#4ADE80' : '#059669', iconBg: isDark ? '#4ADE8022' : '#D1FAE5', badgeBg: isDark ? '#4ADE8022' : '#D1FAE5' },
-    warning: { accent: isDark ? '#FBBF24' : '#D97706', bg: cardBg ?? '#FFFBEB', border: cardBdr ?? '#FDE68A', leftBar: isDark ? '#FBBF24' : '#D97706', iconBg: isDark ? '#FBBF2422' : '#FEF3C7', badgeBg: isDark ? '#FBBF2422' : '#FEF3C7' },
-    danger:  { accent: isDark ? '#FB7185' : '#EF4444', bg: cardBg ?? '#FEF2F2', border: cardBdr ?? '#FECACA', leftBar: isDark ? '#FB7185' : '#EF4444', iconBg: isDark ? '#FB718522' : '#FEE2E2', badgeBg: isDark ? '#FB718522' : '#FEE2E2' },
-    info:    { accent: isDark ? '#60A5FA' : '#3B82F6', bg: cardBg ?? '#EFF6FF', border: cardBdr ?? '#BFDBFE', leftBar: isDark ? '#60A5FA' : '#3B82F6', iconBg: isDark ? '#60A5FA22' : '#DBEAFE', badgeBg: isDark ? '#60A5FA22' : '#DBEAFE' },
-  }[category.severity ?? 'info'];
+    accent: isDark ? base.accentDark : base.accentLight,
+    bg: cardBg ?? (isDark ? theme.colors.surfaceVariant : base.bgLight),
+    border: cardBdr ?? base.borderLight,
+    leftBar: isDark ? base.accentDark : base.accentLight,
+    iconBg: isDark ? (base.accentDark + '22') : base.iconBgLight,
+    badgeBg: isDark ? (base.accentDark + '22') : base.iconBgLight,
+  };
 
   const weatherDays = category.items.filter(i => i.type === 'weather-day');
+  const normalizedTitle = category.title?.toLowerCase() ?? '';
+  const showRouteButtons = /(yol|rota)/i.test(normalizedTitle);
+  const showDetailButton = /kamp alan|kampalan|kamp alanı|kampalanı/i.test(normalizedTitle);
+  const routeEnabled = destinationLat != null && destinationLng != null;
 
   return (
     <View style={[s.categoryCard, { backgroundColor: sc.bg, borderColor: sc.border }]}>
@@ -654,8 +634,8 @@ function CategoryCard({ category, theme, isDark }: {
             return (
               <View key={idx} style={[s.campSuggCard, { backgroundColor: isDark ? theme.colors.surface : sc.bg, borderColor: isDark ? theme.colors.border : sc.border }]}>
                 <View style={s.campSuggHeader}>
-                  <View style={[s.campSuggIconWrap, { backgroundColor: sc.iconBg }]}>
-                    <Icon name="Tent" size={14} color={sc.accent} />
+                  <View style={[s.campSuggIconWrap, { backgroundColor: isDark ? theme.colors.surfaceVariant : 'transparent' }]}> 
+                    <Icon name="campground" size={14} color={theme.colors.primary} />
                   </View>
                   <Text style={[s.campSuggName, { color: theme.colors.text }]} numberOfLines={2}>
                     {item.suggestionName ?? item.text}
@@ -699,6 +679,35 @@ function CategoryCard({ category, theme, isDark }: {
             </View>
           );
         })}
+
+        {showRouteButtons && (
+          <View style={s.routeButtonsRow}>
+            <TouchableOpacity
+              style={[s.routeBtn, !routeEnabled && s.routeBtnDisabled]}
+              disabled={!routeEnabled}
+              onPress={() => openRouteLink('google', destinationLat, destinationLng)}
+            >
+              <Text style={s.routeBtnText}>🧭 Google</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.routeBtn, !routeEnabled && s.routeBtnDisabled]}
+              disabled={!routeEnabled}
+              onPress={() => openRouteLink('yandex', destinationLat, destinationLng)}
+            >
+              <Text style={s.routeBtnText}>🧭 Yandex</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {showDetailButton && onOpenCampingAreaDetails && (
+          <View style={s.routeButtonsRow}>
+            <TouchableOpacity
+              style={s.routeBtn}
+              onPress={onOpenCampingAreaDetails}
+            >
+              <Text style={s.routeBtnText}>Detaylı Bilgi</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -733,6 +742,19 @@ interface AIEvaluationDashboardModalProps {
   campingAreaImage?: string | null;
   planTitle?: string;
   weatherData?: { days: WeatherDay[] } | null;
+  destinationLat?: number | null;
+  destinationLng?: number | null;
+  onOpenCampingAreaDetails?: () => void;
+  remaining?: number | null;
+  limit?: number | null;
+}
+
+function openRouteLink(provider: 'google' | 'yandex', lat?: number | null, lng?: number | null) {
+  if (!lat || !lng) return;
+  const url = provider === 'google'
+    ? `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`
+    : `yandexmaps://build_route_on_map?lat_to=${lat}&lon_to=${lng}`;
+  Linking.openURL(url).catch(err => console.error('Navigation error:', err));
 }
 
 export default function AIEvaluationDashboardModal({
@@ -743,6 +765,11 @@ export default function AIEvaluationDashboardModal({
   campingAreaImage,
   planTitle,
   weatherData,
+  destinationLat,
+  destinationLng,
+  onOpenCampingAreaDetails,
+  remaining,
+  limit,
 }: AIEvaluationDashboardModalProps) {
   const { theme, scheme } = useTheme();
   const isDark = scheme === 'dark';
@@ -842,7 +869,11 @@ export default function AIEvaluationDashboardModal({
           }
           const kM = item.text.match(/(\d+(?:[.,]\d+)?)\s*km(?!\/)/);
           if (kM && !badges.some(b => b.label === 'Mesafe'))
-            badges.push({ icon: 'MapPin', label: 'Mesafe', value: `${kM[1]} km`, severity: 'info' });
+            badges.push({ icon: 'Route', label: 'Mesafe', value: `${kM[1]} km`, severity: 'info' });
+          const reviewMatch = item.text.match(/(\d+)\s*(?:yorum|değerlendirme|reviews?)/i);
+          if (reviewMatch && !badges.some(b => b.label === 'Yorum')) {
+            badges.push({ icon: 'MessageSquare', label: 'Yorum', value: `${reviewMatch[1]} yorum`, severity: 'info' });
+          }
         }
       }
     }
@@ -923,7 +954,15 @@ export default function AIEvaluationDashboardModal({
 
             {/* Kategori kartları */}
             {categories.map((cat, idx) => (
-              <CategoryCard key={idx} category={cat} theme={theme} isDark={isDark} />
+              <CategoryCard
+                key={idx}
+                category={cat}
+                theme={theme}
+                isDark={isDark}
+                destinationLat={destinationLat}
+                destinationLng={destinationLng}
+                onOpenCampingAreaDetails={onOpenCampingAreaDetails}
+              />
             ))}
 
             {!evaluation && (
@@ -947,6 +986,11 @@ export default function AIEvaluationDashboardModal({
               >
                 <Icon name="RefreshCcw" size={16} color={theme.colors.primary} />
                 <Text style={[s.refreshBtnText, { color: theme.colors.primary }]}>Yeniden Değerlendir</Text>
+                {(typeof remaining === 'number' || typeof limit === 'number') && (
+                  <View style={{ marginLeft: 8, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: isDark ? theme.colors.border : theme.colors.primary + '20', backgroundColor: isDark ? theme.colors.surfaceVariant : theme.colors.primaryLight + '20' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.primary }}>{typeof remaining === 'number' ? `Kalan ${remaining}` : 'Kalan ?'}{typeof limit === 'number' ? ` / ${limit}` : ''}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             )}
 
@@ -978,7 +1022,7 @@ function renderHeader(
             <Icon name="Sparkles" size={18} color={theme.colors.primary} />
           </View>
           <View>
-            <Text style={[s.headerTitle, { color: theme.colors.text }]}>AI Değerlendirmesi</Text>
+            <Text style={[s.headerTitle, { color: theme.colors.text }]}>Kamp Defterim Değerlendirmesi</Text>
             {planTitle ? (
               <Text style={[s.headerSubtitle, { color: theme.colors.muted }]} numberOfLines={1}>
                 {planTitle}
@@ -1280,6 +1324,32 @@ const s = StyleSheet.create({
   campSuggMetaChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   campSuggMetaText: { fontSize: 11.5, fontWeight: '500' },
   campSuggDesc: { fontSize: 12, lineHeight: 17, marginTop: 2 },
+
+  routeButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 12,
+  },
+  routeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFF',
+  },
+  routeBtnDisabled: {
+    opacity: 0.5,
+  },
+  routeBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
 
   // Empty
   emptyState: {

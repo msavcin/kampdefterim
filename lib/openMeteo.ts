@@ -11,7 +11,12 @@ export async function fetchOpenMeteoForecast(lat: number, lon: number, days: num
   ];
 
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=${dailyVars.join(',')}&timezone=auto&forecast_days=${forecast_days}`;
-  const res = await fetch(url);
+  const retryStatuses = new Set([502, 503, 504]);
+  let res = await fetch(url);
+  if (!res.ok && retryStatuses.has(res.status)) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    res = await fetch(url);
+  }
   if (!res.ok) throw new Error(`Open-Meteo error ${res.status}`);
   const data = await res.json();
 

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { useColorScheme } from 'react-native';
+import { useColorScheme, Appearance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,6 +15,51 @@ import {
 export const themes = {
   light: { colors: palettes[defaultPaletteId].light },
   dark: { colors: palettes[defaultPaletteId].dark },
+};
+
+// ─── Kategori ikon/renk haritası (merkezi kontrol) ───
+export type CatSeverity = 'good' | 'warning' | 'danger' | 'info';
+
+export const defaultCategoryMap: Record<string, { icon: string; severity: CatSeverity }> = {
+  'hava durumu': { icon: 'CloudSun', severity: 'info' },
+  'hava': { icon: 'CloudSun', severity: 'info' },
+  'sıcaklık': { icon: 'Thermometer', severity: 'info' },
+  'weather': { icon: 'CloudSun', severity: 'info' },
+  'rüzgar': { icon: 'Wind', severity: 'warning' },
+  'yağış': { icon: 'CloudRain', severity: 'warning' },
+  'yağmur': { icon: 'CloudRain', severity: 'warning' },
+  'güvenlik': { icon: 'ShieldCheck', severity: 'danger' },
+  'uyarı': { icon: 'AlertTriangle', severity: 'danger' },
+  'dikkat': { icon: 'AlertTriangle', severity: 'danger' },
+  'duyuru': { icon: 'Megaphone', severity: 'warning' },
+  'ekipman': { icon: 'Backpack', severity: 'info' },
+  'malzeme': { icon: 'Package', severity: 'info' },
+  'kamp alanı': { icon: 'campground', severity: 'good' },
+  'kamp': { icon: 'campground', severity: 'good' },
+  'konum': { icon: 'MapPin', severity: 'good' },
+  'lokasyon': { icon: 'MapPin', severity: 'good' },
+  'mesafe': { icon: 'Route', severity: 'info' },
+  'yorum': { icon: 'MessageSquare', severity: 'info' },
+  'ulaşım': { icon: 'Route', severity: 'info' },
+  'yol': { icon: 'Route', severity: 'info' },
+  'genel': { icon: 'ClipboardList', severity: 'info' },
+  'özet': { icon: 'BarChart3', severity: 'good' },
+  'sonuç': { icon: 'CheckCircle2', severity: 'good' },
+  'öneri': { icon: 'Lightbulb', severity: 'info' },
+  'not': { icon: 'StickyNote', severity: 'info' },
+  'puan': { icon: 'Star', severity: 'good' },
+  'skor': { icon: 'Star', severity: 'good' },
+  'değerlendirme': { icon: 'Sparkles', severity: 'good' },
+  'yakın': { icon: 'Compass', severity: 'info' },
+  'alternatif': { icon: 'ArrowRightLeft', severity: 'info' },
+  'alternatif kamp': { icon: 'MapPin', severity: 'info' },
+};
+
+export const DEFAULT_CATEGORY_ACCENTS: Record<CatSeverity, { accentLight: string; accentDark: string; bgLight: string; borderLight: string; iconBgLight: string }> = {
+  good:    { accentLight: '#059669', accentDark: '#4ADE80', bgLight: '#F0FDF4', borderLight: '#BBF7D0', iconBgLight: '#D1FAE5' },
+  warning: { accentLight: '#D97706', accentDark: '#FBBF24', bgLight: '#FFFBEB', borderLight: '#FDE68A', iconBgLight: '#FEF3C7' },
+  danger:  { accentLight: '#EF4444', accentDark: '#FB7185', bgLight: '#FEF2F2', borderLight: '#FECACA', iconBgLight: '#FEE2E2' },
+  info:    { accentLight: '#3B82F6', accentDark: '#60A5FA', bgLight: '#EFF6FF', borderLight: '#BFDBFE', iconBgLight: '#DBEAFE' },
 };
 
 // ─── Mod türleri ───
@@ -51,7 +96,27 @@ const ThemeContext = createContext<ThemeContextType>({
 });
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const systemScheme = useColorScheme();
+  // useColorScheme may not always trigger in every environment reliably,
+  // so keep a local state and also subscribe to Appearance changes to
+  // ensure the app reacts when the OS theme toggles.
+  const rawSystemScheme = useColorScheme();
+  const [systemScheme, setSystemScheme] = useState<'light' | 'dark'>(rawSystemScheme === 'dark' ? 'dark' : 'light');
+
+  // Keep state in-sync with the hook value
+  useEffect(() => {
+    if (rawSystemScheme) setSystemScheme(rawSystemScheme === 'dark' ? 'dark' : 'light');
+  }, [rawSystemScheme]);
+
+  // Also attach a low-level Appearance listener for extra reliability
+  useEffect(() => {
+    const sub = Appearance.addChangeListener((appearance) => {
+      const cs = appearance?.colorScheme === 'dark' ? 'dark' : 'light';
+      setSystemScheme(cs);
+    });
+    return () => {
+      try { sub.remove(); } catch { /* ignore on platforms that return unsubscribe fn */ }
+    };
+  }, []);
   const [paletteId, setPaletteIdState] = useState<string>(defaultPaletteId);
   const [colorMode, setColorModeState] = useState<ColorMode>('system');
   const [loaded, setLoaded] = useState(false);

@@ -99,7 +99,10 @@ export default function CampingAreaSearchBar({ campingAreas, onSelect, onShowOnM
       {results.length > 0 && (
         <FlatList
           data={results}
-          keyExtractor={item => String(item.id)}
+          keyExtractor={(item, index) => {
+            const base = (item as any)?.id ?? (item as any)?.uuid ?? 'area';
+            return `${String(base)}-${index}`;
+          }}
           renderItem={({ item }) => (
             <TouchableOpacity style={[styles.item, { borderBottomColor: colors.border }]} onPress={() => onSelect(item)}>
               <View style={{ flex: 1 }}>

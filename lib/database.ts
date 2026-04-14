@@ -4,6 +4,7 @@ import { getToken } from './auth';
 import { generateUUID } from './uuid';
 import { getLastCampingAreaSync, setLastCampingAreaSync } from './deltaSyncStorage';
 import * as SQLite from 'expo-sqlite';
+import { valilikIdToProvinceName } from './provinceMap';
 
 import type { CampingTypeId } from './categories';
 
@@ -44,6 +45,7 @@ export interface CampingArea {
   images?: string[];
   distance_km?: number;
   friend_user_ids?: string[];
+  province?: any;
 }
 
 export interface Favorite {
@@ -91,14 +93,77 @@ export class DatabaseManager {
     }
   // Tüm kamp alanlarını döndürür
   async listCampingAreas() {
-    if (!this.db) await this.init();
-    const rows = await this.db!.getAllAsync('SELECT * FROM camping_areas WHERE deleted = 0 ORDER BY name ASC');
-    return rows;
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
+      const rows = await this.db!.getAllAsync('SELECT * FROM camping_areas WHERE deleted = 0 ORDER BY name ASC');
+      return rows;
+    }, 'listCampingAreas');
   }
 
+  async listCampingAreasByProvince(valilikIds: number[]) {
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
+      if (!Array.isArray(valilikIds) || valilikIds.length === 0) {
+        return [];
+      }
+
+      const likeClauses: string[] = [];
+      const params: any[] = [];
+      const provinceNames = valilikIds
+        .map(id => valilikIdToProvinceName[id])
+        .filter(Boolean) as string[];
+
+      valilikIds.forEach(id => {
+        likeClauses.push('province LIKE ?');
+        params.push(`%"plaka":${id}%`);
+        likeClauses.push('province LIKE ?');
+        params.push(`%"plaka":"${id}"%`);
+      });
+
+      provinceNames.forEach(name => {
+        likeClauses.push('province LIKE ?');
+        params.push(`%${name}%`);
+      });
+
+      const query = `
+        SELECT * FROM camping_areas
+        WHERE status = 'active' AND deleted = 0 AND province IS NOT NULL AND province != ''
+          AND (${likeClauses.join(' OR ')})
+        ORDER BY name
+      `;
+
+      const rows = await this.db!.getAllAsync(query, params);
+      return (rows as any[])
+        .map((row: any) => {
+          const obj: any = { ...row };
+          try { obj.amenities = typeof row.amenities === 'string' ? JSON.parse(row.amenities || '[]') : row.amenities; } catch { obj.amenities = []; }
+          try { obj.tags = typeof row.tags === 'string' ? JSON.parse(row.tags || '{}') : row.tags; } catch { obj.tags = {}; }
+          try { obj.images = typeof row.images === 'string' ? JSON.parse(row.images || '[]') : (row.images || []); } catch { obj.images = []; }
+          try { obj.facilities = typeof row.facilities === 'string' ? JSON.parse(row.facilities || '[]') : row.facilities; } catch { obj.facilities = []; }
+          try { obj.accessibility = typeof row.accessibility === 'string' ? JSON.parse(row.accessibility || '[]') : row.accessibility; } catch { obj.accessibility = []; }
+          try { obj.social_media = typeof row.social_media === 'string' ? JSON.parse(row.social_media || '{}') : row.social_media; } catch { obj.social_media = {}; }
+          try { obj.photo_links = typeof row.photo_links === 'string' ? JSON.parse(row.photo_links || '[]') : row.photo_links; } catch { obj.photo_links = []; }
+          try { obj.province = typeof row.province === 'string' && row.province ? JSON.parse(row.province) : (row.province || null); } catch { obj.province = row.province || null; }
+          try { obj.friend_user_ids = typeof row.friend_user_ids === 'string' ? JSON.parse(row.friend_user_ids || '[]') : row.friend_user_ids; } catch { obj.friend_user_ids = []; }
+          try {
+            if (typeof row.opening_hours === 'string' && row.opening_hours.trim().length > 0 && (row.opening_hours.trim().startsWith('{') || row.opening_hours.trim().startsWith('['))) {
+              obj.opening_hours = JSON.parse(row.opening_hours);
+            } else {
+              obj.opening_hours = row.opening_hours;
+            }
+          } catch { obj.opening_hours = row.opening_hours; }
+          obj.owner_id = row.owner_id !== undefined && row.owner_id !== null ? String(row.owner_id) : '';
+          obj.community_id = row.community_id !== undefined && row.community_id !== null ? row.community_id : undefined;
+          obj.fee = row.fee === null ? null : Boolean(row.fee);
+          obj.owner_username = row.owner_username ?? '';
+          return obj;
+        }) as CampingArea[];
+    }, 'listCampingAreasByProvince');
+  }
 
   async getCampingAreaById(id: number): Promise<CampingArea | null> {
-    if (!this.db) await this.init();
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
     const row = await this.db!.getFirstAsync('SELECT * FROM camping_areas WHERE id = ?', [id]);
     if (!row) return null;
     const r = row as any;
@@ -110,6 +175,7 @@ export class DatabaseManager {
     try { obj.accessibility = typeof r.accessibility === 'string' ? JSON.parse(r.accessibility || '[]') : (r.accessibility || []); } catch { obj.accessibility = []; }
     try { obj.social_media = typeof r.social_media === 'string' ? JSON.parse(r.social_media || '{}') : (r.social_media || {}); } catch { obj.social_media = {}; }
     try { obj.photo_links = typeof r.photo_links === 'string' ? JSON.parse(r.photo_links || '[]') : (r.photo_links || []); } catch { obj.photo_links = []; }
+    try { obj.province = typeof r.province === 'string' && r.province ? JSON.parse(r.province) : (r.province || null); } catch { obj.province = r.province || null; }
     try { obj.friend_user_ids = typeof r.friend_user_ids === 'string' ? JSON.parse(r.friend_user_ids || '[]') : r.friend_user_ids; } catch { obj.friend_user_ids = []; }
     
     console.log('[DB][getCampingAreaById] Raw opening_hours from database:', r.opening_hours, typeof r.opening_hours);
@@ -129,6 +195,7 @@ export class DatabaseManager {
     obj.fee = r.fee === null ? null : Boolean(r.fee);
     obj.owner_username = r.owner_username ?? '';
     return obj as CampingArea;
+    }, 'getCampingAreaById');
   }
   // Lokal veritabanı dosyasını sil (tamamen sıfırlar)
   async deleteDatabaseFile() {
@@ -670,8 +737,9 @@ export class DatabaseManager {
   }
 
   async getAnnouncementLocal(id: number) {
-    if (!this.db) await this.init();
-  const row = await this.db!.getFirstAsync(`SELECT * FROM announcements WHERE id = ? AND deleted = 0 AND aktif = 1`, [id]);
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
+      const row = await this.db!.getFirstAsync(`SELECT * FROM announcements WHERE id = ? AND deleted = 0 AND aktif = 1`, [id]);
   if (!row) return null;
   const ann = row as any;
   try { ann.keywords = typeof ann.keywords === 'string' ? JSON.parse(ann.keywords || '[]') : (ann.keywords || []); } catch { ann.keywords = []; }
@@ -719,11 +787,13 @@ export class DatabaseManager {
   }
   
   return ann;
+    }, 'getAnnouncementLocal');
   }
 
   async listAnnouncementsLocal({ community_id, valilik_id, onlyActive = true }: { community_id?: number; valilik_id?: number; onlyActive?: boolean } = {}) {
-    if (!this.db) await this.init();
-  let where = 'deleted = 0 AND aktif = 1';
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
+      let where = 'deleted = 0 AND aktif = 1';
     const params: any[] = [];
     if (onlyActive) {
       where += ` AND status = 'active'`;
@@ -784,6 +854,7 @@ export class DatabaseManager {
       
       return row;
     });
+    }, 'listAnnouncementsLocal');
   }
   // uuid ile local id (ve varsa external_id) güncelle
   async updateCampingAreaIdByUuid(uuid: string, newId: number, externalId?: string) {
@@ -983,20 +1054,19 @@ export class DatabaseManager {
         // Prepared statements — döngü dışında bir kez hazırla, N kez executeAsync çağır
         // (Her runAsync çağrısı dahili prepare+execute+finalize yapar — N kayıt için N×overhead)
         // (prepareAsync ile 1×prepare + N×execute + 1×finalize — çok daha hızlı)
-        const updateStmt = await this.db!.prepareAsync(
-          `UPDATE camping_areas SET 
+        const updateSql = `UPDATE camping_areas SET 
             name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
             capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
             social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
-            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?
-           WHERE external_id = ?`
-        );
-        const insertStmt = await this.db!.prepareAsync(
-          `INSERT INTO camping_areas (
+            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?, province = ?
+           WHERE external_id = ?`;
+        const insertSql = `INSERT INTO camping_areas (
             name, latitude, longitude, type, description, website, phone, opening_hours, capacity, fee, status, rating, review_count, price_range,
-            facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images, friend_user_ids, community_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
+            facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images, province, friend_user_ids, community_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+        const updateStmt = await this._withDbRetry(() => this.db!.prepareAsync(updateSql), 'fetchAndStore:updateStmt');
+        const insertStmt = await this._withDbRetry(() => this.db!.prepareAsync(insertSql), 'fetchAndStore:insertStmt');
 
         try {
         for (const item of data) {
@@ -1062,6 +1132,9 @@ export class DatabaseManager {
             ? (Array.isArray(item.friend_user_ids) ? JSON.stringify(item.friend_user_ids) : (item.friend_user_ids || '[]'))
             : null;
           const communityIdVal = item.community_id ?? null;
+          const provinceStr = (item.province !== undefined && item.province !== null)
+            ? (typeof item.province === 'object' ? JSON.stringify(item.province) : String(item.province))
+            : null;
           
           // Fee değerini loglayalım
           if (item.external_id === '1472' || item.id === 1472) {
@@ -1112,6 +1185,7 @@ export class DatabaseManager {
                 imagesStr,
                 friendUserIdsStr,
                 communityIdVal,
+                provinceStr,
                 item.external_id ?? ''
               ]
             );
@@ -1167,6 +1241,7 @@ export class DatabaseManager {
                     imagesStr,
                     friendUserIdsStr,
                     communityIdVal,
+                    provinceStr,
                     item.external_id ?? ''
                   ]
                 );
@@ -1216,6 +1291,7 @@ export class DatabaseManager {
                       imagesStr,
                       friendUserIdsStr,
                       communityIdVal,
+                      provinceStr,
                       item.external_id ?? ''
                     ]
                   );
@@ -1254,6 +1330,7 @@ export class DatabaseManager {
                 amenitiesStr,
                 tagsStr,
                 imagesStr,
+                provinceStr,
                 friendUserIdsStr ?? '[]',
                 communityIdVal
               ]
@@ -1663,6 +1740,7 @@ export class DatabaseManager {
           amenities TEXT DEFAULT '[]',
           tags TEXT DEFAULT '{}',
           images TEXT DEFAULT '[]',
+          province TEXT,
           deleted INTEGER DEFAULT 0
         );
       `);
@@ -1677,6 +1755,10 @@ export class DatabaseManager {
     // Migration: community_id kolonu yoksa ekle
     if (!tableInfo2.some((col: any) => col.name === 'community_id')) {
       await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN community_id INTEGER;");
+    }
+    // Migration: province kolonu yoksa ekle
+    if (!tableInfo2.some((col: any) => col.name === 'province')) {
+      await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN province TEXT;");
     }
     await this.db.execAsync(`
       CREATE INDEX IF NOT EXISTS idx_camping_areas_location ON camping_areas(latitude, longitude);
@@ -1735,6 +1817,21 @@ export class DatabaseManager {
   const socialMediaStr = typeof area.social_media === 'object' ? JSON.stringify(area.social_media || {}) : (area.social_media || '{}');
   const photoLinksStr = Array.isArray(area.photo_links) ? JSON.stringify(area.photo_links) : (area.photo_links || '[]');
   const amenitiesStr = Array.isArray(area.amenities) ? JSON.stringify(area.amenities) : (area.amenities || '[]');
+    let provinceStr = (area as any).province ? (typeof (area as any).province === 'object' ? JSON.stringify((area as any).province) : String((area as any).province)) : null;
+    // Eğer province verilmemişse, koordinatlardan otomatik doldurmaya çalış
+    if ((!provinceStr || provinceStr === 'null') && (area as any).latitude && (area as any).longitude) {
+      try {
+        const { getProvinceInfoFromOSM } = require('./osmReverseGeocode');
+        // await içinde çalışıyoruz (this function zaten enqueue içinde async)
+        const prov = await getProvinceInfoFromOSM(Number((area as any).latitude), Number((area as any).longitude));
+        if (prov) {
+          // provinceStr JSON string olarak saklanacak
+          try { (area as any).province = prov; provinceStr = JSON.stringify(prov); } catch { provinceStr = JSON.stringify(prov); }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
   // tags alanı: type güncellendiğinde tags içindeki type da güncellenmeli
   let tagsObj: any = {};
   if (area.tags && typeof area.tags === 'string') {
@@ -1792,7 +1889,7 @@ export class DatabaseManager {
             capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
             social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?,
             owner_username = COALESCE(NULLIF(?, ''), owner_username), updated_at = CURRENT_TIMESTAMP,
-            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = ?, community_id = ?
+            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = ?, community_id = ?, province = ?
            WHERE external_id = ?`;
           updateParams = [
             area.uuid ?? null,
@@ -1829,6 +1926,7 @@ export class DatabaseManager {
             imagesStr,
             friendUserIdsStr,
             area.community_id ?? null,
+            provinceStr,
             area.external_id ?? ''
           ];
         }
@@ -1846,7 +1944,7 @@ export class DatabaseManager {
             capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
             social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = ?, owner_id = ?,
             owner_username = COALESCE(NULLIF(?, ''), owner_username), updated_at = CURRENT_TIMESTAMP,
-            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = ?, community_id = ?
+            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = ?, community_id = ?, province = ?
            WHERE uuid = ?`;
           const uuidUpdateParams = [
             area.name, latitude, longitude, area.type,
@@ -1857,7 +1955,7 @@ export class DatabaseManager {
             (['public', 'private', 'community', 'friends'].includes(area.visibility as string) ? area.visibility : 'private'),
             area.owner_id ?? '', (area as any).owner_username ?? '',
             area.source_id ?? '', photoLinksStr, amenitiesStr, tagsStr, imagesStr, friendUserIdsStr,
-            area.community_id ?? null, area.uuid,
+            area.community_id ?? null, provinceStr, area.uuid,
           ];
           result = await this.db!.runAsync(uuidUpdateQuery, uuidUpdateParams);
           console.log('[DB][insertOrUpdateCampingArea] uuid ile güncelleme:', { uuid: area.uuid, changes: result.changes });
@@ -1873,8 +1971,8 @@ export class DatabaseManager {
           const insertResult = await this.db!.runAsync(
             `INSERT INTO camping_areas (
               uuid, name, latitude, longitude, type, description, website, phone, opening_hours, capacity, fee, status, rating, review_count, price_range,
-              facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, friend_user_ids, community_id, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`
+              facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, friend_user_ids, community_id, province, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`
             , [
               uuid,
               area.name ?? '',
@@ -1902,6 +2000,7 @@ export class DatabaseManager {
               (area as any).owner_username ?? '',
               friendUserIdsStr,
               area.community_id ?? null,
+              provinceStr,
               // created_at ve updated_at için parametre yok!
               area.external_id ?? '', // external_id
               area.source_id ?? '',
@@ -1947,7 +2046,8 @@ export class DatabaseManager {
     distanceFromLatitude?: number,
     distanceFromLongitude?: number
   ): Promise<CampingArea[]> {
-    if (!this.db) await this.init();
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
 
     // Bounding box hesapla — SQL tarafında kaba filtreleme (tam Haversine'dan çok daha hızlı)
     // 1 derece enlem ≈ 111 km, 1 derece boylam ≈ 111 km × cos(enlem)
@@ -2011,7 +2111,6 @@ export class DatabaseManager {
         END,
         name
     `;
-  // ...existing code...
 
     // LOG EKLENDİ
     console.log('[DB][searchCampingAreasByLocation] Query:', query);
@@ -2120,13 +2219,12 @@ export class DatabaseManager {
         } as CampingArea;
       });
       
-      // ...existing code...
-      
       return filteredAreas;
     } catch (error) {
       console.error('Error searching camping areas:', error);
       throw error;
     }
+    }, 'searchCampingAreasByLocation');
   }
 
   async deleteCampingArea(id: number) {
@@ -2201,7 +2299,8 @@ export class DatabaseManager {
   }
 
   async getFavorites(): Promise<CampingArea[]> {
-    if (!this.db) await this.init();
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
     try {
       // Tablo yoksa boş dizi döndür
       const tables = await this.db!.getAllAsync(`SELECT name FROM sqlite_master WHERE type='table' AND name='camping_areas';`);
@@ -2242,6 +2341,7 @@ export class DatabaseManager {
       console.error('Error getting favorites:', error);
       return [];
     }
+    }, 'getFavorites');
   }
 
   // Haversine formula to calculate distance between two points
@@ -2312,6 +2412,7 @@ export class DatabaseManager {
           try { obj.accessibility = typeof row.accessibility === 'string' ? JSON.parse(row.accessibility || '[]') : (row.accessibility || []); } catch { obj.accessibility = []; }
           try { obj.social_media = typeof row.social_media === 'string' ? JSON.parse(row.social_media || '{}') : (row.social_media || {}); } catch { obj.social_media = {}; }
           try { obj.photo_links = typeof row.photo_links === 'string' ? JSON.parse(row.photo_links || '[]') : (row.photo_links || []); } catch { obj.photo_links = []; }
+          try { obj.province = typeof row.province === 'string' && row.province ? JSON.parse(row.province) : (row.province || null); } catch { obj.province = row.province || null; }
           try { obj.friend_user_ids = typeof row.friend_user_ids === 'string' ? JSON.parse(row.friend_user_ids || '[]') : row.friend_user_ids; } catch { obj.friend_user_ids = []; }
           try {
             if (typeof row.opening_hours === 'string' && row.opening_hours.trim().length > 0 && (row.opening_hours.trim().startsWith('{') || row.opening_hours.trim().startsWith('['))) {
@@ -2385,42 +2486,48 @@ export class DatabaseManager {
    * Belirli bir kullanıcının topluluktaki rolünü getirir
    */
   async getUserRoleInCommunity(community_id: number, user_id: number): Promise<string | null> {
-    if (!this.db) await this.init();
-    const row = await this.db!.getFirstAsync(
-      `SELECT role FROM community_members WHERE community_id = ? AND user_id = ? AND status = 'active'`,
-      [community_id, user_id]
-    ) as { role?: string } | undefined;
-    return row && typeof row.role === 'string' ? row.role : null;
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
+      const row = await this.db!.getFirstAsync(
+        `SELECT role FROM community_members WHERE community_id = ? AND user_id = ? AND status = 'active'`,
+        [community_id, user_id]
+      ) as { role?: string } | undefined;
+      return row && typeof row.role === 'string' ? row.role : null;
+    }, 'getUserRoleInCommunity');
   }
 
   /**
    * Belirli bir kullanıcının topluluktaki rolünü ve durumunu getirir
    */
   async getUserMembershipInCommunity(community_id: number, user_id: number): Promise<{ role: string; status: string } | null> {
-    if (!this.db) await this.init();
-    const row = await this.db!.getFirstAsync(
-      `SELECT role, status FROM community_members WHERE community_id = ? AND user_id = ?`,
-      [community_id, user_id]
-    ) as { role?: string; status?: string } | undefined;
-    if (row && typeof row.role === 'string' && typeof row.status === 'string') {
-      return { role: row.role, status: row.status };
-    }
-    return null;
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
+      const row = await this.db!.getFirstAsync(
+        `SELECT role, status FROM community_members WHERE community_id = ? AND user_id = ?`,
+        [community_id, user_id]
+      ) as { role?: string; status?: string } | undefined;
+      if (row && typeof row.role === 'string' && typeof row.status === 'string') {
+        return { role: row.role, status: row.status };
+      }
+      return null;
+    }, 'getUserMembershipInCommunity');
   }
   /**
    * Kullanılan SQLite veritabanındaki tüm tablo adlarını logla (debug için)
    */
   async listAllTables() {
-    if (!this.db) await this.init();
-    try {
-      const tables = await this.db!.getAllAsync("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;");
-      const tableNames = tables.map((t: any) => t.name);
-      console.log('[DB][listAllTables] Mevcut tablolar:', tableNames);
-      return tableNames;
-    } catch (err) {
-      console.error('[DB][listAllTables] Tablo listesi alınamadı:', err);
-      return [];
-    }
+    return this._withDbRetry(async () => {
+      if (!this.db) await this.init();
+      try {
+        const tables = await this.db!.getAllAsync("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;");
+        const tableNames = tables.map((t: any) => t.name);
+        console.log('[DB][listAllTables] Mevcut tablolar:', tableNames);
+        return tableNames;
+      } catch (err) {
+        console.error('[DB][listAllTables] Tablo listesi alınamadı:', err);
+        return [];
+      }
+    }, 'listAllTables');
   }
 }
 

@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Check, CheckSquare, Square, Map, Crown } from 'lucide-react-native';
 import { campingTypes } from '../lib/categories';
 import type { CampingArea } from '../lib/database';
+import { valilikIdToProvinceName } from '../lib/provinceMap';
 import { useTheme } from './ThemeProvider';
 import { createThemedStyles } from '../constants/theme/sharedStyles';
 
@@ -26,6 +27,8 @@ interface Props {
   filteredAreas?: CampingArea[];
   turkeyWideFilters?: string[];
   onTurkeyWideToggle?: (key: string) => void;
+  selectedProvinces?: number[];
+  onProvinceToggle?: (id: number) => void;
   isOffline?: boolean;
   isPremium?: boolean;
 }
@@ -38,7 +41,7 @@ function ModernCheckbox({ checked, disabled }: { checked: boolean; disabled?: bo
       style={[
         styles.checkbox,
         { backgroundColor: colors.surface, borderColor: colors.border },
-        checked && styles.checkboxChecked,
+        checked && { backgroundColor: colors.primary, borderColor: colors.primary },
         disabled && styles.checkboxDisabled,
       ]}
     >
@@ -60,10 +63,13 @@ export default function CampingAreaFilters({
   userId,
   turkeyWideFilters = [],
   onTurkeyWideToggle,
+  selectedProvinces = [],
+  onProvinceToggle,
   isOffline = false,
   isPremium = false,
 }: Props & { userId?: string | number }) {
   const { colors } = useTheme();
+  const [provinceQuery, setProvinceQuery] = React.useState('');
   const themed = createThemedStyles(colors);
   const router = useRouter();
   // Türkiye geneli checkbox gösterilecek filtre anahtarları
@@ -109,8 +115,8 @@ export default function CampingAreaFilters({
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Kullanıcı Filtresi</Text>
           {onTurkeyWideToggle && (
             <View style={styles.turkeyHeaderHint}>
-              <Map size={15} color={isOffline ? colors.border : '#f97316'} strokeWidth={2} />
-              <Text style={[styles.turkeyHeaderHintText, isOffline && { color: colors.border }]}>Tüm TR</Text>
+              <Map size={15} color={isOffline ? colors.border : colors.primary} strokeWidth={2} />
+              <Text style={[styles.turkeyHeaderHintText, isOffline ? { color: colors.border } : { color: colors.primary }]}>Tüm TR</Text>
             </View>
           )}
         </View>
@@ -140,7 +146,9 @@ export default function CampingAreaFilters({
                     style={[
                       styles.userFilterLabel,
                       { color: colors.text },
-                      (filter.disabled || disabledByTurkey) && styles.userFilterLabelDisabled,
+                      (filter.disabled || disabledByTurkey) && {
+                        color: colors.textSecondary,
+                      },
                     ]}
                   >
                     {filter.label} ({count})
@@ -155,7 +163,10 @@ export default function CampingAreaFilters({
                         style={[
                           styles.turkeyCheckbox,
                           { backgroundColor: colors.surface, borderColor: colors.border },
-                          turkeyWideFilters.includes(filter.key) && !lockedByPremium && styles.turkeyCheckboxActive,
+                          turkeyWideFilters.includes(filter.key) && !lockedByPremium && {
+                            backgroundColor: colors.surfaceVariant,
+                            borderColor: colors.primary,
+                          },
                           (disabled || isOffline) && !lockedByPremium && { opacity: 0.35 },
                           lockedByPremium && styles.turkeyCheckboxLocked,
                         ]}
@@ -191,7 +202,82 @@ export default function CampingAreaFilters({
         </View>
       </View>
 
-      {/* Kamp Türleri Bölümü */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>İl Filtresi</Text>
+        </View>
+        <TextInput
+          value={provinceQuery}
+          onChangeText={setProvinceQuery}
+          placeholder="İl ara..."
+          placeholderTextColor={colors.muted}
+          style={[styles.provinceSearchInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+          editable={!disabled}
+        />
+        {selectedProvinces.length > 0 && (
+          <View style={{ gap: 10, marginBottom: 10 }}>
+            <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Seçilen iller</Text>
+            <View style={styles.provinceFiltersGrid}>
+              {selectedProvinces
+                .slice()
+                .sort((a, b) => a - b)
+                .map(provinceId => {
+                  const name = valilikIdToProvinceName[provinceId] || String(provinceId);
+                  return (
+                    <TouchableOpacity
+                      key={provinceId}
+                      style={[
+                        styles.provinceChip,
+                        { backgroundColor: colors.primary, borderColor: colors.primary },
+                        disabled && styles.provinceChipDisabled,
+                      ]}
+                      onPress={() => !disabled && onProvinceToggle?.(provinceId)}
+                      disabled={disabled}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.provinceChipLabel, { color: colors.surface }]}>{name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+            </View>
+          </View>
+        )}
+        {provinceQuery.trim().length > 0 ? (
+          <View style={styles.provinceFiltersGrid}>
+            {Object.entries(valilikIdToProvinceName)
+              .sort(([a], [b]) => Number(a) - Number(b))
+              .filter(([id, name]) => {
+                const query = provinceQuery.trim().toLowerCase();
+                const provinceId = Number(id);
+                if (selectedProvinces?.includes(provinceId)) {
+                  return false;
+                }
+                return name.toLowerCase().includes(query) || id.includes(query);
+              })
+              .map(([id, name]) => {
+                const provinceId = Number(id);
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    style={[
+                      styles.provinceChip,
+                      { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                      disabled && styles.provinceChipDisabled,
+                    ]}
+                    onPress={() => !disabled && onProvinceToggle?.(provinceId)}
+                    disabled={disabled}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.provinceChipLabel, { color: colors.textSecondary }]}>{name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+          </View>
+        ) : selectedProvinces.length === 0 ? (
+          <Text style={[styles.provinceHintText, { color: colors.textSecondary }]}>İl listesi arama yapıldığında gösterilir.</Text>
+        ) : null}
+      </View>
+
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Kamp Türleri</Text>
@@ -219,7 +305,11 @@ export default function CampingAreaFilters({
                 key={type.id}
                 style={[
                   styles.campingTypeChip,
-                  isSelected && styles.campingTypeChipActive,
+                  { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
+                  isSelected && {
+                    backgroundColor: colors.primary,
+                    borderColor: colors.primary,
+                  },
                 ]}
                 onPress={() => !disabled && onCampingTypeToggle(type.id)}
                 disabled={disabled}
@@ -228,7 +318,8 @@ export default function CampingAreaFilters({
                 <Text
                   style={[
                     styles.campingTypeLabel,
-                    isSelected && styles.campingTypeLabelActive,
+                    { color: colors.textSecondary },
+                    isSelected && { color: colors.surface },
                   ]}
                 >
                   {type.label} ({count})
@@ -276,8 +367,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
     letterSpacing: 0.2,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
   },
   toggleAllButton: {
     padding: 4,
@@ -295,10 +390,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: '#f9fafb',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
   },
   userFilterItemFlex: {
     flex: 1,
@@ -312,15 +405,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 10,
     paddingHorizontal: 10,
-    backgroundColor: '#f9fafb',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
     minWidth: 48,
   },
   turkeyCheckboxActive: {
-    backgroundColor: '#fff7ed',
-    borderColor: '#f97316',
+    borderWidth: 1,
   },
   turkeyCheckboxLocked: {
     opacity: 0.5,
@@ -329,14 +419,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -10,
     right: 0,
-    backgroundColor: '#059669', // semantic: premium badge green
     borderRadius: 10,
     width: 18,
     height: 18,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: '#fff',
   },
   turkeyHeaderHint: {
     flexDirection: 'row',
@@ -346,31 +434,25 @@ const styles = StyleSheet.create({
   turkeyHeaderHintText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#f97316',
   },
   userFilterLabel: {
     fontSize: 15,
     fontWeight: '500',
-    color: '#374151',
     marginLeft: 12,
     flex: 1,
   },
   userFilterLabelDisabled: {
-    color: '#9ca3af',
+    opacity: 0.5,
   },
   checkbox: {
     width: 24,
     height: 24,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#d1d5db',
-    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#059669', // overridden by theme at runtime where needed
-    borderColor: '#059669',
   },
   checkboxDisabled: {
     opacity: 0.5,
@@ -384,13 +466,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 8,
-    backgroundColor: '#f3f4f6',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
   },
   campingTypeChipActive: {
-    backgroundColor: '#059669',
-    borderColor: '#059669',
   },
   campingTypeLabel: {
     fontSize: 13,
@@ -400,19 +478,54 @@ const styles = StyleSheet.create({
   campingTypeLabelActive: {
     color: '#fff',
   },
+  provinceSearchInput: {
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  provinceFiltersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  provinceHintText: {
+    fontSize: 13,
+    marginTop: 6,
+  },
+  provinceChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    minWidth: 72,
+    alignItems: 'center',
+  },
+  provinceChipActive: {
+  },
+  provinceChipDisabled: {
+    opacity: 0.5,
+  },
+  provinceChipLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  provinceChipLabelActive: {
+  },
   applyContainer: {
     paddingTop: 10,
     paddingBottom: 4,
     borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-    backgroundColor: '#fff',
   },
   applyButton: {
-    backgroundColor: '#059669',
     paddingVertical: 13,
     borderRadius: 12,
     alignItems: 'center',
-    shadowColor: '#059669',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,

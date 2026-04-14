@@ -3,15 +3,18 @@ import { useEffect, useState } from 'react';
 import { getMe } from '../../lib/userCommunityApi';
 import { checkAndHandleAppVersion } from '../../lib/appVersion';
 import { getDatabase } from '../../lib/database';
-import { Map, Heart, User, SquareCheck as CheckSquare, Bell, Crown } from 'lucide-react-native';
+import { Map, Heart, User, SquareCheck as CheckSquare, Bell, Crown, MessageCircle } from 'lucide-react-native';
 import { View, TouchableOpacity, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { emit } from '../../lib/eventBus';
 import { useTheme } from '../../components/ThemeProvider';
+import { useChatUnread } from '../../hooks/useChatUnread';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [isPremium, setIsPremium] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(true);
   const insets = useSafeAreaInsets();
@@ -41,8 +44,10 @@ export default function TabLayout() {
       try {
         const me = await getMe();
         setUserRole(me?.role || (me?.user?.role ?? null));
+        setIsPremium(!!(me?.is_premium || me?.user?.is_premium || me?.offline_enabled || me?.user?.offline_enabled));
       } catch {
         setUserRole(null);
+        setIsPremium(false);
       } finally {
         setLoading(false);
       }
@@ -66,6 +71,7 @@ export default function TabLayout() {
 
   // Guest ise erişilemeyen sekmeler
   const guestDisabled = userRole === 'guest';
+  const { unread } = useChatUnread();
 
   // Sekme yapılandırması
   const tabScreens = [
@@ -94,6 +100,12 @@ export default function TabLayout() {
       disabled: false,
     },
     {
+      name: 'new',
+      label: 'Sohbet',
+      icon: MessageCircle,
+      disabled: false,
+    },
+    {
       name: 'profile',
       label: 'Profil',
       icon: User,
@@ -102,6 +114,13 @@ export default function TabLayout() {
   ];
 
   if (loading) return null;
+
+  const tabLabelStyle = {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    marginTop: 4,
+    lineHeight: 16,
+  };
 
   return (
     <Tabs
@@ -117,11 +136,7 @@ export default function TabLayout() {
         },
         tabBarActiveTintColor: colors.tabBarActive,
         tabBarInactiveTintColor: colors.tabBarInactive,
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
-          marginTop: 4,
-        },
+        tabBarLabelStyle: tabLabelStyle,
       }}
     >
       {tabScreens.map(tab => (
@@ -130,12 +145,10 @@ export default function TabLayout() {
           name={tab.name}
           options={{
             tabBarLabel: ({ color }) => (
-              <Text style={{
+              <Text allowFontScaling={false} style={{
+                ...tabLabelStyle,
                 color: tab.disabled ? '#d1d5db' : color,
                 opacity: tab.disabled ? 0.5 : 1,
-                fontWeight: '600',
-                fontSize: 12,
-                marginTop: 4,
               }}>
                 {tab.label}
               </Text>
@@ -143,6 +156,19 @@ export default function TabLayout() {
             tabBarIcon: ({ color, size }) => (
               <View style={{ position: 'relative' }}>
                 <tab.icon color={tab.disabled ? colors.muted : color} size={size} style={{ opacity: tab.disabled ? 0.5 : 1 }} />
+                {tab.name === 'new' && unread > 0 && (
+                  <View style={{
+                    position: 'absolute',
+                    top: -4,
+                    right: -4,
+                    width: 10,
+                    height: 10,
+                    borderRadius: 6,
+                    backgroundColor: '#ef4444',
+                    borderWidth: 1,
+                    borderColor: colors.tabBar,
+                  }} />
+                )}
                 {/* Guest kullanıcı için disabled tab'larda Premium badge */}
                 {guestDisabled && tab.disabled && tab.name !== 'index' && tab.name !== 'favorites' && tab.name !== 'profile' && (
                   <TouchableOpacity
@@ -167,14 +193,16 @@ export default function TabLayout() {
               </View>
             ),
             tabBarButton: ({ children, onPress, accessibilityState }) => (
-              tab.disabled ? (
+                tab.disabled ? (
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() => {
-                    // Guest kullanıcı için disabled tab'lara tıklandığında premium sayfasına yönlendir
-                    if (guestDisabled && (tab.name === 'announcements' || tab.name === 'checklist')) {
+                    // Guest veya non-premium kullanıcı için disabled tab'lara tıklandığında premium sayfasına yönlendir (özellikle sohbet)
+                    if (tab.name === 'announcements' || tab.name === 'checklist') {
                       router.push('/premium' as any);
+                      return;
                     }
+                    // diğer disabled türlerinde pasif bırak
                   }}
                   style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
                 >

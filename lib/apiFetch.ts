@@ -21,9 +21,6 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
       // Token null veya boşsa header'ı kaldır
       delete headers['Authorization'];
       if (__DEV__) console.warn('[apiFetch] Uyarı: API çağrısında boş token gönderilmeye çalışıldı. Kullanıcı login mi?');
-    } else if (headers['Authorization']) {
-      // Token gerçekten gönderiliyor mu logla
-      console.log('[apiFetch] Authorization header:', headers['Authorization']);
     }
   }
   let response = await fetch(input, init);
@@ -56,19 +53,19 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
   // 403 durumunda token yenilemeyi dene (sunucu bazı durumlarda 403 döner)
   if (response.status === 403) {
     const refreshToken = await getRefreshToken();
-    console.log('[apiFetch] 403 alındı, refresh token mevcut mu:', !!refreshToken);
+    if (__DEV__) console.log('[apiFetch] 403 alındı, refresh token mevcut mu:', !!refreshToken);
     if (refreshToken) {
       const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
       });
-      console.log('[apiFetch] 403 refresh yanıtı:', refreshRes.status);
+      if (__DEV__) console.log('[apiFetch] 403 refresh yanıtı:', refreshRes.status);
       if (refreshRes.ok) {
         const data = await refreshRes.json();
         if (data.token) {
           await saveToken(data.token);
-          console.log('[apiFetch] 403 sonrası yeni token kaydedildi, istek tekrarlanıyor...');
+          if (__DEV__) console.log('[apiFetch] 403 sonrası yeni token kaydedildi, istek tekrarlanıyor...');
         }
         if (data.refreshToken) await saveRefreshToken(data.refreshToken);
         // Orijinal isteği yeni token ile tekrar dene
@@ -77,7 +74,7 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
         }
         init.headers = headers;
         response = await fetch(input, init);
-        console.log('[apiFetch] 403 retry yanıtı:', response.status);
+        if (__DEV__) console.log('[apiFetch] 403 retry yanıtı:', response.status);
         // Yine 403 gelirse direkt döndür (gerçek yetki hatası)
         return response;
       }

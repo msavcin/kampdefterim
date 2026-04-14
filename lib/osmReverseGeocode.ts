@@ -114,3 +114,42 @@ export async function getLocationNameFromOSM(lat: number, lon: number): Promise<
     return null;
   }
 }
+
+// İl, ilçe ve plaka (valilik id) bilgilerini obje olarak döndürür
+export async function getProvinceInfoFromOSM(lat: number, lon: number): Promise<{ il: string | null; ilce: string | null; plaka: string | null } | null> {
+  const cacheKey = makeOsmCacheKey(lat, lon) + '_province_obj';
+  const cached = await getCachedOsmResult?.(cacheKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {}
+  }
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=tr&addressdetails=1`;
+    const res = await throttledOsmRequest(() => axios.get(url, { headers: { 'User-Agent': 'KampApp/1.0' } }));
+    const address = res.data?.address || {};
+
+    const il = address.state || address.province || address.city || address.region || null;
+    const ilce = address.county || address.town || address.district || address.city_district || address.suburb || null;
+
+    // Plaka kodunu provinceMap'den bul
+    let plaka: string | null = null;
+    try {
+      const { getValilikIdFromProvinceName } = require('./provinceMap');
+      const vid = getValilikIdFromProvinceName(il || ilce || '');
+      if (vid) plaka = String(vid);
+    } catch (e) {
+      // ignore
+    }
+
+    const obj = { il: il || null, ilce: ilce || null, plaka };
+    // Cache'le
+    if (obj.il || obj.ilce || obj.plaka) {
+      await setCachedOsmResult?.(cacheKey, JSON.stringify(obj));
+    }
+    return obj;
+  } catch (e) {
+    console.log('[OSM] Reverse geocode error:', e);
+    return null;
+  }
+}

@@ -32,6 +32,7 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
   tags = ['campground', 'caravan_site', 'bungalow', 'recreation', 'restaurant', 'camp_store', 'national_park', 'hiking_road', 'touristic_place', 'accommodation', 'parking'],
     autoFetch = true,
     currentUserId,
+    isSuperAdmin = false,
     hasLocationPermission = null, // Varsayılan null (izin durumu bilinmiyor)
   } = options;
 
@@ -64,7 +65,46 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
         const cachedAreas = await getDatabase().listCampingAreas();
         if (!isCancelled && Array.isArray(cachedAreas) && cachedAreas.length > 0) {
           if (__DEV__) console.log('[useCampingAreas] Cached camping areas yüklendi:', cachedAreas.length);
-          setCampingAreas((cachedAreas as CampingArea[]).slice(0, 250));
+          // Eğer hook üzerinde zaten bir fetch başlatıldıysa cachedAreas ile UI'yi ezme
+          if (fetchSequenceRef.current === 0) {
+            setCampingAreas((cachedAreas as CampingArea[]).slice(0, 250));
+          } else {
+            if (__DEV__) console.log('[useCampingAreas:init] Skipped setting cachedAreas because a fetch already started');
+          }
+
+          // Dev-only: eğer cachedAreas içinde province eksikse sunucudan bir kere sync dene
+          if (__DEV__) {
+            try {
+              const missing = (cachedAreas as any[]).filter(a => !a.province).length;
+              console.log('[useCampingAreas:init] cachedAreas missing province count:', missing);
+              if (missing > 0 && !autoSyncProvincesRef.current) {
+                autoSyncProvincesRef.current = true;
+                console.log('[useCampingAreas:init] Eksik province bulundu — server sync başlatılıyor (dev)');
+                (async () => {
+                  try {
+                    const syncResult = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
+                    console.log('[useCampingAreas:init] fetchAndStoreCampingAreasFromAPI result:', syncResult);
+                    if (!isCancelled) {
+                      const fresh = await getDatabase().listCampingAreas();
+                      if (!isCancelled && Array.isArray(fresh) && fresh.length > 0) {
+                        // Yine, eğer kullanıcı tarafından daha güncel bir fetch başlamışsa cached auto-sync ile UI'yi ezme
+                        if (fetchSequenceRef.current === 0) {
+                          setCampingAreas((fresh as CampingArea[]).slice(0, 250));
+                          console.log('[useCampingAreas:init] Local cache güncellendi, yeniden setCampingAreas çağrıldı');
+                        } else {
+                          if (__DEV__) console.log('[useCampingAreas:init] Skipped auto-sync cached update due to newer fetch in progress');
+                        }
+                      }
+                    }
+                  } catch (syncErr) {
+                    console.warn('[useCampingAreas:init] Server sync failed:', syncErr);
+                  }
+                })();
+              }
+            } catch (e) {
+              console.warn('[useCampingAreas:init] auto-sync check error:', e);
+            }
+          }
         }
       } catch (err) {
         console.error('Database initialization error:', err);
@@ -144,7 +184,7 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
     if (autoFetch && lat && lng) {
       fetchCampingAreas(lat, lng, radius, tags);
     }
-  }, [latitude, longitude, location, radius, tags, autoFetch]);
+  }, [latitude, longitude, location, radius, tags, autoFetch, currentUserId, isSuperAdmin]);
 
 
   // --- friend_user_ids filtrelemesini fetchCampingAreas fonksiyonuna taşı ---
@@ -216,8 +256,12 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
     lng: number;
     radius: number;
     tagsKey: string;
+    queryKey: string;
     time: number;
   } | null>(null);
+  const fetchSequenceRef = useRef(0);
+  // Dev-only: otomatik province sync denemesinin tekrarını engelle
+  const autoSyncProvincesRef = useRef(false);
 
   // Haversine distance (km)
   const calcDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -235,15 +279,18 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
     lat: number,
     lng: number,
     searchRadius: number = radius,
-    searchTags: string[] = tags
+    searchTags: string[] = tags,
+    requestId: number
   ) => {
+    const isCurrentRequest = () => requestId === fetchSequenceRef.current;
+
     try {
-      setLoading(true);
-      setError(null);
+      if (isCurrentRequest()) {
+        setLoading(true);
+        setError(null);
+      }
 
       const normalizedTags = searchTags.map(t => t === 'camping' ? 'campground' : t);
-      const isSuperAdmin = (options as any)?.isSuperAdmin === true;
-      const userId = options.currentUserId ? String(options.currentUserId) : undefined;
       const distanceFromLat = location?.coords.latitude ?? lat;
       const distanceFromLng = location?.coords.longitude ?? lng;
       const areas = await getDatabase().searchCampingAreasByLocation(
@@ -252,7 +299,7 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
         searchRadius,
         normalizedTags,
         true,
-        userId,
+        currentUserId ? String(currentUserId) : undefined,
         isSuperAdmin,
         distanceFromLat,
         distanceFromLng
@@ -262,15 +309,56 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
         (typeof area.tags === 'object' && area.tags?.user_submitted === 'yes' && typeof area.tags.type === 'string' && area.tags.type.trim() !== '')
       );
       if (__DEV__) console.log('User submitted areas:', userAreas.length);
-      setCampingAreas(areas);
+
+      if (isCurrentRequest()) {
+        setCampingAreas(areas);
+        if (__DEV__) {
+          try {
+            console.log('[useCampingAreas] area provinces:', areas.map((a: any) => ({ id: a.id, province: a.province })));
+          } catch (e) {
+            console.log('[useCampingAreas] province log hatası:', e);
+          }
+
+          try {
+            const missingCount = (areas as any[]).filter(a => !a.province).length;
+            if (missingCount > 0 && !autoSyncProvincesRef.current) {
+              autoSyncProvincesRef.current = true;
+              console.log(`[useCampingAreas] ${missingCount} area(s) missing province locally — attempting server sync...`);
+              (async () => {
+                try {
+                  const syncRes = await getDatabase().fetchAndStoreCampingAreasFromAPI(undefined, { forceFull: false });
+                  console.log('[useCampingAreas] fetchAndStoreCampingAreasFromAPI result:', syncRes);
+                  // Yeniden fetch et ve state'i güncelle
+                  try {
+                    await fetchCampingAreas(lat, lng, searchRadius, normalizedTags);
+                  } catch (refreshErr) {
+                    console.warn('[useCampingAreas] refresh after sync failed:', refreshErr);
+                  }
+                } catch (syncErr) {
+                  console.warn('[useCampingAreas] Server sync failed:', syncErr);
+                }
+              })();
+            }
+          } catch (e) {
+            console.warn('[useCampingAreas] auto-sync check error:', e);
+          }
+        }
+      } else {
+        if (__DEV__) console.log('[useCampingAreas] Stale fetch result ignored:', requestId, fetchSequenceRef.current);
+      }
+
       return areas;
     } catch (err) {
       console.error('Error fetching camping areas:', err);
-      setError(err instanceof Error ? err.message : 'Kamp alanları yüklenemedi');
-      setCampingAreas([]);
+      if (isCurrentRequest()) {
+        setError(err instanceof Error ? err.message : 'Kamp alanları yüklenemedi');
+        setCampingAreas([]);
+      }
       throw err;
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) {
+        setLoading(false);
+      }
     }
   };
 
@@ -282,28 +370,37 @@ export function useCampingAreas(options: UseCampingAreasOptions = {}) {
     searchTags: string[] = tags
   ): Promise<any[]> => {
     const tagsKey = (searchTags || []).join(',');
+    const userKey = currentUserId ? String(currentUserId) : 'anon';
+    const authKey = `${userKey}:${isSuperAdmin ? 'super' : 'normal'}`;
+    const queryKey = `${tagsKey}|${authKey}`;
 
-    // Last-query guard: eğer yakın konuma (50m) ve kısa süre (5s) içindeysek atla
+    // Last-query guard: eğer yakın konuma (50m), kısa süre (5s) içindeysek ve auth/session farkı yoksa atla
     const last = lastQueryRef.current;
     if (last) {
       const distKm = calcDistanceKm(last.lat, last.lng, lat, lng);
       const timeDiff = Date.now() - last.time;
-      if (distKm <= 0.05 && Math.abs(searchRadius - last.radius) < 0.1 && last.tagsKey === tagsKey && timeDiff < 5000) {
-        if (__DEV__) console.log('[useCampingAreas] Atlanan tekrarlı sorgu (guard)', { distKm, timeDiff });
+      if (
+        distKm <= 0.05 &&
+        Math.abs(searchRadius - last.radius) < 0.1 &&
+        last.queryKey === queryKey &&
+        timeDiff < 5000
+      ) {
+        if (__DEV__) console.log('[useCampingAreas] Atlanan tekrarlı sorgu (guard)', { distKm, timeDiff, authKey });
         return Promise.resolve([]);
       }
     }
 
     return new Promise((resolve, reject) => {
+      const requestId = ++fetchSequenceRef.current;
       pendingPromisesRef.current.push({ resolve, reject });
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current as ReturnType<typeof setTimeout>);
       }
       debounceTimerRef.current = setTimeout(async () => {
         debounceTimerRef.current = null;
-        lastQueryRef.current = { lat, lng, radius: searchRadius, tagsKey, time: Date.now() };
+        lastQueryRef.current = { lat, lng, radius: searchRadius, tagsKey, queryKey, time: Date.now() };
         try {
-          const res = await fetchCampingAreasInternal(lat, lng, searchRadius, searchTags);
+          const res = await fetchCampingAreasInternal(lat, lng, searchRadius, searchTags, requestId);
           pendingPromisesRef.current.forEach(p => p.resolve(res));
           pendingPromisesRef.current = [];
         } catch (e) {

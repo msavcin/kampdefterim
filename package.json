@@ -21,6 +21,7 @@
     "@types/react": "~19.0.10",
     "axios": "^1.11.0",
     "date-fns": "^2.30.0",
+    "engine.io-parser": "^5.2.3",
     "expo": "~53.0.27",
     "expo-background-fetch": "~13.1.6",
     "expo-blur": "~14.1.5",
@@ -54,16 +55,20 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-native": "0.79.6",
+    "react-native-gesture-handler": "~2.24.0",
     "react-native-iap": "^12.16.4",
     "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "react-native-svg": "15.11.2",
-    "react-native-webview": "13.13.5"
+    "react-native-webview": "13.13.5",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/jwt-decode": "^3.1.0",
+    "eslint": "^10.2.0",
+    "eslint-config-expo": "^55.0.0",
     "typescript": "~5.8.3"
   }
 }

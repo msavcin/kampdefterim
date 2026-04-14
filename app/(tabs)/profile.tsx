@@ -52,13 +52,13 @@ import React, { useEffect, useState } from 'react';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { eventBus } from '@/lib/eventBus';
 
-import { View, Text, Image, Button, StyleSheet, ActivityIndicator, ScrollView, Switch, Alert, TouchableOpacity, Modal, TextInput, BackHandler, Linking, Platform } from 'react-native';
+import { View, Text, Image, Button, StyleSheet, ActivityIndicator, ScrollView, Switch, Alert, TouchableOpacity, Modal, TextInput, BackHandler, Linking, Platform, ViewStyle, TextStyle, ImageStyle } from 'react-native';
 import { Friend } from '../../types/friend';
 import FriendAvatar from '../../components/FriendAvatar';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MapPin, ChevronRight, Download as DownloadIcon, Upload, RefreshCw, User, Shield, Mail, UserCheck, Building, Eye, CheckCircle, Clock, XCircle, Edit2, X, BookOpen } from 'lucide-react-native';
+import { MapPin, ChevronRight, Download as DownloadIcon, Upload, RefreshCw, User, Shield, Mail, UserCheck, Building, Eye, CheckCircle, Clock, XCircle, Edit2, X, BookOpen, Sun, Moon } from 'lucide-react-native';
 import { Search, Trash } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { useTheme } from '../../components/ThemeProvider';
@@ -101,9 +101,22 @@ async function syncFromOverpass(bounds: string): Promise<{ success: boolean; sta
 }
 
 export default function ProfileScreen(props: any) {
-  const { colors } = useTheme();
+  const { colors, scheme, colorMode, setColorMode } = useTheme();
   const themed = createThemedStyles(colors);
   const navigation = useNavigation();
+
+  const currentThemeMode = colorMode === 'system' ? scheme : colorMode;
+  const isDarkMode = currentThemeMode === 'dark';
+  // Döngü: system -> dark -> light -> system
+  const cycleColorMode = () => {
+    if (colorMode === 'system') {
+      setColorMode('dark');
+    } else if (colorMode === 'dark') {
+      setColorMode('light');
+    } else {
+      setColorMode('system');
+    }
+  };
 
   // Swipe-back gesture ve geri tuşunu devre dışı bırak
   useFocusEffect(
@@ -246,8 +259,10 @@ export default function ProfileScreen(props: any) {
         const mapped: Friend[] = data.map((f: any) => {
           // tag örneği: "#8" → id: 8
           const idFromTag = typeof f.tag === 'string' && f.tag.startsWith('#') ? Number(f.tag.replace('#', '')) : undefined;
+          const idCandidate = f.user_id ?? f.id ?? idFromTag;
+          const resolvedId = typeof idCandidate !== 'undefined' && idCandidate !== null ? Number(idCandidate) : undefined;
           return {
-            id: idFromTag,
+            id: resolvedId,
             username: f.username,
             tag: f.tag,
             name: f.name || '',
@@ -468,6 +483,10 @@ export default function ProfileScreen(props: any) {
 
   // İsim güncelleme fonksiyonu
   const handleUpdateName = async () => {
+    if (user?.role === 'guest' || user?.id === 34) {
+      Alert.alert('Kısıtlı Erişim', 'Misafir hesabıyla isim değiştirilemez.');
+      return;
+    }
     if (!editNameValue.trim()) {
       Alert.alert('Hata', 'İsim boş olamaz');
       return;
@@ -494,7 +513,7 @@ export default function ProfileScreen(props: any) {
 
   // Kullanıcı adı güncelleme fonksiyonu
   const handleUpdateUsername = async () => {
-    if (user?.role === 'guest') {
+    if (user?.role === 'guest' || user?.id === 34) {
       Alert.alert('Kısıtlı Erişim', 'Misafir hesabıyla kullanıcı adı değiştirilemez.');
       return;
     }
@@ -907,6 +926,7 @@ export default function ProfileScreen(props: any) {
 
   // Guest kullanıcı ise sadece profil kartı göster
   const isGuest = user?.role === 'guest';
+  const isRestrictedGuest = isGuest || user?.id === 34;
   // Sadece user rolünde, trial_user: true, ve premium değilse deneme süresi göster
   const isTrialUser = user?.role === 'user'
     && (user?.trial_user === true || user?.trial_user === 1 || user?.trial_user === 'true')
@@ -945,7 +965,22 @@ export default function ProfileScreen(props: any) {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Profile Card */}
-        <View style={[profileCardStyles.profileCard, { backgroundColor: colors.surface }]}>
+        <View style={[profileCardStyles.profileCard, { backgroundColor: colors.surface }]}> 
+          <View style={styles.profileCardTopRight}>
+            <View style={[styles.themeSwitchContainer, { alignItems: 'center' }]}> 
+              <View style={{ alignItems: 'center' }}>
+                <Sun size={12} color={colorMode === 'light' ? colors.primary : colors.muted} style={{ marginBottom: 8 }} />
+                <TouchableOpacity onPress={cycleColorMode} activeOpacity={0.8}>
+                  <View style={[styles.triToggleTrack, { backgroundColor: colors.surfaceVariant }]}> 
+                    <View style={[styles.triToggleDot, colorMode === 'light' ? { backgroundColor: colors.primary } : { backgroundColor: colors.border }]} />
+                    <View style={[styles.triToggleDot, colorMode === 'system' ? { backgroundColor: colors.primary } : { backgroundColor: colors.border }]} />
+                    <View style={[styles.triToggleDot, colorMode === 'dark' ? { backgroundColor: colors.primary } : { backgroundColor: colors.border }]} />
+                  </View>
+                </TouchableOpacity>
+                <Moon size={12} color={colorMode === 'dark' ? colors.primary : colors.muted} style={{ marginTop: 8 }} />
+              </View>
+            </View>
+          </View>
           <View style={{ alignItems: 'center', justifyContent: 'center', width: 140, height: 140, marginBottom: 8 }}>
               <Image
                 source={
@@ -993,24 +1028,28 @@ export default function ProfileScreen(props: any) {
               {/* İsim - düzenlenebilir */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                 <Text style={[profileCardStyles.profileName, { color: colors.primary }]}>{user.name || 'Kullanıcı'}</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    setEditNameValue(user.name || '');
-                    setEditNameModal(true);
-                  }}
-                  style={{ marginLeft: 8, padding: 6, backgroundColor: colors.surfaceVariant, borderRadius: 8 }}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Edit2 size={16} color={colors.muted} />
-                </TouchableOpacity>
+                  {!isRestrictedGuest && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (isRestrictedGuest) return;
+                        setEditNameValue(user.name || '');
+                        setEditNameModal(true);
+                      }}
+                      style={{ marginLeft: 8, padding: 6, backgroundColor: colors.surfaceVariant, borderRadius: 8 }}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Edit2 size={16} color={colors.muted} />
+                    </TouchableOpacity>
+                  )}
               </View>
               {/* Kullanıcı adı - düzenlenebilir (misafirde sadece göster) */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
                 <Text style={[profileCardStyles.profileEmail, { color: colors.muted }]}>{user.username ? `@${user.username}` : '@kullaniciadi'}</Text>
-                {!isGuest && (
+                {!isRestrictedGuest && (
                   <TouchableOpacity
                     onPress={() => {
+                      if (isRestrictedGuest) return;
                       setEditUsernameValue(user.username || '');
                       setEditUsernameModal(true);
                     }}
@@ -1084,107 +1123,109 @@ export default function ProfileScreen(props: any) {
                 <Text style={[profileCardStyles.profileLogoutBtnText, { color: colors.danger }]}>Çıkış Yap</Text>
               </TouchableOpacity>
               {/* Delete Account Button */}
-              <TouchableOpacity
-                style={{ marginTop: 14, alignItems: 'center', paddingVertical: 4 }}
-                disabled={isDeletingAccount}
-                onPress={async () => {
-                  // Aktif abonelik kontrolü
-                  // Manuel olarak tanımlanan premium hesaplarda subscription_expired_at (expiresAt) null gelir.
-                  // expiresAt null ise gerçek bir mağaza aboneliği yoktur — mağaza yönetim sayfasına yönlendirme yapılmaz.
-                  let hasActiveAutoRenewingSub = false;
-                  try {
-                    const subStatus = await IAPManager.checkSubscriptionStatus();
-                    hasActiveAutoRenewingSub = !!(
-                      subStatus?.isActive &&
-                      subStatus?.autoRenewing !== false &&
-                      subStatus?.expiresAt != null
-                    );
-                  } catch (_) {}
+              {!isRestrictedGuest && (
+                <TouchableOpacity
+                  style={{ marginTop: 14, alignItems: 'center', paddingVertical: 4 }}
+                  disabled={isDeletingAccount}
+                  onPress={async () => {
+                    // Aktif abonelik kontrolü
+                    // Manuel olarak tanımlanan premium hesaplarda subscription_expired_at (expiresAt) null gelir.
+                    // expiresAt null ise gerçek bir mağaza aboneliği yoktur — mağaza yönetim sayfasına yönlendirme yapılmaz.
+                    let hasActiveAutoRenewingSub = false;
+                    try {
+                      const subStatus = await IAPManager.checkSubscriptionStatus();
+                      hasActiveAutoRenewingSub = !!(
+                        subStatus?.isActive &&
+                        subStatus?.autoRenewing !== false &&
+                        subStatus?.expiresAt != null
+                      );
+                    } catch (_) {}
 
-                  const subscriptionWarning = hasActiveAutoRenewingSub
-                    ? Platform.OS === 'ios'
-                      ? '\n\n⚠️ Aktif bir aboneliğiniz var. Hesabınızı silmeden önce aboneliğinizi App Store üzerinden iptal etmeniz gerekir; aksi hâlde ücretlendirilmeye devam edersiniz.'
-                      : '\n\n⚠️ Aktif bir aboneliğiniz var. Hesabınızı silmeden önce aboneliğinizi Google Play üzerinden iptal etmeniz gerekir; aksi hâlde ücretlendirilmeye devam edersiniz.'
-                    : '';
+                    const subscriptionWarning = hasActiveAutoRenewingSub
+                      ? Platform.OS === 'ios'
+                        ? '\n\n⚠️ Aktif bir aboneliğiniz var. Hesabınızı silmeden önce aboneliğinizi App Store üzerinden iptal etmeniz gerekir; aksi hâlde ücretlendirilmeye devam edersiniz.'
+                        : '\n\n⚠️ Aktif bir aboneliğiniz var. Hesabınızı silmeden önce aboneliğinizi Google Play üzerinden iptal etmeniz gerekir; aksi hâlde ücretlendirilmeye devam edersiniz.'
+                      : '';
 
-                  const subscriptionButtons = hasActiveAutoRenewingSub
-                    ? [
-                        { text: 'İptal', style: 'cancel' as const },
-                        {
-                          text: Platform.OS === 'ios' ? 'Aboneliği Yönet (App Store)' : 'Aboneliği Yönet (Google Play)',
-                          onPress: () => {
-                            const url = Platform.OS === 'ios'
-                              ? 'itms-apps://apps.apple.com/account/subscriptions'
-                              : 'https://play.google.com/store/account/subscriptions';
-                            Linking.openURL(url).catch(() =>
-                              Alert.alert('Hata', 'Abonelik yönetim sayfası açılamadı.')
-                            );
-                          }
-                        },
-                        {
-                          text: 'Yine de Devam Et',
-                          style: 'destructive' as const,
-                          onPress: () => confirmDelete(),
-                        },
-                      ]
-                    : [
-                        { text: 'İptal', style: 'cancel' as const },
-                        { text: 'Evet, Sil', style: 'destructive' as const, onPress: () => confirmDelete() },
-                      ];
+                    const subscriptionButtons = hasActiveAutoRenewingSub
+                      ? [
+                          { text: 'İptal', style: 'cancel' as const },
+                          {
+                            text: Platform.OS === 'ios' ? 'Aboneliği Yönet (App Store)' : 'Aboneliği Yönet (Google Play)',
+                            onPress: () => {
+                              const url = Platform.OS === 'ios'
+                                ? 'itms-apps://apps.apple.com/account/subscriptions'
+                                : 'https://play.google.com/store/account/subscriptions';
+                              Linking.openURL(url).catch(() =>
+                                Alert.alert('Hata', 'Abonelik yönetim sayfası açılamadı.')
+                              );
+                            }
+                          },
+                          {
+                            text: 'Yine de Devam Et',
+                            style: 'destructive' as const,
+                            onPress: () => confirmDelete(),
+                          },
+                        ]
+                      : [
+                          { text: 'İptal', style: 'cancel' as const },
+                          { text: 'Evet, Sil', style: 'destructive' as const, onPress: () => confirmDelete() },
+                        ];
 
-                  const confirmDelete = () => {
-                    Alert.alert(
-                      'Son Onay',
-                      'Hesabınız ve tüm verileriniz kalıcı olarak silinecek. Onaylıyor musunuz?',
-                      [
-                        { text: 'İptal', style: 'cancel' },
-                        {
-                          text: 'Hesabımı Sil',
-                          style: 'destructive',
-                          onPress: async () => {
-                            setIsDeletingAccount(true);
-                            try {
-                              await deleteAccount();
-                              // Lokal SQLite cache'i temizle
+                    const confirmDelete = () => {
+                      Alert.alert(
+                        'Son Onay',
+                        'Hesabınız ve tüm verileriniz kalıcı olarak silinecek. Onaylıyor musunuz?',
+                        [
+                          { text: 'İptal', style: 'cancel' },
+                          {
+                            text: 'Hesabımı Sil',
+                            style: 'destructive',
+                            onPress: async () => {
+                              setIsDeletingAccount(true);
                               try {
-                                const db = require('../../lib/database').getDatabase();
-                                await db.dropAllTables();
-                              } catch (_) {}
-                              // Tile cache temizle
-                              try { await clearTileCache(); } catch (_) {}
-                              // SecureStore anahtarlarını temizle
-                              try {
-                                await SecureStore.deleteItemAsync('doNotShowLocationPermissionModal');
-                              } catch (_) {}
-                              // LargeStorage (AsyncStorage) anahtarlarını temizle
-                              try {
-                                await removeLargeItemAsync('shownFriendRequestIds');
-                              } catch (_) {}
-                              // Token'ı sil ve login'e yönlendir
-                              await removeToken();
-                              router.replace('/(auth)/login' as any);
-                            } catch (e: any) {
-                              Alert.alert('Hata', e?.message || 'Hesap silinemedi. Lütfen tekrar deneyin.');
-                            } finally {
-                              setIsDeletingAccount(false);
+                                await deleteAccount();
+                                // Lokal SQLite cache'i temizle
+                                try {
+                                  const db = require('../../lib/database').getDatabase();
+                                  await db.dropAllTables();
+                                } catch (_) {}
+                                // Tile cache temizle
+                                try { await clearTileCache(); } catch (_) {}
+                                // SecureStore anahtarlarını temizle
+                                try {
+                                  await SecureStore.deleteItemAsync('doNotShowLocationPermissionModal');
+                                } catch (_) {}
+                                // LargeStorage (AsyncStorage) anahtarlarını temizle
+                                try {
+                                  await removeLargeItemAsync('shownFriendRequestIds');
+                                } catch (_) {}
+                                // Token'ı sil ve login'e yönlendir
+                                await removeToken();
+                                router.replace('/(auth)/login' as any);
+                              } catch (e: any) {
+                                Alert.alert('Hata', e?.message || 'Hesap silinemedi. Lütfen tekrar deneyin.');
+                              } finally {
+                                setIsDeletingAccount(false);
+                              }
                             }
                           }
-                        }
-                      ]
-                    );
-                  };
+                        ]
+                      );
+                    };
 
-                  Alert.alert(
-                    'Hesabı Sil',
-                    `Hesabınızı kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve tüm verileriniz silinecektir.${subscriptionWarning}`,
-                    subscriptionButtons
-                  );
-                }}
-              >
-                <Text style={{ color: colors.muted, fontSize: 13, textDecorationLine: 'underline' }}>
-                  {isDeletingAccount ? 'Siliniyor...' : 'Hesabımı Sil'}
-                </Text>
-              </TouchableOpacity>
+                    Alert.alert(
+                      'Hesabı Sil',
+                      `Hesabınızı kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve tüm verileriniz silinecektir.${subscriptionWarning}`,
+                      subscriptionButtons
+                    );
+                  }}
+                >
+                  <Text style={{ color: colors.muted, fontSize: 13, textDecorationLine: 'underline' }}>
+                    {isDeletingAccount ? 'Siliniyor...' : 'Hesabımı Sil'}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : null}
   </View>
@@ -1351,6 +1392,20 @@ export default function ProfileScreen(props: any) {
                        <CheckCircle size={12} color={colors.success} />
                      </View>
                    </View>
+                   <TouchableOpacity
+                     onPress={() => {
+                       if (!f.id) {
+                         Alert.alert('Hata', 'Bu kullanıcı için alıcı kimliği yok.');
+                         return;
+                       }
+                      router.push({ pathname: '/(tabs)/chat/new', params: { recipientId: String(f.id) } });
+                     }}
+                     style={{ padding: 0, borderRadius: 16 }}
+                   >
+                     <View style={{ backgroundColor: colors.info + '20', borderRadius: 16, padding: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.info }}>
+                       <Mail size={12} color={colors.info} />
+                     </View>
+                   </TouchableOpacity>
                    <TouchableOpacity
                      onPress={() => {
                        Alert.alert(
@@ -2150,7 +2205,7 @@ export default function ProfileScreen(props: any) {
 
         {/* İsim Düzenleme Modalı */}
         <Modal
-          visible={editNameModal}
+          visible={editNameModal && !isRestrictedGuest}
           transparent
           animationType="slide"
           onRequestClose={() => setEditNameModal(false)}
@@ -2191,7 +2246,7 @@ export default function ProfileScreen(props: any) {
 
         {/* Kullanıcı Adı Düzenleme Modalı */}
         <Modal
-          visible={editUsernameModal}
+          visible={editUsernameModal && !isRestrictedGuest}
           transparent
           animationType="slide"
           onRequestClose={() => setEditUsernameModal(false)}
@@ -2238,7 +2293,92 @@ export default function ProfileScreen(props: any) {
   );
 }
 
-const styles = StyleSheet.create({
+type ProfileStyles = {
+  container: ViewStyle;
+  scrollContent: ViewStyle;
+  gradientHeader: ViewStyle;
+  profileHeader: ViewStyle;
+  avatarWrapper: ViewStyle;
+  avatar: ImageStyle;
+  avatarEditFab: ViewStyle;
+  avatarOverlayLarge: ViewStyle;
+  avatarOverlay: ViewStyle;
+  avatarEditBadge: ViewStyle;
+  avatarEditText: TextStyle;
+  headerName: TextStyle;
+  headerEmail: TextStyle;
+  badgeRow: ViewStyle;
+  badge: ViewStyle;
+  badgeText: TextStyle;
+  badgePrimary: ViewStyle;
+  badgeNeutral: ViewStyle;
+  badgeSuccess: ViewStyle;
+  badgeWarning: ViewStyle;
+  badgeDanger: ViewStyle;
+  logoutChip: ViewStyle;
+  logoutChipText: TextStyle;
+  communityMini: ViewStyle;
+  communityName: TextStyle;
+  communityDesc: TextStyle;
+  errorAlt: ViewStyle;
+  name: TextStyle;
+  email: TextStyle;
+  error: TextStyle;
+  statsContainer: ViewStyle;
+  statItem: ViewStyle;
+  statItemBorder: ViewStyle;
+  statNumber: TextStyle;
+  statLabel: TextStyle;
+  menuContainer: ViewStyle;
+  sectionTitle: TextStyle;
+  menuItem: ViewStyle;
+  menuIconContainer: ViewStyle;
+  menuContent: ViewStyle;
+  menuTitle: TextStyle;
+  menuSubtitle: TextStyle;
+  appInfoContainer: ViewStyle;
+  infoRow: ViewStyle;
+  infoLabel: TextStyle;
+  infoValue: TextStyle;
+  devButton: ViewStyle;
+  devButtonDisabled: ViewStyle;
+  devButtonContent: ViewStyle;
+  devButtonText: ViewStyle;
+  devButtonTitle: TextStyle;
+  devButtonTitleDisabled: ViewStyle;
+  devButtonSubtitle: TextStyle;
+  syncStatusContainer: ViewStyle;
+  syncStatusSuccess: ViewStyle;
+  syncStatusError: ViewStyle;
+  syncStatusText: TextStyle;
+  backupInfoContainer: ViewStyle;
+  backupInfoTitle: TextStyle;
+  backupStats: ViewStyle;
+  backupStat: ViewStyle;
+  backupStatNumber: TextStyle;
+  backupStatLabel: TextStyle;
+  backupButton: ViewStyle;
+  exportButton: ViewStyle;
+  importButton: ViewStyle;
+  shareButton: ViewStyle;
+  backupButtonDisabled: ViewStyle;
+  backupButtonContent: ViewStyle;
+  backupButtonText: ViewStyle;
+  backupButtonTitle: TextStyle;
+  importButtonTitle: TextStyle;
+  shareButtonTitle: TextStyle;
+  backupButtonTitleDisabled: ViewStyle;
+  backupButtonSubtitle: TextStyle;
+  spinning: ViewStyle;
+  themeToggleButton: ViewStyle;
+  profileCardTopRight: ViewStyle;
+  themeSwitchContainer: ViewStyle;
+  themeSwitch: ViewStyle;
+  triToggleTrack: ViewStyle;
+  triToggleDot: ViewStyle;
+};
+
+const styles = StyleSheet.create<ProfileStyles>({
   container: {
     flex: 1,
   },
@@ -2386,6 +2526,51 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingVertical: 8,
   },
+  themeToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  profileCardTopRight: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 10,
+  },
+  themeSwitchContainer: {
+    borderRadius: 20,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
+  themeSwitch: {
+    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
+  },
+  triToggleTrack: {
+    width: 30,
+    height: 78,
+    borderRadius: 18,
+    paddingVertical: 8,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  triToggleDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 8,
+  },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2516,7 +2701,17 @@ const styles = StyleSheet.create({
 });
 
 // Modern tasarımda kullanılan kart stiller (runtime'da colors.* ile override edilir)
-const profileCardStyles = StyleSheet.create({
+type ProfileCardStyles = {
+  profileCard: ViewStyle;
+  profileName: TextStyle;
+  profileEmail: TextStyle;
+  profileRoleRow: ViewStyle;
+  profileRoleText: TextStyle;
+  profileLogoutBtn: ViewStyle;
+  profileLogoutBtnText: TextStyle;
+};
+
+const profileCardStyles = StyleSheet.create<ProfileCardStyles>({
   profileCard: {
     borderRadius: 20,
     padding: 24,

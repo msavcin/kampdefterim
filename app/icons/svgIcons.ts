@@ -110,8 +110,8 @@ export type SVGStandardizeOptions = {
 const DEFAULT_SVG_OPTIONS: Required<SVGStandardizeOptions> = {
   width: 20,
   height: 20,
-  fill: 'none', // ikonun içi siyah
-  stroke: '#000', // çerçeve beyaz
+  fill: 'transparent',
+  stroke: '#000',
 };
 
 export function standardizeSVG(svg: string, options?: SVGStandardizeOptions): string {

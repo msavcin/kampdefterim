@@ -20,17 +20,24 @@ import Icon from './icons';
 import { useTheme } from '../components/ThemeProvider';
 import { eventBus } from '../lib/eventBus';
 import { getLocationNameFromOSM } from '../lib/osmReverseGeocode';
-import { getAIEvaluation, AIEvaluationRequest, AIEvaluationResponse } from '../lib/aiEvaluationApi';
+import { getAIEvaluation, getAIEvalStatus, AIEvaluationRequest, AIEvaluationResponse, AIEvalStatusResponse } from '../lib/aiEvaluationApi';
 import Markdown from 'react-native-markdown-display';
 import AIEvaluationDashboardModal from '../components/AIEvaluationDashboardModal';
 
 const DRAFT_KEY = 'campPlannerDraft';
 const SAVED_PLANS_KEY = 'campPlannerSavedPlans';
+const PENDING_SELECTED_KEY = 'campPlanPendingSelected';
+const PENDING_STEP_KEY = 'campPlanPendingStep';
+const PENDING_OPEN_KEY = 'campPlanPendingOpen';
 const WEATHER_API_KEY = '750db91332eb47c69c8171303262703';
 const WEATHER_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 saat
+const makeStorageKey = (key: string, userId?: string | null) => (userId ? `${key}:${userId}` : key);
 const weatherCacheKey = (lat: number, lng: number, start?: string | null, end?: string | null) =>
   `weatherCache_${lat.toFixed(4)}_${lng.toFixed(4)}_${start ?? ''}_${end ?? ''}`;
 
+// AI değerlendirme önbellek anahtarı ve TTL (ms)
+const AI_EVAL_CACHE_KEY = 'campPlannerAIEvals';
+const AI_EVAL_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 saat
 type CampPlanLocation = {
   latitude: number;
   longitude: number;
@@ -47,6 +54,7 @@ type CampPlan = {
   location?: CampPlanLocation;
   weather?: any;
   announcements?: any[];
+  stepIndex?: number;
   status: CampPlanStatus;
   updatedAt: string;
   createdAt: string;
@@ -115,7 +123,10 @@ export default function CampPlanPage() {
   const [planAIEvaluations, setPlanAIEvaluations] = useState<Record<string, AIEvaluationResponse | null>>({});
   const [planAIEvalLoadings, setPlanAIEvalLoadings] = useState<Record<string, boolean>>({});
   const [aiModalPlanId, setAiModalPlanId] = useState<string | null>(null);
+  const [aiEvalStatus, setAiEvalStatus] = useState<AIEvalStatusResponse | null>(null);
   const [planWeatherMaps, setPlanWeatherMaps] = useState<Record<string, any>>({});
+  const [me, setMe] = useState<any | null>(null);
+  const currentUserId = me?.id ? String(me.id) : null;
   const savedScrollRef = useRef<ScrollView | null>(null);
   const [carouselIndex, setCarouselIndex] = useState<number>(0);
   const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -137,6 +148,76 @@ export default function CampPlanPage() {
   }, [expandedPlanId, savedPlans]);
 
   const { theme } = useTheme();
+
+  // AI değerlendirme için AsyncStorage yardımcıları
+  const aiEvalStorageKey = (uid?: string | null) => makeStorageKey(AI_EVAL_CACHE_KEY, uid);
+
+  const loadStoredAIEvals = async (uid?: string | null) => {
+    try {
+      const key = aiEvalStorageKey(uid);
+      const raw = await AsyncStorage.getItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      const now = Date.now();
+      const keep: Record<string, AIEvaluationResponse> = {} as any;
+      for (const pid of Object.keys(parsed)) {
+        try {
+          const ev = parsed[pid] as AIEvaluationResponse | null;
+          if (!ev) continue;
+          if ((ev as any).fallback === true) {
+            keep[pid] = ev as any;
+            continue;
+          }
+          if (ev.generatedAt) {
+            const gen = new Date(ev.generatedAt).getTime();
+            if (now - gen < AI_EVAL_CACHE_TTL_MS) {
+              keep[pid] = ev as any;
+            }
+          } else {
+            keep[pid] = ev as any;
+          }
+        } catch (e) {}
+      }
+      try { await AsyncStorage.setItem(key, JSON.stringify(keep)); } catch (_) {}
+      if (Object.keys(keep).length > 0) setPlanAIEvaluations(prev => ({ ...prev, ...keep }));
+    } catch (e) {
+      console.warn('[camp-plan] loadStoredAIEvals hata', e);
+    }
+  };
+
+  const persistAIEvalToStorage = async (uid?: string | null, planId?: string, evalObj?: AIEvaluationResponse | null) => {
+    try {
+      if (!planId || !evalObj) return;
+      const key = aiEvalStorageKey(uid);
+      const raw = await AsyncStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : {};
+      parsed[planId] = evalObj;
+      await AsyncStorage.setItem(key, JSON.stringify(parsed));
+    } catch (e) {
+      console.warn('[camp-plan] persistAIEval hata', e);
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getMe } = require('../lib/userCommunityApi');
+        const u = await getMe();
+        setMe(u);
+      } catch (e) {
+        setMe(null);
+      }
+
+      // Sayfa açılışında AI değerlendirme hakkı durumunu sorgula
+      try {
+        const s = await getAIEvalStatus();
+        if (s) setAiEvalStatus(s);
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
 
   const themedStyles: any = {
     container: [styles.container, { backgroundColor: theme.colors.background }],
@@ -197,9 +278,13 @@ export default function CampPlanPage() {
   useEffect(() => {
     (async () => {
       try {
-        // 1) Load existing draft and saved plans first
-        const rawDraft = await AsyncStorage.getItem(DRAFT_KEY);
-        const rawPlans = await AsyncStorage.getItem(SAVED_PLANS_KEY);
+        const { getMe } = require('../lib/userCommunityApi');
+        const u = await getMe();
+        const uid = u?.id ? String(u.id) : null;
+
+        // 1) Load existing draft and saved plans first (user-scoped keys)
+        const rawDraft = await AsyncStorage.getItem(makeStorageKey(DRAFT_KEY, uid));
+        const rawPlans = await AsyncStorage.getItem(makeStorageKey(SAVED_PLANS_KEY, uid));
         let currentDraft: CampPlan = emptyPlan();
         if (rawDraft) {
           const parsed = JSON.parse(rawDraft);
@@ -224,7 +309,7 @@ export default function CampPlanPage() {
 
         // 2) Then handle any pending selection (serialized processing to avoid races)
         try {
-          const pendingRaw = await AsyncStorage.getItem('campPlanPendingSelected');
+          const pendingRaw = await AsyncStorage.getItem(makeStorageKey(PENDING_SELECTED_KEY, uid));
           if (pendingRaw) {
             const parsedPending = JSON.parse(pendingRaw);
             if (parsedPending && parsedPending.latitude && parsedPending.longitude) {
@@ -251,11 +336,16 @@ export default function CampPlanPage() {
                 },
               };
               currentDraft = newDraft;
-              await AsyncStorage.removeItem('campPlanPendingSelected');
+              await AsyncStorage.removeItem(makeStorageKey(PENDING_SELECTED_KEY, uid));
               if (typeof parsedPending.gotoStep === 'number') {
                 setStepIndex(parsedPending.gotoStep);
               } else {
-                await saveDraft(newDraft, 2);
+                // Persist draft under user-scoped key
+                try {
+                  const p = { ...newDraft, updatedAt: new Date().toISOString(), status: 'draft', stepIndex: 2 } as any;
+                  await AsyncStorage.setItem(makeStorageKey(DRAFT_KEY, uid), JSON.stringify(p));
+                  try { eventBus.emit('camp-planner:updated'); } catch (_) {}
+                } catch (e) {}
               }
             }
           }
@@ -265,17 +355,19 @@ export default function CampPlanPage() {
 
         // 3) Apply any pending step request
         try {
-          const pendingStep = await AsyncStorage.getItem('campPlanPendingStep');
+          const pendingStep = await AsyncStorage.getItem(makeStorageKey(PENDING_STEP_KEY, uid));
           if (pendingStep) {
             const p = JSON.parse(pendingStep);
             if (p && typeof p.step === 'number') setStepIndex(p.step);
-            await AsyncStorage.removeItem('campPlanPendingStep');
+            await AsyncStorage.removeItem(makeStorageKey(PENDING_STEP_KEY, uid));
           }
         } catch (e) {
           // ignore
         }
 
         // 4) Finally set draft state once
+        // Load cached AI değerlendirmelerini (TTL uygulanmış)
+        try { await loadStoredAIEvals(uid); } catch (e) {}
         setDraft(currentDraft);
       } catch (err) {
         console.warn('CampPlanPage load hata', err);
@@ -451,9 +543,14 @@ export default function CampPlanPage() {
       updatedAt: new Date().toISOString(),
       status: 'draft',
     };
+    if (typeof newStepIndex === 'number') {
+      try { (payload as any).stepIndex = newStepIndex; } catch (e) {}
+      try { setStepIndex(newStepIndex); } catch (e) {}
+    }
     setDraft(payload);
     try {
-      await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
+      const uid = me?.id ? String(me.id) : null;
+      await AsyncStorage.setItem(makeStorageKey(DRAFT_KEY, uid), JSON.stringify(payload));
       eventBus.emit('camp-planner:updated');
     } catch (err) {
       console.warn('[camp-plan] draft kaydetme hata', err);
@@ -462,7 +559,8 @@ export default function CampPlanPage() {
 
   const clearDraft = async () => {
     try {
-      await AsyncStorage.removeItem(DRAFT_KEY);
+      const uid = me?.id ? String(me.id) : null;
+      await AsyncStorage.removeItem(makeStorageKey(DRAFT_KEY, uid));
       setDraft(emptyPlan());
       eventBus.emit('camp-planner:updated');
     } catch (err) {
@@ -478,21 +576,22 @@ export default function CampPlanPage() {
         status: 'saved',
         updatedAt: new Date().toISOString(),
       };
-      const existing = await AsyncStorage.getItem(SAVED_PLANS_KEY);
+      const uid = me?.id ? String(me.id) : null;
+      const existing = await AsyncStorage.getItem(makeStorageKey(SAVED_PLANS_KEY, uid));
       let list: CampPlan[] = [];
       if (existing) {
         const parsed = JSON.parse(existing);
         if (Array.isArray(parsed)) list = parsed;
       }
       list = [planToSave, ...list.filter(p => p.id !== planToSave.id)];
-      await AsyncStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(list));
-      await AsyncStorage.removeItem(DRAFT_KEY);
+      await AsyncStorage.setItem(makeStorageKey(SAVED_PLANS_KEY, uid), JSON.stringify(list));
+      await AsyncStorage.removeItem(makeStorageKey(DRAFT_KEY, uid));
       setSavedPlans(list);
       setDraft(planToSave);
       eventBus.emit('camp-planner:updated');
       // Clear any pending selection/step keys so map overlay won't reopen unexpectedly
-      try { await AsyncStorage.removeItem('campPlanPendingSelected'); } catch (_) {}
-      try { await AsyncStorage.removeItem('campPlanPendingStep'); } catch (_) {}
+      try { await AsyncStorage.removeItem(makeStorageKey(PENDING_SELECTED_KEY, currentUserId)); } catch (_) {}
+      try { await AsyncStorage.removeItem(makeStorageKey(PENDING_STEP_KEY, currentUserId)); } catch (_) {}
       try { eventBus.emit('camp-plan:modeActive', { active: false }); } catch (_) {}
 
       Alert.alert('Başarılı', 'Kamp planınız kaydedildi.');
@@ -788,34 +887,187 @@ export default function CampPlanPage() {
       const result = await getAIEvaluation(request);
       if (result && result.evaluation) {
         setPlanAIEvaluations(prev => ({ ...prev, [plan.id]: result }));
+        try { await persistAIEvalToStorage(currentUserId, plan.id, result); } catch (e) {}
+        // Eğer POST yanıtında kalan hak bilgisi geldiyse UI'ı güncelle, gelmediyse durum sorgula
+        try {
+          if (typeof (result as any).remaining === 'number') {
+            setAiEvalStatus(prev => ({ ...(prev || {} as any), remaining: (result as any).remaining, limit: (result as any).limit ?? (prev ? prev.limit : undefined) }));
+          } else {
+            const s = await getAIEvalStatus();
+            if (s) setAiEvalStatus(s);
+          }
+        } catch (e) {
+          // ignore
+        }
       } else {
         const fallbackText = evaluateForecast(weathermap?.days);
-        setPlanAIEvaluations(prev => ({
-          ...prev,
-          [plan.id]: {
-            evaluation: fallbackText
-              ? `${fallbackText}\n\n*(AI değerlendirmesi şu an kullanılamıyor, kural tabanlı analiz gösterilmektedir.)*`
-              : 'AI değerlendirmesi şu an kullanılamıyor. Lütfen daha sonra tekrar deneyin.',
-            generatedAt: new Date().toISOString(), modules: [], cached: false, fallback: true,
-          },
-        }));
-      }
-    } catch (err) {
-      if (__DEV__) console.warn('[camp-plan] plan AI eval hata:', err);
-      const fallbackText = evaluateForecast(weathermap?.days);
-      setPlanAIEvaluations(prev => ({
-        ...prev,
-        [plan.id]: {
+        const fallbackObj: AIEvaluationResponse = {
           evaluation: fallbackText
             ? `${fallbackText}\n\n*(AI değerlendirmesi şu an kullanılamıyor, kural tabanlı analiz gösterilmektedir.)*`
             : 'AI değerlendirmesi şu an kullanılamıyor. Lütfen daha sonra tekrar deneyin.',
           generatedAt: new Date().toISOString(), modules: [], cached: false, fallback: true,
-        },
-      }));
+        } as any;
+        setPlanAIEvaluations(prev => ({ ...prev, [plan.id]: fallbackObj }));
+        try { await persistAIEvalToStorage(currentUserId, plan.id, fallbackObj); } catch (e) {}
+
+        // Eğer POST başarısız olduysa (ör. 429) orada kalan bilgi olmayabilir; durumu sorgula ve UI'yı güncelle
+        try {
+          const s = await getAIEvalStatus();
+          if (s) {
+            setAiEvalStatus(s);
+            if (typeof s.remaining === 'number' && s.remaining <= 0) {
+              Alert.alert('Kotaya ulaşıldı', 'Bugünkü değerlendirme kotanız doldu. Yarın tekrar deneyebilirsiniz.');
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (err) {
+      if (__DEV__) console.warn('[camp-plan] plan AI eval hata:', err);
+      const fallbackText = evaluateForecast(weathermap?.days);
+      const fallbackObj: AIEvaluationResponse = {
+        evaluation: fallbackText
+          ? `${fallbackText}\n\n*(AI değerlendirmesi şu an kullanılamıyor, kural tabanlı analiz gösterilmektedir.)*`
+          : 'AI değerlendirmesi şu an kullanılamıyor. Lütfen daha sonra tekrar deneyin.',
+        generatedAt: new Date().toISOString(), modules: [], cached: false, fallback: true,
+      } as any;
+      setPlanAIEvaluations(prev => ({ ...prev, [plan.id]: fallbackObj }));
+      try { await persistAIEvalToStorage(currentUserId, plan.id, fallbackObj); } catch (e) {}
+
+      // Hata durumunda da quota bilgisini yeniden sorgulayalım (ör. 429 gibi)
+      try {
+        const s = await getAIEvalStatus();
+        if (s) {
+          setAiEvalStatus(s);
+          if (typeof s.remaining === 'number' && s.remaining <= 0) {
+            Alert.alert('Kotaya ulaşıldı', 'Bugünkü değerlendirme kotanız doldu. Yarın tekrar deneyebilirsiniz.');
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
     } finally {
       setPlanAIEvalLoadings(prev => ({ ...prev, [plan.id]: false }));
       setAiModalPlanId(plan.id);
     }
+  };
+
+  const renderAIEvalButtonForPlan = (plan: CampPlan) => {
+    if (!plan?.id) return null;
+    if (planAIEvalLoadings[plan.id]) {
+      return (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 4, marginBottom: 8 }}>
+          <ActivityIndicator size="small" color={theme.colors.primary} />
+          <Text style={[themedStyles.helpText, { marginLeft: 8 }]}>AI değerlendiriliyor... (30-60 sn)</Text>
+        </View>
+      );
+    }
+    const evaluation = planAIEvaluations[plan.id];
+    const isPremium = !!(me?.isPremium || me?.offline_enabled);
+
+    const isRecentlyEvaluated = (() => {
+      try {
+        if (!evaluation || !evaluation.generatedAt) return false;
+        if (evaluation.fallback === true) return false; // fallback değerlendirmeler cooldown'a dahil olmasın
+        const diff = Date.now() - new Date(evaluation.generatedAt).getTime();
+        return diff < 24 * 60 * 60 * 1000;
+      } catch (e) { return false; }
+    })();
+
+    const timeSince = (iso?: string) => {
+      try {
+        if (!iso) return '';
+        const diff = Date.now() - new Date(iso).getTime();
+        const hrs = Math.floor(diff / (1000 * 60 * 60));
+        if (hrs < 1) return 'az önce';
+        if (hrs < 24) return `${hrs} saat önce`;
+        const days = Math.floor(hrs / 24);
+        return `${days} gün önce`;
+      } catch (e) { return ''; }
+    };
+
+    // Eğer değerlendirme zaten varsa, göster ve eğer 24 saatten küçükse yeniden değerlendirmeyi engelle
+    if (evaluation) {
+      return (
+        <View style={{ marginTop: 10, marginBottom: 8 }}>
+          <TouchableOpacity
+            style={{ padding: 12, borderRadius: 10, backgroundColor: theme.colors.primary, alignItems: 'center', flexDirection: 'row' }}
+            onPress={() => setAiModalPlanId(plan.id)}
+          >
+            <Icon name="Sparkles" size={16} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 15, marginLeft: 8, fontWeight: '600', flex: 1 }}>Kamp Defterim Değerlendirmesini Gör</Text>
+            <Icon name="ChevronRight" size={16} color="#fff" />
+          </TouchableOpacity>
+          {isRecentlyEvaluated ? (
+            <Text style={[themedStyles.helpText, { marginTop: 8 }]}>Bu plan {timeSince(evaluation.generatedAt)} değerlendirildi. Yeni değerlendirme 1 gün sonra aktif olacak.</Text>
+          ) : (
+            // 24 saatten eskiyse yeniden değerlendirme butonunu göster (kota ve premium kontrolü uygulanır)
+            <View style={{ marginTop: 8, position: 'relative' }}>
+              <TouchableOpacity
+                style={[
+                  { padding: 12, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
+                  !isPremium
+                    ? { backgroundColor: theme.colors.surfaceVariant ?? '#f1f5f9', borderColor: theme.colors.border ?? '#cbd5e1', opacity: 0.9 }
+                    : { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
+                ]}
+                activeOpacity={isPremium ? 0.7 : 0.9}
+                onPress={() => {
+                  if (!isPremium) { router.push('/premium'); return; }
+                  fetchAIEvaluationForPlan(plan);
+                }}
+              >
+                <Icon name="Sparkles" size={16} color={isPremium ? '#fff' : theme.colors.muted} />
+                <Text style={{ color: isPremium ? '#fff' : theme.colors.muted, fontSize: 15, marginLeft: 8, fontWeight: '600' }}>Kamp Defterim ile Yeniden Değerlendir</Text>
+              </TouchableOpacity>
+              {!isPremium && (
+                <View style={[styles.aiEvalPremiumIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]} pointerEvents="none">
+                  <Icon name="Crown" size={14} color={theme.colors.primary} />
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    // Eğer değerlendirme yoksa, normal çağrı UI'ını göster (kalan hakkı ve devre-dışı durumunu uygula)
+    const remaining = typeof aiEvalStatus?.remaining === 'number' ? aiEvalStatus!.remaining : undefined;
+    const limit = typeof aiEvalStatus?.limit === 'number' ? aiEvalStatus!.limit : undefined;
+    const hasQuota = typeof remaining === 'number' ? remaining > 0 : true;
+
+    return (
+      <View style={{ marginTop: 10, marginBottom: 8, position: 'relative' }}>
+        <TouchableOpacity
+          style={[
+            { padding: 12, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
+            (!isPremium || !hasQuota)
+              ? { backgroundColor: theme.colors.surfaceVariant ?? '#f1f5f9', borderColor: theme.colors.border ?? '#cbd5e1', opacity: 0.6 }
+              : { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
+          ]}
+          activeOpacity={(!isPremium || !hasQuota) ? 1 : 0.7}
+          disabled={!isPremium || !hasQuota}
+          onPress={() => {
+            if (!isPremium) { router.push('/premium'); return; }
+            if (!hasQuota) return;
+            fetchAIEvaluationForPlan(plan);
+          }}
+        >
+          <Icon name="Sparkles" size={16} color={(!isPremium || !hasQuota) ? theme.colors.muted : '#fff'} />
+          <Text style={{ color: (!isPremium || !hasQuota) ? theme.colors.muted : '#fff', fontSize: 15, marginLeft: 8, fontWeight: '600' }}>
+            {`Kamp Defterim ile Değerlendir${typeof remaining === 'number' || typeof limit === 'number' ? ` (Kalan ${remaining ?? '?'} / ${limit ?? 10})` : ''}`}
+          </Text>
+        </TouchableOpacity>
+        {!isPremium && (
+          <View style={[styles.aiEvalPremiumIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]} pointerEvents="none">
+            <Icon name="Crown" size={14} color={theme.colors.primary} />
+          </View>
+        )}
+        {!hasQuota && (
+          <Text style={[themedStyles.helpText, { marginTop: 8 }]}>Bugünkü değerlendirme kotanız doldu. Yarın tekrar deneyebilirsiniz.</Text>
+        )}
+      </View>
+    );
   };
 
   const fetchWeather = async (lat: number, lng: number, startDate?: string | null, endDate?: string | null) => {
@@ -952,7 +1204,8 @@ export default function CampPlanPage() {
         try { await AsyncStorage.setItem(weatherCacheKey(lat, lng, startDate, endDate), JSON.stringify({ data: _wm1, timestamp: Date.now() })); } catch {}
         return;
       } catch (err) {
-        console.warn('[camp-plan] Open-Meteo primary failed, falling back to WeatherAPI:', err);
+        const errMessage = err instanceof Error ? err.message : String(err);
+        console.warn('[camp-plan] Open-Meteo primary failed, falling back to WeatherAPI:', errMessage);
       }
 
       // Fallback legacy flow: WeatherAPI -> Open-Meteo hourly (keeps existing behavior if needed)
@@ -1223,7 +1476,7 @@ export default function CampPlanPage() {
         try { router.push('/'); } catch (e) {}
         (async () => {
           try {
-            await AsyncStorage.setItem('campPlanPendingOpen', JSON.stringify({ campType: draft.campType, location: currentLoc }));
+            await AsyncStorage.setItem(makeStorageKey(PENDING_OPEN_KEY, currentUserId), JSON.stringify({ campType: draft.campType, location: currentLoc }));
           } catch (e) {}
           setTimeout(() => {
             eventBus.emit('camp-plan:openMap', { campType: draft.campType, location: currentLoc });
@@ -1249,7 +1502,7 @@ export default function CampPlanPage() {
       try { router.push('/'); } catch (e) {}
       (async () => {
         try {
-          await AsyncStorage.setItem('campPlanPendingOpen', JSON.stringify({ campType: draft.campType, location: draft.location }));
+          await AsyncStorage.setItem(makeStorageKey(PENDING_OPEN_KEY, currentUserId), JSON.stringify({ campType: draft.campType, location: draft.location }));
         } catch (e) {}
         setTimeout(() => {
           eventBus.emit('camp-plan:openMap', { campType: draft.campType, location: draft.location });
@@ -1397,7 +1650,7 @@ export default function CampPlanPage() {
                 );
               })}
             </View>
-            <Text style={themedStyles.helpText}>Kamp türleri dinamik olarak merkezi kategori listesinden gelir.</Text>
+            <Text style={themedStyles.helpText}>Kamp türleri dinamik olarak merkezi kategori listesinden gelir. 3. Adımda harita ekranında filtre sekmesi ile aramanızı detaylandırabilirsiniz.</Text>
           </View>
         );
       case 2:
@@ -1420,7 +1673,7 @@ export default function CampPlanPage() {
               // Pending payload kaydet (MapScreen mount olmazsa bile okunabilecek)
               (async () => {
                 try {
-                  await AsyncStorage.setItem('campPlanPendingOpen', JSON.stringify({ campType: draft.campType, location: draft.location }));
+                  await AsyncStorage.setItem(makeStorageKey(PENDING_OPEN_KEY, currentUserId), JSON.stringify({ campType: draft.campType, location: draft.location }));
                 } catch (e) {
                   // ignore
                 }
@@ -1527,7 +1780,6 @@ export default function CampPlanPage() {
             {announcementList.length > 0 ? announcementList.slice(0, 5).map((ann: any) => (
               <View key={ann.id || ann.title || Math.random()} style={themedStyles.smallItem}>
                 <Text style={themedStyles.smallHeader}>{ann.title || ann.baslik || 'Duyuru'}</Text>
-                <Text style={themedStyles.helpText}>{ann.summary || ann.aciklama || 'Detay yok'}</Text>
               </View>
             )) : <Text style={themedStyles.helpText}>Bu konum için aktif duyuru bulunamadı.</Text>}
           </View>
@@ -1540,20 +1792,13 @@ export default function CampPlanPage() {
             <Text style={themedStyles.summaryText}>Bitiş: {draft.endDate ? formatDateTR(draft.endDate) : 'Yok'}</Text>
             <Text style={themedStyles.summaryText}>Kamp Türü: {draft.campType ? getCampingTypeLabel(draft.campType) : 'Seçilmedi'}</Text>
             <Text style={themedStyles.summaryText}>Konum: {draft.location ? (draft.location.label ? draft.location.label : `${draft.location.latitude.toFixed(4)}, ${draft.location.longitude.toFixed(4)}`) : 'Seçilmedi'}</Text>
-            {weathermap ? (() => {
-              const evalText = evaluateForecast(weathermap.days);
-              return evalText ? (
-                <View style={[themedStyles.evaluationBox, { marginTop: 8 }]}> 
-                  <View style={styles.evaluationHeader}>
-                    <View style={themedStyles.evaluationIcon}><Icon name="Info" size={16} color={theme.colors.text} /></View>
-                    <Text style={themedStyles.evaluationTitle}>Hava Değerlendirmesi</Text>
-                  </View>
-                  <Text style={themedStyles.evaluationText}>{evalText}</Text>
-                </View>
-              ) : null;
-            })() : (
-              <Text style={themedStyles.helpText}>Hava değerlendirmesi için konum seçin.</Text>
-            )}
+            <View style={[themedStyles.evaluationBox, { marginTop: 8 }]}> 
+              <View style={styles.evaluationHeader}>
+                <View style={themedStyles.evaluationIcon}><Icon name="Info" size={16} color={theme.colors.text} /></View>
+                <Text style={themedStyles.evaluationTitle}>Bilgilendirme</Text>
+              </View>
+              <Text style={themedStyles.evaluationText}>Yapay Zeka destekli "Kamp Defterim Değerlendirmesi"ne <Text style={{ fontStyle: 'italic' }}>Planlanan Kamplar</Text> içerisinden erişebilirsiniz.</Text>
+            </View>
 
             {/* AI Değerlendirmesi case 4'ten kaldırıldı, kaydedilen plan künyesine taşındı */}
 
@@ -1651,7 +1896,7 @@ export default function CampPlanPage() {
                             </View>
                             <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
                               <Icon name="Sparkles" size={11} color={theme.colors.primary} />
-                              <Text style={{ color: theme.colors.primary, fontSize: 11, marginLeft: 4 }}>AI ile değerlendirilebilir</Text>
+                              <Text style={{ color: theme.colors.primary, fontSize: 11, marginLeft: 4 }}>Kamp Defterim ile değerlendirilebilir</Text>
                             </View>
                           </View>
                       </TouchableOpacity>
@@ -1701,6 +1946,7 @@ export default function CampPlanPage() {
                         {weatherLoading ? <ActivityIndicator size="small" color={theme.colors.primary} /> : (
                           weathermap?.list?.length > 0 ? (
                             <View>
+                              {renderAIEvalButtonForPlan(plan)}
                               <View style={themedStyles.weatherSummaryCard}>
                                 <View style={styles.weatherSummaryTop}>
                                   <WeatherIcon condition={weathermap.list[0].weather[0].description || ''} size={26} />
@@ -1755,31 +2001,7 @@ export default function CampPlanPage() {
                           )
                         )}
 
-                        {/* AI Değerlendirmesi — liste view expanded */}
-                        {/* AI Değerlendirmesi — liste view, modal ile açılır */}
-                        {planAIEvalLoadings[plan.id] ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 4 }}>
-                            <ActivityIndicator size="small" color={theme.colors.primary} />
-                            <Text style={[themedStyles.helpText, { marginLeft: 8 }]}>AI değerlendiriliyor... (30-60 sn)</Text>
-                          </View>
-                        ) : planAIEvaluations[plan.id] ? (
-                          <TouchableOpacity
-                            style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, padding: 10, backgroundColor: theme.colors.surfaceVariant, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border }}
-                            onPress={() => setAiModalPlanId(plan.id)}
-                          >
-                            <Icon name="Sparkles" size={15} color={theme.colors.primary} />
-                            <Text style={{ color: theme.colors.primary, fontSize: 13, marginLeft: 6, fontWeight: '600', flex: 1 }}>AI Değerlendirmesini Gör</Text>
-                            <Icon name="ChevronRight" size={15} color={theme.colors.primary} />
-                          </TouchableOpacity>
-                        ) : (
-                          <TouchableOpacity
-                            style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, padding: 10, backgroundColor: theme.colors.surfaceVariant, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border }}
-                            onPress={() => fetchAIEvaluationForPlan(plan)}
-                          >
-                            <Icon name="Sparkles" size={15} color={theme.colors.primary} />
-                            <Text style={{ color: theme.colors.primary, fontSize: 13, marginLeft: 6, fontWeight: '600' }}>AI ile Değerlendir</Text>
-                          </TouchableOpacity>
-                        )}
+                        {/* AI butonu taşındı (konum künyesinin üstünde gösteriliyor) */}
 
                         <View style={styles.detailActionsRow}>
                           <View style={{ flexDirection: 'row' }}>
@@ -1853,7 +2075,7 @@ export default function CampPlanPage() {
                                 </View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
                                   <Icon name="Sparkles" size={11} color={theme.colors.primary} />
-                                  <Text style={{ color: theme.colors.primary, fontSize: 11, marginLeft: 4 }}>AI ile değerlendirilebilir</Text>
+                                  <Text style={{ color: theme.colors.primary, fontSize: 11, marginLeft: 4 }}>Kamp Defterim ile değerlendirilebilir</Text>
                                 </View>
                               </View>
                             </TouchableOpacity>
@@ -1902,6 +2124,7 @@ export default function CampPlanPage() {
                             {weatherLoading ? <ActivityIndicator size="small" color={theme.colors.primary} /> : (
                               weathermap?.list?.length > 0 ? (
                                 <View>
+                                  {renderAIEvalButtonForPlan(plan)}
                                   {weathermap?.days?.length === 0 ? (
                                     <View style={[themedStyles.evaluationBox, { marginBottom: 8 }]}>
                                       <View style={styles.evaluationHeader}>
@@ -1979,30 +2202,7 @@ export default function CampPlanPage() {
                               )
                             )}
 
-                            {/* AI Değerlendirmesi — carousel view, modal açar */}
-                            {planAIEvalLoadings[plan.id] ? (
-                              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 4 }}>
-                                <ActivityIndicator size="small" color={theme.colors.primary} />
-                                <Text style={[themedStyles.helpText, { marginLeft: 8 }]}>AI değerlendiriliyor... (30-60 sn)</Text>
-                              </View>
-                            ) : planAIEvaluations[plan.id] ? (
-                              <TouchableOpacity
-                                style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, padding: 10, backgroundColor: theme.colors.surfaceVariant, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border }}
-                                onPress={() => setAiModalPlanId(plan.id)}
-                              >
-                                <Icon name="Sparkles" size={15} color={theme.colors.primary} />
-                                <Text style={{ color: theme.colors.primary, fontSize: 13, marginLeft: 6, fontWeight: '600', flex: 1 }}>AI Değerlendirmesini Gör</Text>
-                                <Icon name="ChevronRight" size={15} color={theme.colors.primary} />
-                              </TouchableOpacity>
-                            ) : (
-                              <TouchableOpacity
-                                style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, padding: 10, backgroundColor: theme.colors.surfaceVariant, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border }}
-                                onPress={() => fetchAIEvaluationForPlan(plan)}
-                              >
-                                <Icon name="Sparkles" size={15} color={theme.colors.primary} />
-                                <Text style={{ color: theme.colors.primary, fontSize: 13, marginLeft: 6, fontWeight: '600' }}>AI ile Değerlendir</Text>
-                              </TouchableOpacity>
-                            )}
+                            {/* AI butonu taşındı (konum künyesinin üstünde gösteriliyor) */}
 
                             <View style={styles.detailActionsRow}>
                               <View style={{ flexDirection: 'row' }}>
@@ -2085,6 +2285,8 @@ export default function CampPlanPage() {
           setAiModalPlanId(null);
         } : undefined}
         weatherData={aiModalPlanId ? planWeatherMaps[aiModalPlanId] ?? null : null}
+        remaining={aiEvalStatus?.remaining ?? undefined}
+        limit={aiEvalStatus?.limit ?? undefined}
         campingAreaImage={(() => {
           if (!aiModalPlanId) return null;
           const plan = savedPlans.find(p => p.id === aiModalPlanId) ?? (draft.id === aiModalPlanId ? draft : null);
@@ -2099,6 +2301,23 @@ export default function CampPlanPage() {
           if (!aiModalPlanId) return undefined;
           const plan = savedPlans.find(p => p.id === aiModalPlanId) ?? (draft.id === aiModalPlanId ? draft : null);
           return plan?.location?.label || planLocationNames[aiModalPlanId] || undefined;
+        })()}
+        destinationLat={(() => {
+          if (!aiModalPlanId) return undefined;
+          const plan = savedPlans.find(p => p.id === aiModalPlanId) ?? (draft.id === aiModalPlanId ? draft : null);
+          return plan?.location?.latitude ?? undefined;
+        })()}
+        destinationLng={(() => {
+          if (!aiModalPlanId) return undefined;
+          const plan = savedPlans.find(p => p.id === aiModalPlanId) ?? (draft.id === aiModalPlanId ? draft : null);
+          return plan?.location?.longitude ?? undefined;
+        })()}
+        onOpenCampingAreaDetails={(() => {
+          if (!aiModalPlanId) return undefined;
+          return () => {
+            const plan = savedPlans.find(p => p.id === aiModalPlanId) ?? (draft.id === aiModalPlanId ? draft : null);
+            if (plan) openCampingAreaDetail(plan);
+          };
         })()}
       />
 
@@ -2208,4 +2427,5 @@ const styles = StyleSheet.create({
   paginationContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 10, backgroundColor: 'transparent' },
   dot: { width: 8, height: 8, borderRadius: 8, backgroundColor: '#e2e8f0', marginHorizontal: 6 },
   dotActive: { width: 16, height: 8, borderRadius: 8, backgroundColor: '#111827' },
+  aiEvalPremiumIcon: { position: 'absolute', right: 8, top: -6, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e6eef6' },
 });

@@ -49,7 +49,10 @@ export default function CommunityScreen() {
       <Text style={[styles.title, { color: colors.text }]}>Topluluk Seç</Text>
       <FlatList
         data={communities}
-        keyExtractor={item => item.id.toString()}
+        keyExtractor={(item, index) => {
+          const base = item && (item.id ?? item.uuid ?? item.slug) ? (item.id ?? item.uuid ?? item.slug) : 'community';
+          return `${String(base)}-${index}`;
+        }}
         renderItem={({ item }) => (
           <View style={[styles.communityItem, { borderColor: colors.border }]}>
             <Text style={[styles.communityName, { color: colors.text }]}>{item.name}</Text>

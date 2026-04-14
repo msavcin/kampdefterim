@@ -54,6 +54,10 @@ export interface AIEvaluationResponse {
   modules: string[];
   cached: boolean;
   fallback: boolean;
+  /** Kalan kullanım sayısı (backend yanıtı gönderiyorsa) */
+  remaining?: number;
+  /** Günlük limit (backend yanıtı gönderiyorsa) */
+  limit?: number;
   /**
    * Yapısal (structured) değerlendirme verisi.
    * Backend bunu gönderiyorsa client doğrudan kullanır, markdown parsing atlanır.
@@ -272,5 +276,32 @@ export async function getAIEvaluation(planData: AIEvaluationRequest): Promise<AI
     return null;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+export interface AIEvalStatusResponse {
+  remaining: number;
+  limit: number;
+  /** ISO tarih stringi: günlük sıfırlama veya bir sonraki kullanım zamanı gibi alanlar olabilir */
+  reset_at?: string | null;
+  next_available_at?: string | null;
+}
+
+/**
+ * Kullanıcının AI değerlendirme hakkı durumunu getirir (tüketmez).
+ */
+export async function getAIEvalStatus(): Promise<AIEvalStatusResponse | null> {
+  try {
+    const res = await apiFetch(`${API_URL}/me/ai-eval-status`, { method: 'GET' });
+    if (!res.ok) {
+      if (__DEV__) console.warn('[aiEvaluation] status yanıtı başarısız:', res.status);
+      return null;
+    }
+    const data = await res.json();
+    if (!data) return null;
+    return data as AIEvalStatusResponse;
+  } catch (err) {
+    if (__DEV__) console.warn('[aiEvaluation] status hata:', err);
+    return null;
   }
 }

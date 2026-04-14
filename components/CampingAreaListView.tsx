@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { MapPin, Navigation, Info } from 'lucide-react-native';
@@ -20,7 +21,9 @@ import { createThemedStyles } from '../constants/theme/sharedStyles';
 import { eventBus } from '@/lib/eventBus';
 import type { CampingArea } from '@/lib/database';
 import { getCampingTypeLabel } from '@/lib/categories';
-import { getLocationNameFromOSM } from '@/lib/osmReverseGeocode';
+const PENDING_SELECTED_KEY = 'campPlanPendingSelected';
+const PENDING_OPEN_KEY = 'campPlanPendingOpen';
+// Konum isimlerini artık lokal DB'deki `province` alanından alıyoruz
 
 const { width } = Dimensions.get('window');
 
@@ -59,6 +62,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
   const [loadingLocationIds, setLoadingLocationIds] = useState<Set<string | number>>(new Set());
   const [visibleIds, setVisibleIds] = useState<Array<string | number>>([]);
   const [showSelectMode, setShowSelectMode] = useState(false);
+  const [searchText, setSearchText] = useState('');
   const isMounted = useRef(true);
 
   useEffect(() => {
@@ -83,10 +87,14 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
     eventBus.on('camp-plan:openMap', onOpen);
     eventBus.on('camp-plan:selectedArea', onSelected);
     eventBus.on('camp-plan:modeActive', onModeActive);
-    // Eğer event kaçırıldıysa pending payload'a bak ve mode'u aç
+    // Eğer event kaçırıldıysa pending payload'a bak ve mode'u aç (kullanıcıya özel anahtar)
     (async () => {
       try {
-        const pending = await AsyncStorage.getItem('campPlanPendingOpen');
+        const { getMe } = require('../lib/userCommunityApi');
+        const u = await getMe();
+        const uid = u?.id ? String(u.id) : null;
+        const key = uid ? `${PENDING_OPEN_KEY}:${uid}` : PENDING_OPEN_KEY;
+        const pending = await AsyncStorage.getItem(key);
         if (pending) {
           setShowSelectMode(true);
         }
@@ -110,55 +118,130 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
     return getCampingTypeLabel(type);
   };
 
-  // Kamp alanlarını reverse geocode ederek il/ilçe için metin döndürür.
-  // Aynı lat/lon için cache kullanılır, ayrıca Nominatim isteğini dakikada 60'a sınırlayan
-  // rate-limiter ile 429 hatalarının önüne geçiyoruz.
-  useEffect(() => {
-    if (!isConnected) return;
+  function getAreaType(area: CampingArea): string {
+    let tag = '';
+    const tags = (area as any).tags;
+    if (typeof tags === 'string' && tags.trim() !== '') {
+      tag = tags;
+    } else if (typeof tags === 'object' && tags !== null && tags.type) {
+      tag = tags.type;
+    } else if (typeof area.type === 'string' && area.type.trim() !== '') {
+      tag = area.type;
+    }
+    return tag;
+  }
 
-    const idsToFetch = campingAreas
+  function getOwnerName(area: CampingArea): string {
+    if ((area as any).owner_username) {
+      return (area as any).owner_username;
+    }
+    const tags = (area as any).tags;
+    if (typeof tags === 'object' && tags?.user_submitted === 'yes') {
+      return 'Kullanıcı Ekledi';
+    }
+    return 'Kamp Defterim';
+  }
+
+  // Kamp alanları için il/ilçe bilgisini lokal DB'de saklanan `province` alanından al.
+  // `province` alanı obje veya JSON string olabilir (ör. { il, ilce, plaka }).
+  useEffect(() => {
+    const idsToProcess = campingAreas
       .map(area => {
         const rawId = (area as any).id;
         return {
           id: rawId !== undefined && rawId !== null ? String(rawId) : null,
-          lat: area.latitude,
-          lon: area.longitude,
+          province: (area as any).province,
         };
       })
-      .filter(({ id, lat, lon }) => {
+      .filter(({ id }) => {
         return (
           id !== null &&
-          typeof lat === 'number' &&
-          typeof lon === 'number' &&
           !(id in locationNames) &&
           !loadingLocationIds.has(id) &&
           visibleIds.includes(id)
         );
       })
-      .slice(0, 10); // çok fazla isteğe girmemek için sınırlama
+      .slice(0, 10);
 
-    idsToFetch.forEach(({ id, lat, lon }) => {
+    idsToProcess.forEach(({ id, province }) => {
+      if (!isMounted.current) return;
       setLoadingLocationIds(prev => new Set(prev).add(id));
-      getLocationNameFromOSM(lat, lon)
-        .then((name) => {
-          if (!isMounted.current) return;
-          setLocationNames(prev => ({ ...prev, [id]: name ?? null }));
-        })
-        .catch((err) => {
-          console.warn('[CampingAreaListView] Reverse geocode hatası:', err);
-          if (!isMounted.current) return;
-          setLocationNames(prev => ({ ...prev, [id]: null }));
-        })
-        .finally(() => {
-          if (!isMounted.current) return;
-          setLoadingLocationIds(prev => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
+
+      // Eğer lokal `province` bilgisi yoksa, state'e null yazmayıp
+      // sadece loading flag'ini temizleyelim — böylece UI "Konum alınamıyor"
+      // yerine boş gösterir (daha az yanıltıcı).
+      if (!province) {
+        if (!isMounted.current) return;
+        setLoadingLocationIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
         });
+        return;
+      }
+
+      let name: string | null = null;
+      try {
+        if (typeof province === 'string') {
+          try {
+            const parsed = JSON.parse(province);
+            if (parsed && typeof parsed === 'object') {
+              const il = parsed.il || parsed.state || parsed.province || parsed.city || null;
+              const ilce = parsed.ilce || parsed.county || parsed.town || parsed.district || parsed.city_district || null;
+              if (il && ilce && il !== ilce) name = `${il}, ${ilce}`;
+              else name = il || ilce || null;
+            } else {
+              name = String(parsed);
+            }
+          } catch {
+            name = String(province);
+          }
+        } else if (typeof province === 'object') {
+          const il = province.il || province.state || province.province || province.city || null;
+          const ilce = province.ilce || province.county || province.town || province.district || province.city_district || null;
+          if (il && ilce && il !== ilce) name = `${il}, ${ilce}`;
+          else name = il || ilce || null;
+        }
+      } catch (err) {
+        console.warn('[CampingAreaListView] Local province parse hatası:', err);
+        name = null;
+      } finally {
+        if (!isMounted.current) return;
+        setLocationNames(prev => ({ ...prev, [id]: name ?? null }));
+        setLoadingLocationIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
     });
-  }, [campingAreas, visibleIds, isConnected, locationNames, loadingLocationIds]);
+  }, [campingAreas, visibleIds]);
+
+  const filteredCampingAreas = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
+    if (!query) return campingAreas;
+
+    return campingAreas.filter(area => {
+      const name = (area.name ?? '').toString().toLowerCase();
+      const type = getAreaType(area).toLowerCase();
+      const owner = getOwnerName(area).toLowerCase();
+      const location = (locationNames[String((area as any).id)] ?? '').toString().toLowerCase();
+      let provinceText = location;
+      if (!provinceText && area.province) {
+        if (typeof area.province === 'string') {
+          provinceText = area.province.toLowerCase();
+        } else if (typeof area.province === 'object') {
+          provinceText = JSON.stringify(area.province).toLowerCase();
+        }
+      }
+      return (
+        name.includes(query) ||
+        type.includes(query) ||
+        owner.includes(query) ||
+        provinceText.includes(query)
+      );
+    });
+  }, [campingAreas, searchText, locationNames]);
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ item: CampingArea }> }) => {
@@ -183,30 +266,8 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
     return null;
   };
 
-  const getAreaType = (area: CampingArea): string => {
-    let tag = '';
-    if (typeof area.tags === 'string' && (area.tags as string).trim() !== '') {
-      tag = area.tags as string;
-    } else if (typeof area.tags === 'object' && area.tags !== null && area.tags.type) {
-      tag = area.tags.type;
-    } else if (typeof area.type === 'string' && area.type.trim() !== '') {
-      tag = area.type;
-    }
-    return tag;
-  };
-
   const isUserSubmitted = (area: CampingArea): boolean => {
     return typeof area.tags === 'object' && area.tags?.user_submitted === 'yes';
-  };
-
-  const getOwnerName = (area: CampingArea): string => {
-    if ((area as any).owner_username) {
-      return (area as any).owner_username;
-    }
-    if (isUserSubmitted(area)) {
-      return 'Kullanıcı Ekledi';
-    }
-    return 'Kamp Defterim';
   };
 
   const handleNavigationMenu = (area: CampingArea) => {
@@ -270,7 +331,7 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
             onError={coverImage ? handleImageLoadEnd : undefined}
           />
           {isImageLoading && coverImage && (
-            <View style={styles.loadingOverlay}>
+            <View style={[styles.loadingOverlay, { backgroundColor: colors.surface + 'cc' }]}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
           )}
@@ -355,24 +416,32 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
               <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: colors.primaryLight }, disabled && styles.actionButtonDisabled]}
                 onPress={() => {
-                  if (disabled) return;
-                  try {
-                    const payload = {
-                      id: (item as any).id,
-                      latitude: item.latitude,
-                      longitude: item.longitude,
-                      name: item.name,
-                      type: getAreaType(item) || undefined,
-                      gotoStep: 3,
-                    };
-                    // Persist pending selection so camp-plan reads it if event is missed
-                    AsyncStorage.setItem('campPlanPendingSelected', JSON.stringify(payload)).catch(() => {});
-                    eventBus.emit('camp-plan:selectedArea', payload);
-                    router.push('/camp-plan');
-                  } catch (e) {
-                    console.warn('[CampingAreaListView] selectForPlan hata', e);
-                  }
-                }}
+                      if (disabled) return;
+                      try {
+                        const payload = {
+                          id: (item as any).id,
+                          latitude: item.latitude,
+                          longitude: item.longitude,
+                          name: item.name,
+                          type: getAreaType(item) || undefined,
+                          gotoStep: 3,
+                        };
+                        // Persist pending selection so camp-plan reads it if event is missed (user-scoped key)
+                        (async () => {
+                          try {
+                            const { getMe } = require('../lib/userCommunityApi');
+                            const u = await getMe();
+                            const uid = u?.id ? String(u.id) : null;
+                            const key = uid ? `${PENDING_SELECTED_KEY}:${uid}` : PENDING_SELECTED_KEY;
+                            await AsyncStorage.setItem(key, JSON.stringify(payload));
+                          } catch (e) {}
+                          try { eventBus.emit('camp-plan:selectedArea', payload); } catch (e) {}
+                          try { router.push('/camp-plan'); } catch (e) {}
+                        })();
+                      } catch (e) {
+                        console.warn('[CampingAreaListView] selectForPlan hata', e);
+                      }
+                    }}
                 disabled={disabled}
               >
                 <Feather name="check-circle" size={16} color={disabled ? colors.muted : colors.primary} />
@@ -402,10 +471,23 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
         </View>
       )}
 
+      <View style={styles.searchBarContainer}>
+        <TextInput
+          value={searchText}
+          onChangeText={setSearchText}
+          placeholder="Kamp alanı ara..."
+          placeholderTextColor={colors.muted}
+          style={[styles.searchInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+          returnKeyType="search"
+        />
+      </View>
       <FlatList
-        data={campingAreas}
+        data={filteredCampingAreas}
         renderItem={renderItem}
-        keyExtractor={(item) => String((item as any).id)}
+        keyExtractor={(item, index) => {
+          const base = (item as any)?.id ?? (item as any)?.uuid ?? (item as any)?.area_id ?? 'area';
+          return `${String(base)}-${index}`;
+        }}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={true}
         viewabilityConfig={viewabilityConfig}
@@ -458,6 +540,18 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 12,
     paddingBottom: 24,
+  },
+  searchBarContainer: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  searchInput: {
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
   },
   listItem: {
     borderRadius: 12,

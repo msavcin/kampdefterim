@@ -3,6 +3,7 @@ import { Slot, useRouter, useSegments } from 'expo-router';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import useTokenAutoLogout from '@/hooks/useTokenAutoLogout';
 import { View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import ThemeProvider from '../components/ThemeProvider';
 import { isLoggedIn } from '../lib/auth';
 
@@ -46,8 +47,10 @@ export default function RootLayout() {
   }, [checked, shouldRedirect]);
 
   return (
-    <ThemeProvider>
-      <Slot />
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <Slot />
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

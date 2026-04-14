@@ -214,6 +214,7 @@ export default function MapScreen() {
   // Kullanıcı ve topluluk üyeliği state'leri
   const [user, setUser] = useState<any>(null);
   const [communityMember, setCommunityMember] = useState<any>(null);
+  const getUserScopedStorageKey = (key: string, userId?: string | number | null) => (userId ? `${key}:${userId}` : key);
   
   // Kamp planı taslağı gösterge
   const [hasDraftPlan, setHasDraftPlan] = useState(false);
@@ -272,14 +273,14 @@ export default function MapScreen() {
   useEffect(() => {
     const loadDraftAndSaved = async () => {
       try {
-        const draftRaw = await AsyncStorage.getItem('campPlannerDraft');
+        const draftRaw = await AsyncStorage.getItem(getUserScopedStorageKey('campPlannerDraft', user?.id));
         setHasDraftPlan(!!draftRaw);
       } catch {
         setHasDraftPlan(false);
       }
 
       try {
-        const savedRaw = await AsyncStorage.getItem('campPlannerSavedPlans');
+        const savedRaw = await AsyncStorage.getItem(getUserScopedStorageKey('campPlannerSavedPlans', user?.id));
         if (savedRaw) {
           const parsed = JSON.parse(savedRaw);
           setPlanCount(Array.isArray(parsed) ? parsed.length : 0);
@@ -334,12 +335,12 @@ export default function MapScreen() {
     // Eğer camp-plan tarafından pending payload yazıldıysa (event kaçırıldıysa) onu oku
     (async () => {
       try {
-        const pending = await AsyncStorage.getItem('campPlanPendingOpen');
+        const pending = await AsyncStorage.getItem(getUserScopedStorageKey('campPlanPendingOpen', user?.id));
         if (pending) {
           const parsed = JSON.parse(pending);
           if (parsed) {
             handleOpenFromCampPlan(parsed);
-            await AsyncStorage.removeItem('campPlanPendingOpen');
+            await AsyncStorage.removeItem(getUserScopedStorageKey('campPlanPendingOpen', user?.id));
           }
         }
       } catch (e) {
@@ -351,7 +352,7 @@ export default function MapScreen() {
       eventBus.off('camp-planner:updated', handleUpdate);
       eventBus.off('camp-plan:openMap', handleOpenFromCampPlan);
     };
-  }, []);
+  }, [user?.id]);
 
   // Konum izni verilmediyse modal sadece ilk açılışta ve gerekli durumlarda açılsın
   useEffect(() => {
@@ -959,6 +960,13 @@ export default function MapScreen() {
     }
   }, [showNotificationBar]);
 
+  const resetFilterSelections = () => {
+    setSelectedTags(campingTypes.map(t => t.id));
+    setSelectedFilters(FILTERS.map(f => f.key));
+    setSelectedProvinces([]);
+    setProvinceAreaList([]);
+  };
+
   // Mevcut konuma odaklanma fonksiyonu
   const handleShowCurrentLocation = async () => {
     try {
@@ -983,7 +991,8 @@ export default function MapScreen() {
         
         if (!isMounted.current) return;
         
-        // Haritayı kullanıcının konumuna döndür
+        // Seçilmiş filtreleri sıfırla ve haritayı kullanıcının konumuna döndür
+        resetFilterSelections();
         setMapMoveQuery(null);
         setMapCenter({ latitude, longitude });
         
@@ -1073,7 +1082,8 @@ export default function MapScreen() {
           if (__DEV__) console.warn('[LOCATION] lastKnownLocation kaydedilemedi:', err);
         });
         
-        // Haritayı kullanıcının konumuna döndür
+        // Seçilmiş filtreleri sıfırla ve haritayı kullanıcının konumuna döndür
+        resetFilterSelections();
         setMapMoveQuery(null);
         setMapCenter({ latitude, longitude });
         // WebView'a haritayı ortala komutu hemen gönder
@@ -1615,6 +1625,7 @@ export default function MapScreen() {
   const [selectedLocation, setSelectedLocation] = useState<{latitude: number, longitude: number} | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [provinceAreaList, setProvinceAreaList] = useState<CampingArea[]>([]);
   // Artık filtreler merkezi kategori yönetiminden geliyor
   const [selectedTags, setSelectedTags] = useState(campingTypes.map(t => t.id));
 
@@ -1639,6 +1650,40 @@ export default function MapScreen() {
   useEffect(() => {
     setSelectedFilters(FILTERS.map(f => f.key));
   }, [FILTERS]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!selectedProvinces || selectedProvinces.length === 0) {
+      setProvinceAreaList([]);
+      setMapMoveQuery(null);
+      return;
+    }
+
+    (async () => {
+      try {
+        const results = await getDatabase().listCampingAreasByProvince(selectedProvinces);
+        if (isCancelled) return;
+        setProvinceAreaList(results);
+
+        if (results.length > 0) {
+          const avgLat = results.reduce((sum, area) => sum + (area.latitude || 0), 0) / results.length;
+          const avgLng = results.reduce((sum, area) => sum + (area.longitude || 0), 0) / results.length;
+          const center = { latitude: avgLat, longitude: avgLng };
+          setMapCenter(center);
+          setMapMoveQuery(center);
+        }
+      } catch (error) {
+        console.warn('[index] listCampingAreasByProvince failed:', error);
+        if (!isCancelled) {
+          setProvinceAreaList([]);
+        }
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedProvinces]);
 
   // Türkiye geneli filtre state'leri
   const [turkeyWideKeys, setTurkeyWideKeys] = useState<string[]>([]);
@@ -2194,7 +2239,8 @@ export default function MapScreen() {
   
   // filteredCampingAreas'ı memoize et - gereksiz re-render'ları önle
   const filteredCampingAreas = useMemo(() => {
-    let filtered = filterCampingAreasByUser(campingAreas, user, isGuest);
+    const sourceAreas = selectedProvinces && selectedProvinces.length > 0 ? provinceAreaList : campingAreas;
+    let filtered = filterCampingAreasByUser(sourceAreas, user, isGuest);
     filtered = filtered.filter(area => {
       // Kendi kamp alanlarım
       if (!selectedFilters.includes('own') && String(area.owner_id) === String(user?.id)) return false;
@@ -2210,11 +2256,22 @@ export default function MapScreen() {
       if (!selectedFilters.includes('user') && area.visibility === 'public' && area.owner_id) return false;
       // KampDefterim Paylaşımları (owner_id BOŞ olanlar)
       if (!selectedFilters.includes('system') && (!area.owner_id || area.owner_id === '')) return false;
+
+      // Kamp türü filtresi (selectedTags) - il seçili olsa da bu filtre uygulanmalı
+      const rawTags = (area as any).tags;
+      const areaType: string =
+        (typeof rawTags === 'object' && rawTags !== null && rawTags.type)
+          ? rawTags.type
+          : (typeof rawTags === 'string' && (rawTags as string).trim() !== '')
+            ? rawTags
+            : (typeof (area as any).type === 'string' ? (area as any).type : '');
+      if (selectedTags.length > 0 && areaType && !selectedTags.includes(areaType)) return false;
+
       return true;
     });
 
     // Türkiye geneli alanları ekle (radius dışındaki alanlar, duplicate kontrolü ile)
-    if (turkeyWideAreas.length > 0) {
+    if (turkeyWideAreas.length > 0 && (!selectedProvinces || selectedProvinces.length === 0)) {
       const existingIds = new Set(filtered.map((a: any) => String(a.id)));
       const accessFiltered = filterCampingAreasByUser(turkeyWideAreas, user, isGuest);
       for (const area of accessFiltered) {
@@ -2256,8 +2313,20 @@ export default function MapScreen() {
     // İl filtresi uygulanıyorsa sadece seçili illeri dahil et
     if (selectedProvinces && selectedProvinces.length > 0) {
       filtered = filtered.filter(a => {
-        const vid = (a as any).valilik_id;
-        return vid && selectedProvinces.includes(Number(vid));
+        let vid: number | null = null;
+        if ((a as any).valilik_id !== undefined && (a as any).valilik_id !== null) {
+          vid = Number((a as any).valilik_id);
+        } else if ((a as any).province && typeof (a as any).province === 'object') {
+          vid = Number((a as any).province.plaka || (a as any).province.valilik_id || (a as any).province.plate || null);
+        } else if (typeof (a as any).province === 'string') {
+          try {
+            const parsed = JSON.parse((a as any).province);
+            vid = Number(parsed?.plaka || parsed?.valilik_id || parsed?.plate || null);
+          } catch {
+            vid = null;
+          }
+        }
+        return vid ? selectedProvinces.includes(vid) : false;
       });
     }
 
@@ -3371,7 +3440,7 @@ export default function MapScreen() {
           // Persist pending selection so camp-plan reads it if event is missed
           (async () => {
             try {
-              await AsyncStorage.setItem('campPlanPendingSelected', JSON.stringify(eventPayload));
+              await AsyncStorage.setItem(getUserScopedStorageKey('campPlanPendingSelected', user?.id), JSON.stringify(eventPayload));
             } catch (e) {}
             try { eventBus.emit('camp-plan:selectedArea', eventPayload); } catch (e) {}
             // seçim modu kapat
@@ -3901,7 +3970,8 @@ export default function MapScreen() {
                 const isFilterActive =
                   turkeyWideKeys.length > 0 ||
                   selectedTags.length < campingTypes.length ||
-                  selectedFilters.length < FILTERS.filter(f => f.visible).length;
+                  selectedFilters.length < FILTERS.filter(f => f.visible).length ||
+                  (typeof selectedProvinces !== 'undefined' && selectedProvinces.length > 0);
                 return isFilterActive ? { backgroundColor: colors.primary } : undefined;
               })()
             ]}
@@ -3930,7 +4000,8 @@ export default function MapScreen() {
               const isFilterActive =
                 turkeyWideKeys.length > 0 ||
                 selectedTags.length < campingTypes.length ||
-                selectedFilters.length < FILTERS.filter(f => f.visible).length;
+                selectedFilters.length < FILTERS.filter(f => f.visible).length ||
+                (typeof selectedProvinces !== 'undefined' && selectedProvinces.length > 0);
               return (
                 <View style={{ position: 'relative' }}>
                   <Filter size={20} color={disabled ? colors.muted : isFilterActive ? '#fff' : colors.primary} />
@@ -4001,7 +4072,7 @@ export default function MapScreen() {
         </View>
       )}
       {/* Bildirim Barı - Filtre satırının hemen altında */}
-      {showNotificationBar && Array.isArray(notifications) && notifications.length > 0 && (
+      {showNotificationBar && Array.isArray(notifications) && notifications.length > 0 && !!(user?.isPremium || user?.offline_enabled) && (
         <Animated.View style={[styles.notificationBar, {
           opacity: notificationBarAnim,
           backgroundColor:
@@ -4309,7 +4380,7 @@ export default function MapScreen() {
                   style={styles.compactBtn}
                   onPress={() => {
                     (async () => {
-                      try { await AsyncStorage.setItem('campPlanPendingStep', JSON.stringify({ step: 1 })); } catch (e) {}
+                      try { await AsyncStorage.setItem(getUserScopedStorageKey('campPlanPendingStep', user?.id), JSON.stringify({ step: 1 })); } catch (e) {}
                       try { eventBus.emit('camp-plan:mapBack'); } catch {}
                       setSelectForPlanMode(false);
                       try { router.push('/camp-plan'); } catch (e) {}
@@ -4326,7 +4397,7 @@ export default function MapScreen() {
                     style={styles.compactBtn}
                     onPress={() => {
                       (async () => {
-                        try { await AsyncStorage.setItem('campPlanPendingStep', JSON.stringify({ step: 3 })); } catch (e) {}
+                        try { await AsyncStorage.setItem(getUserScopedStorageKey('campPlanPendingStep', user?.id), JSON.stringify({ step: 3 })); } catch (e) {}
                         try { eventBus.emit('camp-plan:mapNext'); } catch {}
                         setSelectForPlanMode(false);
                         try { eventBus.emit('camp-plan:modeActive', { active: false }); } catch {}
@@ -4341,9 +4412,9 @@ export default function MapScreen() {
                     onPress={() => {
                         (async () => {
                           try {
-                            await AsyncStorage.removeItem('campPlanPendingOpen');
-                            await AsyncStorage.removeItem('campPlanPendingStep');
-                            await AsyncStorage.removeItem('campPlanPendingSelected');
+                            await AsyncStorage.removeItem(getUserScopedStorageKey('campPlanPendingOpen', user?.id));
+                            await AsyncStorage.removeItem(getUserScopedStorageKey('campPlanPendingStep', user?.id));
+                            await AsyncStorage.removeItem(getUserScopedStorageKey('campPlanPendingSelected', user?.id));
                           } catch (e) {}
                           // Restore previous filters/map if we saved them
                           try {

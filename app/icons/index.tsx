@@ -11,14 +11,14 @@ type IconProps = {
   [key: string]: any;
 };
 
-const Icon: React.FC<IconProps> = ({ name, size = 18, color = '#000', ...rest }) => {
+const Icon: React.FC<IconProps> = ({ name, size = 18, color = '#000000', ...rest }) => {
   // Try lucide-react-native first
   const LucideComp = (Lucide as any)[name];
   if (LucideComp) return <LucideComp size={size} color={color} {...rest} />;
 
   // Then try svgIcons (string-based SVGs)
   try {
-    const svg = getSVGIcon(name as any, { width: size, height: size, stroke: color, fill: 'none' });
+    const svg = getSVGIcon(name as any, { width: size, height: size, stroke: color, fill: 'transparent' });
     if (svg) return <SvgXml xml={svg} width={size} height={size} />;
   } catch (e) {
     // ignore

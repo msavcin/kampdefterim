@@ -164,6 +164,7 @@ import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle, Share2 } from 'lucide-react-native';
+import ThemedButton from './ThemedButton';
 import { CampingArea, getDatabase } from '@/lib/database';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { deleteCampingAreaSmart } from '@/lib/syncManager';
@@ -259,6 +260,9 @@ interface CampingAreaDetailModalProps {
 
 
 import { getCampingTypeLabel, getCampingAreaBgColor } from '../lib/categories';
+import RatingComment from './RatingComment';
+import RatingFormModal from './RatingFormModal';
+import { postRatingForCampground, getRatingsSummary, getMyRating } from '@/lib/ratingApi';
 
 
 
@@ -490,6 +494,13 @@ export default function CampingAreaDetailModal({
 }: CampingAreaDetailModalProps & { isSuperAdmin?: boolean; currentUserId?: string | number }) {
   const { colors, scheme } = useTheme();
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
+  const [showRatingForm, setShowRatingForm] = useState(false);
+  const [ratingRefreshKey, setRatingRefreshKey] = useState(0);
+  const [kdAggregate, setKdAggregate] = useState<{ rating: number; review_count: number } | null>(null);
+  const [quickVoteLoading, setQuickVoteLoading] = useState(false);
+  const [userQuickRating, setUserQuickRating] = useState<number | null>(null);
+  const [ratingFormLoading, setRatingFormLoading] = useState(false);
+  const [ratingFormDefaults, setRatingFormDefaults] = useState<{ rating?: number; comment?: string; anon_name?: string } | null>(null);
 
   // Modal açıldığında görselleri yeniden kontrol et
   useEffect(() => {
@@ -584,6 +595,48 @@ export default function CampingAreaDetailModal({
     Linking.openURL(url).catch(() => {
       Alert.alert('Hata', 'Yandex Haritalar açılamadı.');
     });
+  };
+
+  // Kamp Defterim özetini çek
+  const fetchKDAggregate = async () => {
+    try {
+      const id = (campingArea as any)?.id;
+      if (!id) {
+        setKdAggregate(null);
+        return;
+      }
+      const sum = await getRatingsSummary(id);
+      if (sum && (typeof sum.rating === 'number' || typeof sum.review_count === 'number')) {
+        setKdAggregate({ rating: Number(sum.rating ?? 0), review_count: Number(sum.review_count ?? 0) });
+      } else {
+        setKdAggregate(null);
+      }
+    } catch (e) {
+      console.warn('[CampingAreaDetailModal] fetchKDAggregate error', e);
+    }
+  };
+
+  useEffect(() => {
+    if ((campingArea as any)?.id) fetchKDAggregate();
+  }, [campingArea?.id, ratingRefreshKey]);
+
+  const handleQuickVote = async (value: number) => {
+    if (!campingArea || quickVoteLoading) return;
+    setQuickVoteLoading(true);
+    setUserQuickRating(value);
+    try {
+      await postRatingForCampground((campingArea as any).id, { rating: value });
+      // yenile
+      setRatingRefreshKey(k => k + 1);
+      await fetchKDAggregate();
+      Alert.alert('Teşekkürler', 'Oyunuz kaydedildi.');
+    } catch (e: any) {
+      console.warn('[CampingAreaDetailModal] quickVote error', e);
+      Alert.alert('Hata', e?.message || 'Oy kaydedilemedi');
+      setUserQuickRating(null);
+    } finally {
+      setQuickVoteLoading(false);
+    }
   };
 
   // Hata bildirimi için mail gönder
@@ -1117,10 +1170,36 @@ export default function CampingAreaDetailModal({
               <View style={styles.ratingRow}>
                 <Star size={16} color="#fbbf24" fill="#fbbf24" />
                 <Text style={[styles.ratingText, { color: colors.textSecondary }]}>
-                  {campingArea.rating.toFixed(1)} ({campingArea.review_count ? String(campingArea.review_count) : '0'} değerlendirme)
+                  {campingArea.rating.toFixed(1)} ({campingArea.review_count ? String(campingArea.review_count) : '0'} değerlendirme | Google Maps)
                 </Text>
               </View>
             ) : null}
+
+            {(kdAggregate || kdAggregate === null) && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                <Star size={16} color="#fbbf24" fill="#fbbf24" />
+                <Text style={[styles.ratingText, { color: colors.textSecondary }]}>
+                  {kdAggregate ? `${kdAggregate.rating.toFixed(1)} (${kdAggregate.review_count} değerlendirme | Kamp Defterim)` : 'Henüz Kamp Defterim oyu yok'}
+                </Text>
+              </View>
+            )}
+
+          </View>
+
+          {/* Kamp Defterim özet (Google rating'in altına gelecek) */}
+          <View style={{ marginTop: 8 }}>
+            {/* Kamp Defterim oylama barı — Açıklama künyesinin üstünde ortalı şekilde */}
+            <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>Kamp Defterim Oyu Ver</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8 }}>
+                {([1,2,3,4,5]).map(n => (
+                  <TouchableOpacity key={n} onPress={() => handleQuickVote(n)} style={{ padding: 6 }} disabled={quickVoteLoading}>
+                    <Star size={28} color={n <= (userQuickRating ?? Math.round(Number(kdAggregate?.rating ?? 0))) ? '#f59e0b' : colors.surfaceVariant} fill={n <= (userQuickRating ?? Math.round(Number(kdAggregate?.rating ?? 0))) ? '#f59e0b' : 'none'} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {quickVoteLoading && <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />}
+            </View>
           </View>
 
           {/* Description */}
@@ -1291,6 +1370,32 @@ export default function CampingAreaDetailModal({
             })()}
           </View>
 
+          {/* Kamp Defterim yorum listesi (sayfanın en altında) */}
+          <View style={[styles.section, { backgroundColor: colors.surface }]}> 
+            <RatingComment campingAreaId={(campingArea as any).id} currentUserId={currentUserId} perPage={5} refreshKey={ratingRefreshKey} onDeleted={() => setRatingRefreshKey(k => k + 1)} />
+            <View style={{ height: 12 }} />
+            <ThemedButton variant="primary" onPress={async () => {
+              if (!campingArea || !(campingArea as any).id) {
+                setShowRatingForm(true);
+                return;
+              }
+              setRatingFormLoading(true);
+              try {
+                const my = await getMyRating((campingArea as any).id);
+                if (my) setRatingFormDefaults({ rating: my.rating ? Number(my.rating) : undefined, comment: my.comment ?? undefined, anon_name: my.anon_name ?? undefined });
+                else setRatingFormDefaults(null);
+              } catch (e) {
+                console.warn('[CampingAreaDetailModal] getMyRating error', e);
+                setRatingFormDefaults(null);
+              } finally {
+                setRatingFormLoading(false);
+                setShowRatingForm(true);
+              }
+            }} disabled={ratingFormLoading}>
+              {ratingFormLoading ? 'Yükleniyor...' : 'Yorum yap / Güncelle'}
+            </ThemedButton>
+          </View>
+
           {/* Edit Button: Sadece superadmin veya owner görebilir */}
           {isUserSubmitted && (isSuperAdmin || (currentUserId && campingArea.owner_id && String(currentUserId) === String(campingArea.owner_id))) && (
             <View style={[styles.section, { backgroundColor: colors.surface }]}>
@@ -1300,6 +1405,17 @@ export default function CampingAreaDetailModal({
             </View>
           )}
         </ScrollView>
+
+        {/* Rating form modal */}
+        <RatingFormModal
+          visible={showRatingForm}
+          onClose={() => { setShowRatingForm(false); setRatingFormDefaults(null); }}
+          campingAreaId={(campingArea as any).id}
+          onSubmitted={() => setRatingRefreshKey(k => k + 1)}
+          defaultRating={ratingFormDefaults?.rating ?? userQuickRating ?? (kdAggregate ? Math.round(kdAggregate.rating) : 3)}
+          defaultComment={ratingFormDefaults?.comment}
+          defaultAnonName={ratingFormDefaults?.anon_name}
+        />
 
         {/* Hata Bildirim Modalı */}
         <Modal visible={showErrorReport} animationType="slide" transparent onRequestClose={() => setShowErrorReport(false)}>
