@@ -97,6 +97,15 @@ export default function LoginScreen() {
         console.log('[LOGIN] SecureStore jwt_token:', justSavedToken);
         const tokenCheck = await saveToken ? await SecureStore.getItemAsync('jwt_token') : null;
         console.log('[LOGIN] saveToken sonrası kontrol:', tokenCheck);
+        // DEBUG: refresh token'ın SecureStore'da kayıtlı olup olmadığını kontrol et
+        try {
+          const justSavedRefresh = await SecureStore.getItemAsync('refresh_token');
+          if (justSavedRefresh) {
+            console.log('[LOGIN] SecureStore refresh_token bulundu:', String(justSavedRefresh).slice(0,20) + '...');
+          } else {
+            console.log('[LOGIN] SecureStore refresh_token yok');
+          }
+        } catch (e) { console.log('[LOGIN] refresh_token kontrolü hata', e); }
         // Kullanıcı ve topluluk üyeliği durumunu kontrol et
         const me = await getMe();
         console.log('[LOGIN] getMe sonucu:', me);

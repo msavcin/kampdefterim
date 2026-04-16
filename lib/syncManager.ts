@@ -94,8 +94,10 @@ export async function deleteCampingAreaSmart({ campingArea, isConnected }) {
           });
           if (refreshRes.ok) {
             const data = await refreshRes.json();
-            if (data.token) await saveToken(data.token);
-            if (data.refreshToken) await saveRefreshToken(data.refreshToken);
+            const newToken = data?.token ?? null;
+            if (newToken) await saveToken(newToken);
+            const newRefresh = data?.refreshToken ?? data?.refresh_token ?? null;
+            if (newRefresh) await saveRefreshToken(newRefresh);
             console.log('[deleteCampingAreaSmart] Token silme öncesi yenilendi.');
           }
         }

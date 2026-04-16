@@ -2,15 +2,19 @@ import 'react-native-gesture-handler';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, FlatList } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { useIsFocused } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { apiFetch } from '@/lib/apiFetch';
 import { API_URL } from '@/lib/config';
+import { openConversationOrCommunity } from '@/lib/chatNavigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { listCommunities } from '@/lib/userCommunityApi';
+import { listCommunities, getMe } from '@/lib/userCommunityApi';
+import { createChatSocket } from '@/lib/chatSocket';
+import { getToken } from '@/lib/auth';
 import FriendAvatar from '@/components/FriendAvatar';
 import ThemedIcon from '@/components/ThemedIcon';
 import { useTheme } from '@/components/ThemeProvider';
+import { createThemedStyles } from '../../constants/theme/sharedStyles';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 const LAST_OPENED_KEY = '@chat_last_opened_v1';
 import { emitChatEvent, onChatEvent } from '@/lib/chatEvents';
@@ -36,6 +40,27 @@ function getConvLastTime(conv:any) {
   return !isNaN(t) ? t : 0;
 }
 
+function extractParticipant(item:any) {
+  const userCandidates = [item.other_user, item.recipient, item.user, item.participant_user, item.participant, item.other_user_object, item.recipient_object];
+  for (const u of userCandidates) {
+    if (u && typeof u === 'object') {
+      const name = u.name || u.full_name || u.display_name || u.username || (u.id ? String(u.id) : undefined);
+      const avatar_url = u.avatar_url || u.avatar || u.avatarUrl || u.photo;
+      if (name || avatar_url) return { name, avatar_url };
+    }
+  }
+  const nameFields = [item.other_user_name, item.recipient_name, item.other_username, item.recipient_username, item.name, item.title, item.display_name, item.chat_name];
+  for (const n of nameFields) if (n) return { name: String(n) };
+  const arr = item.participants ?? item.members ?? item.participants_ids ?? item.user_ids ?? item.memberships ?? item.participant_ids;
+  if (Array.isArray(arr) && arr.length) {
+    const obj = arr.find((p:any) => p && typeof p === 'object' && (p.name || p.username || p.avatar_url));
+    if (obj) return { name: obj.name || obj.username || obj.display_name, avatar_url: obj.avatar_url || obj.avatar };
+    const id = arr.find((p:any) => p && (typeof p === 'string' || typeof p === 'number'));
+    if (id) return { name: String(id) };
+  }
+  return null;
+}
+
 function extractParticipantIds(conv:any) {
   const ids = new Set<string>();
   if (!conv) return [];
@@ -44,7 +69,7 @@ function extractParticipantIds(conv:any) {
     for (const p of conv.participants) {
       if (!p) continue;
       if (typeof p === 'object') {
-        pushId(p.id ?? p.user_id ?? p.recipient_id ?? p.other_user_id);
+        pushId(p.user_id ?? p.recipient_id ?? p.other_user_id ?? p.id);
       } else {
         pushId(p);
       }
@@ -55,9 +80,26 @@ function extractParticipantIds(conv:any) {
   const candidateObjs = ['other_user','recipient','user','participant_user','participant','other_user_object','recipient_object'];
   for (const k of candidateObjs) {
     const u = conv[k];
-    if (u && typeof u === 'object') pushId(u.id ?? u.user_id);
+    if (u && typeof u === 'object') pushId(u.user_id ?? u.id);
   }
   return Array.from(ids);
+}
+
+function isCommunityConversationObj(c:any) {
+  if (!c) return false;
+  try {
+    const type = String(c?.type ?? c?.conversation_type ?? c?.kind ?? c?.kind_type ?? '').toLowerCase();
+    const communityTypeNames = ['community','group','channel','community_chat','group_chat','community_conversation'];
+    if (type && communityTypeNames.includes(type)) return true;
+  } catch (e) { }
+  try {
+    if (c?.community_id) return true;
+    if (c?.community && (c.community.id || c.community.community_id)) return true;
+    if (c?.conversation && (c.conversation.community_id || (c.conversation.community && (c.conversation.community.id || c.conversation.community.community_id)))) return true;
+    if (c?.metadata && (c.metadata.community_id || c.metadata.communityId)) return true;
+    if (c?.meta && (c.meta.community_id || c.meta.communityId)) return true;
+  } catch (e) { }
+  return false;
 }
 
 const normalizeIndexKey = (value:any) => {
@@ -70,7 +112,11 @@ function getFriendConversation(friend:any, convIndex:any, conversations:any[]) {
   if (typeof idCandidate !== 'undefined' && idCandidate !== null) {
     const byId = convIndex?.byId;
     if (byId) {
-      const found = byId.get(String(idCandidate)) ?? byId.get(Number(idCandidate));
+      let found = byId.get(String(idCandidate)) ?? byId.get(Number(idCandidate));
+      // ignore community conversations when matching friends
+      try {
+        if (isCommunityConversationObj(found)) found = undefined;
+      } catch (e) { if (found && (found.community_id || (found.community && found.community.id))) found = undefined; }
       if (found) return found;
     }
   }
@@ -79,7 +125,10 @@ function getFriendConversation(friend:any, convIndex:any, conversations:any[]) {
   if (byUsername) {
     const unameKey = normalizeIndexKey(friend.username);
     const nameKey = normalizeIndexKey(friend.name);
-    const found = (unameKey && byUsername.get(unameKey)) || (nameKey && byUsername.get(nameKey));
+    let found = (unameKey && byUsername.get(unameKey)) || (nameKey && byUsername.get(nameKey));
+    try {
+      if (isCommunityConversationObj(found)) found = undefined;
+    } catch (e) { if (found && (found.community_id || (found.community && found.community.id))) found = undefined; }
     if (found) return found;
   }
 
@@ -120,6 +169,10 @@ function getFriendConversation(friend:any, convIndex:any, conversations:any[]) {
       if (c.user_id && Number(c.user_id) === idNum) return true;
       if (c.participants && Array.isArray(c.participants) && c.participants.some((p:any) => p && (Number(p.id) === idNum || Number(p.user_id) === idNum))) return true;
     }
+    // do not match community conversations when looking for friend conversations
+    try {
+      if (isCommunityConversationObj(c)) return false;
+    } catch (e) { if (c?.community_id || (c?.community && c.community.id)) return false; }
     if (friendUsernameLower) {
       const members = c.participants ?? c.members ?? c.participants_ids ?? c.user_ids ?? [];
       if (Array.isArray(members) && members.some((m:any) => {
@@ -158,11 +211,13 @@ const FriendRow = React.memo(({
   colors,
   convIndex,
   conversations,
+  conv: convProp,
+  showUnread,
   onContinue,
   onStart,
   onDelete,
 }: any) => {
-  const conv = useMemo(() => getFriendConversation(item, convIndex, conversations), [item, convIndex, conversations]);
+  const conv = convProp ?? useMemo(() => getFriendConversation(item, convIndex, conversations), [item, convIndex, conversations]);
 
   return (
     <View style={{flexDirection:'row', alignItems:'center', paddingVertical:8, borderBottomWidth:1, borderColor:colors.border, backgroundColor:colors.surface}}>
@@ -179,7 +234,7 @@ const FriendRow = React.memo(({
           <TouchableOpacity onPress={() => onContinue(conv)} style={{backgroundColor:colors.primary, paddingVertical:8, paddingHorizontal:12, borderRadius:8}}>
             <Text style={{color:'#fff'}}>Sohbete Devam Et</Text>
           </TouchableOpacity>
-          {Number(conv?.unread_count) > 0 && (
+          {showUnread && (
             <View style={{position:'absolute', top:-5, right:4, width:10, height:10, borderRadius:6, backgroundColor:colors.danger}} />
           )}
         </View>
@@ -192,27 +247,46 @@ const FriendRow = React.memo(({
   );
 });
 
-const CommunityRow = React.memo(({
+  const CommunityRow = React.memo(({
   item,
   colors,
   onStart,
-}: any) => (
-  <View style={{flexDirection:'row', alignItems:'center', paddingVertical:8, borderBottomWidth:1, borderColor:colors.border, backgroundColor:colors.surface}}>
-    <View style={{width:40,height:40,borderRadius:8,backgroundColor:colors.surfaceVariant,alignItems:'center',justifyContent:'center'}}><Text>🏘️</Text></View>
-    <View style={{flex:1, marginLeft:12}}>
-      <Text style={{fontWeight:'600', color: colors.text}}>{item.name}</Text>
-      {item.description ? <Text style={{color:colors.muted}} numberOfLines={1}>{item.description}</Text> : null}
+  conversations,
+  showUnread,
+}: any) => {
+  const conv = Array.isArray(conversations) ? conversations.find((c:any) => {
+    try {
+      const cid = c?.community_id ?? c?.community?.id ?? c?.metadata?.community_id ?? c?.meta?.community_id ?? c?.conversation?.community_id ?? null;
+      if (cid && Number(cid) === Number(item.id)) return true;
+      if (isCommunityConversationObj(c) && cid && Number(cid) === Number(item.id)) return true;
+    } catch (e) { /* ignore */ }
+    return false;
+  }) : null;
+  const label = conv ? 'Sohbete Katıl' : 'Mesaj Başlat';
+  return (
+    <View style={{flexDirection:'row', alignItems:'center', paddingVertical:8, borderBottomWidth:1, borderColor:colors.border, backgroundColor:colors.surface}}>
+      <View style={{width:40,height:40,borderRadius:8,backgroundColor:colors.surfaceVariant,alignItems:'center',justifyContent:'center'}}>
+        <ThemedIcon category="camp" icon="tent" size={24} color={colors.primary} />
+      </View>
+      <View style={{flex:1, marginLeft:12}}>
+        <Text style={{fontWeight:'600', color: colors.text}}>{item.name}</Text>
+        {item.description ? <Text style={{color:colors.muted}}>{item.description}</Text> : null}
+      </View>
+      {showUnread && (
+        <View style={{ width: 10, height: 10, borderRadius: 6, backgroundColor: colors.info, marginRight: 8 }} />
+      )}
+      <TouchableOpacity onPress={() => onStart(item)} style={{backgroundColor:colors.primary, paddingVertical:8,paddingHorizontal:12, borderRadius:8}}>
+        <Text style={{color:'#fff'}}>{label}</Text>
+      </TouchableOpacity>
     </View>
-    <TouchableOpacity onPress={() => onStart(item)} style={{backgroundColor:colors.primary, paddingVertical:8,paddingHorizontal:12, borderRadius:8}}>
-      <Text style={{color:'#fff'}}>Mesaj Başlat</Text>
-    </TouchableOpacity>
-  </View>
-));
+  );
+});
 
 export default function NewChatScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const { colors } = useTheme();
+  const themed = createThemedStyles(colors);
   const initialRecipientId = (params as any).recipientId;
   const initialCommunityId = (params as any).communityId;
 
@@ -226,6 +300,7 @@ export default function NewChatScreen() {
   const suppressUnreadUpdatedRef = useRef(false);
   const localReadOverlayRef = useRef<Map<string, number>>(new Map());
   const [tab, setTab] = useState<'friends'|'communities'>('friends');
+  const [friendConvMap, setFriendConvMap] = useState<Record<string, any>>({});
 
   const emitUnreadUpdated = (totalUnread: number) => {
     if (lastUnreadTotalRef.current !== null && lastUnreadTotalRef.current === totalUnread) return;
@@ -233,11 +308,35 @@ export default function NewChatScreen() {
     suppressUnreadUpdatedRef.current = true;
     try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) { }
   };
+  const getLastMessageSenderId = (conv:any) => {
+    const last = conv?.last_message ?? conv?.lastMessage ?? conv?.conversation?.last_message ?? conv?.conversation?.lastMessage;
+    if (!last || typeof last !== 'object') return null;
+    return last?.sender_id ?? last?.senderId ?? last?.from_id ?? last?.user_id ?? last?.userId ?? null;
+  };
+
+  const isUnreadFromSelf = (conv:any) => {
+    if (!conv || Number(conv?.unread_count) <= 0) return false;
+    if (localUserId == null) return false;
+    const senderId = getLastMessageSenderId(conv);
+    return senderId != null && String(senderId) === String(localUserId);
+  };
+
+  const sumPersonalUnread = (arr: any[]) => Array.isArray(arr) ? arr.reduce((acc:number, c:any) => {
+    try {
+      const t = String(c?.type ?? '').toLowerCase();
+      if (t === 'community') return acc;
+    } catch (e) { }
+    const communityId = c?.community_id ?? c?.community?.id ?? null;
+    if (communityId) return acc;
+    if (isUnreadFromSelf(c)) return acc;
+    return acc + (Number(c?.unread_count) || 0);
+  }, 0) : 0;
   const [creating, setCreating] = useState(false);
   const [selectedFriend, setSelectedFriend] = useState<any | null>(null);
   const [selectedCommunity, setSelectedCommunity] = useState<any | null>(null);
   const [composerText, setComposerText] = useState('');
   const [sending, setSending] = useState(false);
+  const [localUserId, setLocalUserId] = useState<number | string | null>(null);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -290,18 +389,38 @@ export default function NewChatScreen() {
           return c;
         }) : arrFiltered;
         setConversations(arrWithRead);
-        const totalUnread = arrWithRead.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
+        const totalUnread = sumPersonalUnread(arrWithRead);
         emitUnreadUpdated(totalUnread);
       } catch (e) { }
       try {
         const byId = new Map();
         const byUsername = new Map();
+        try {
+          console.log('[NewChat] refreshConversations conversations sample', arrFiltered.slice(0,3).map((c:any) => ({
+            id: c?.id ?? c?.conversation_id ?? c?.conversation?.id,
+            recipient_id: c?.recipient_id ?? null,
+            other_user_id: c?.other_user_id ?? null,
+            user_id: c?.user_id ?? null,
+            participants: Array.isArray(c?.participants) ? c.participants.slice(0,5) : undefined,
+            members: Array.isArray(c?.members) ? c.members.slice(0,5) : undefined,
+            participants_ids: c?.participants_ids?.slice ? c.participants_ids.slice(0,5) : undefined,
+            user_ids: c?.user_ids?.slice ? c.user_ids.slice(0,5) : undefined,
+            community_id: c?.community_id ?? c?.community?.id ?? c?.metadata?.community_id ?? c?.meta?.community_id ?? c?.conversation?.community_id,
+          })));
+        } catch (logErr) { console.warn('[NewChat] refreshConversations sample log failed', logErr); }
         const normalize = (s:any) => {
           if (!s && s !== 0) return null;
           try { return String(s).toLowerCase().replace(/^@/, '').trim(); } catch { return null; }
         };
         arrWithRead.forEach((c:any) => {
           try {
+            const pIds = extractParticipantIds(c);
+            if (Array.isArray(pIds)) {
+              pIds.forEach((pid:any) => {
+                if (pid == null) return;
+                try { byId.set(String(pid), c); } catch {};
+              });
+            }
             const seen = new Set<any>();
             const walk = (obj:any, depth = 0) => {
               if (!obj || depth > 6) return;
@@ -315,10 +434,6 @@ export default function NewChatScreen() {
                 for (const [k, v] of Object.entries(obj)) {
                   if (v == null) continue;
                   const key = String(k).toLowerCase();
-                  if (key === 'id' || key.endsWith('_id') || key === 'user_id' || key === 'recipient_id' || key === 'other_user_id') {
-                    try { byId.set(String(v), c); } catch {}
-                    continue;
-                  }
                   if (['username','handle','slug','tag','tag_name','login','name','display_name','full_name'].includes(key)) {
                     const uname = normalize(v);
                     if (uname) try { byUsername.set(uname, c); } catch {}
@@ -327,13 +442,6 @@ export default function NewChatScreen() {
                   if (typeof v === 'object' || Array.isArray(v)) {
                     walk(v, depth + 1);
                     continue;
-                  }
-                  if (typeof v === 'string') {
-                    const s = normalize(v);
-                    if (s && (/^[a-z0-9_@.-]+$/i.test(s))) {
-                      if (v.startsWith('@') || /[a-zA-Z]/.test(v)) try { byUsername.set(s, c); } catch {}
-                    }
-                    if (/^\d+$/.test(v)) try { byId.set(String(v), c); } catch {}
                   }
                 }
               }
@@ -352,13 +460,34 @@ export default function NewChatScreen() {
     }
   }, []);
 
-  const isFocused = useIsFocused();
+  useFocusEffect(
+    useCallback(() => {
+      refreshConversations();
+    }, [refreshConversations])
+  );
 
   useEffect(() => {
-    if (isFocused) {
-      refreshConversations();
-    }
-  }, [isFocused, refreshConversations]);
+    let socketRef: ReturnType<typeof createChatSocket> | null = null;
+    let mounted = true;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        socketRef = createChatSocket((msg:any) => {
+          try {
+            const t = String(msg?.type || '');
+            if (t === 'conversation_created' || t === 'conversation_updated' || t === 'client_message_sent' || t === 'message') {
+              if (!mounted) return;
+              // small debounce to avoid spamming API
+              setTimeout(() => { try { refreshConversations(); } catch (e) { console.warn('[NewChat] refreshConversations failed', e); } }, 200);
+            }
+          } catch (e) { console.warn('[NewChat] socket handler error', e); }
+        });
+        socketRef.connect(token);
+      } catch (e) { console.warn('[NewChat] socket init failed', e); }
+    })();
+    return () => { mounted = false; try { socketRef && socketRef.disconnect(); } catch (e) {} };
+  }, [refreshConversations]);
 
   useEffect(() => {
     const unsub = onChatEvent((e:any) => {
@@ -380,7 +509,7 @@ export default function NewChatScreen() {
                 return c;
               }) : prev;
               try {
-                const totalUnread = Array.isArray(out) ? out.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0) : 0;
+                const totalUnread = sumPersonalUnread(out);
                 setTimeout(() => {
                   emitUnreadUpdated(totalUnread);
                 }, 0);
@@ -429,6 +558,26 @@ export default function NewChatScreen() {
     return () => { try { unsub(); } catch {} };
   }, []);
 
+  // build a quick lookup map of friend -> conversation when lists change
+  useEffect(() => {
+    try {
+      if (Array.isArray(friends) && Array.isArray(conversations)) {
+        const map: Record<string, any> = {};
+        for (const f of friends) {
+          try {
+            const key = String(f.id ?? f.username ?? f.name ?? '');
+            if (!key) continue;
+            const conv = getFriendConversation(f, convIndex, conversations);
+            if (conv) map[key] = conv;
+          } catch (e) { /* ignore per-friend errors */ }
+        }
+        setFriendConvMap(map);
+      } else {
+        setFriendConvMap({});
+      }
+    } catch (e) { setFriendConvMap({}); }
+  }, [friends, conversations, convIndex]);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -443,7 +592,24 @@ export default function NewChatScreen() {
         }) : [];
         if (mounted) setFriends(mapped);
         const comms = await listCommunities();
-        if (mounted) setCommunities(Array.isArray(comms) ? comms : []);
+        let visibleComms = Array.isArray(comms) ? comms : [];
+        // filter to communities the current user is a member of (user.community_id)
+        try {
+          const me = await getMe().catch(() => null);
+          const userCommId = me?.community_id ?? null;
+          const resolvedMeId = me?.id ?? me?.user_id ?? me?.userId ?? null;
+          if (resolvedMeId != null) setLocalUserId(resolvedMeId);
+          if (userCommId) {
+            visibleComms = visibleComms.filter((c:any) => Number(c?.id) === Number(userCommId));
+          } else {
+            // no membership -> show empty list
+            visibleComms = [];
+          }
+        } catch (e) {
+          // if membership fetch fails, hide communities to be safe
+          visibleComms = [];
+        }
+        if (mounted) setCommunities(visibleComms);
 
         try {
           const convRes = await apiFetch(`${API_URL}/chat/conversations`);
@@ -491,7 +657,7 @@ export default function NewChatScreen() {
               }) : arrFiltered;
               setConversations(arrWithRead);
               try {
-                const totalUnread = arrWithRead.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
+                const totalUnread = sumPersonalUnread(arrWithRead);
                 emitUnreadUpdated(totalUnread);
               } catch (e) { }
               try {
@@ -503,6 +669,13 @@ export default function NewChatScreen() {
                 };
                 arrWithRead.forEach((c:any) => {
                   try {
+                    const pIds = extractParticipantIds(c);
+                    if (Array.isArray(pIds)) {
+                      pIds.forEach((pid:any) => {
+                        if (pid == null) return;
+                        try { byId.set(String(pid), c); } catch {};
+                      });
+                    }
                     const seen = new Set<any>();
                     const walk = (obj:any, depth = 0) => {
                       if (!obj || depth > 6) return;
@@ -516,10 +689,6 @@ export default function NewChatScreen() {
                         for (const [k, v] of Object.entries(obj)) {
                           if (v == null) continue;
                           const key = String(k).toLowerCase();
-                          if (key === 'id' || key.endsWith('_id') || key === 'user_id' || key === 'recipient_id' || key === 'other_user_id') {
-                            try { byId.set(String(v), c); } catch {}
-                            continue;
-                          }
                           if (['username','handle','slug','tag','tag_name','login','name','display_name','full_name'].includes(key)) {
                             const uname = normalize(v);
                             if (uname) try { byUsername.set(uname, c); } catch {}
@@ -528,13 +697,6 @@ export default function NewChatScreen() {
                           if (typeof v === 'object' || Array.isArray(v)) {
                             walk(v, depth + 1);
                             continue;
-                          }
-                          if (typeof v === 'string') {
-                            const s = normalize(v);
-                            if (s && (/^[a-z0-9_@.-]+$/i.test(s))) {
-                              if (v.startsWith('@') || /[a-zA-Z]/.test(v)) try { byUsername.set(s, c); } catch {}
-                            }
-                            if (/^\d+$/.test(v)) try { byId.set(String(v), c); } catch {}
                           }
                         }
                       }
@@ -594,11 +756,21 @@ export default function NewChatScreen() {
   async function handleSendFromComposer() {
     if (!composerText.trim()) { Alert.alert('Hata', 'Mesaj boş olamaz.'); return; }
     const payload: any = { text: composerText.trim() };
-    if (selectedFriend?.id) payload.recipient_id = Number(selectedFriend.id);
-    else if (selectedCommunity?.id) payload.community_id = Number(selectedCommunity.id);
-    else if (initialRecipientId) payload.recipient_id = Number(initialRecipientId);
-    else if (initialCommunityId) payload.community_id = Number(initialCommunityId);
-    else { Alert.alert('Hata', 'Alıcı seçili değil.'); return; }
+    if (selectedFriend?.id) {
+      payload.actualRecipientId = Number(selectedFriend.id);
+      if (localUserId != null) {
+        payload.participant_ids = [Number(localUserId), Number(selectedFriend.id)];
+      }
+    } else if (selectedCommunity?.id) {
+      payload.community_id = Number(selectedCommunity.id);
+    } else if (initialRecipientId) {
+      payload.actualRecipientId = Number(initialRecipientId);
+      if (localUserId != null) {
+        payload.participant_ids = [Number(localUserId), Number(initialRecipientId)];
+      }
+    } else if (initialCommunityId) {
+      payload.community_id = Number(initialCommunityId);
+    } else { Alert.alert('Hata', 'Alıcı seçili değil.'); return; }
 
     setSending(true);
     try {
@@ -618,41 +790,54 @@ export default function NewChatScreen() {
       let saved: any = null;
       try { saved = text ? JSON.parse(text) : null; } catch (err) { saved = null; }
       const convId = saved?.conversation_id ?? saved?.conversation?.id ?? saved?.id;
-      if (convId) {
-        try {
-          // don't mark conversation as locally-deleted on successful send;
-          // only refresh unread totals so floating badge stays in sync
-          const listRes = await apiFetch(`${API_URL}/chat/conversations`);
-          if (listRes && listRes.ok) {
-            const listData = await listRes.json();
-            if (Array.isArray(listData)) {
-              const totalUnread = listData.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
-              try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) {}
-            }
-          }
-        } catch (e) { console.warn('[NewChat] emit unread update failed', e); }
-
+        if (convId) {
         try { await AsyncStorage.setItem(LAST_OPENED_KEY, String(convId)); } catch (e) { /* ignore */ }
-        router.replace({ pathname: '/chat/[conversationId]', params: { conversationId: String(convId) } });
+        // If this was a community message, navigate to the shared community chat screen
+        if (payload.community_id) {
+          try {
+            router.replace({ pathname: '/chat/community/[communityId]', params: { communityId: String(payload.community_id) } });
+          } catch (e) { /* ignore */ }
+        } else {
+          // navigate first so user sees the conversation screen; rely on centralized helper
+          try { await openConversationOrCommunity(router, convId, { replace: true }); } catch (e) { console.warn('[NewChat] openConversationOrCommunity failed', e); }
+        }
+
+        // Fire unread totals update in background (don't block navigation)
+        (async () => {
+          try {
+            const listRes = await apiFetch(`${API_URL}/chat/conversations`);
+            if (listRes && listRes.ok) {
+              const listData = await listRes.json();
+              if (Array.isArray(listData)) {
+                const totalUnread = sumPersonalUnread(listData);
+                try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) {}
+              }
+            }
+          } catch (e) { console.warn('[NewChat] emit unread update failed', e); }
+        })();
+
         return;
       }
 
-      const recipientId = payload.recipient_id ?? (selectedFriend?.id ? Number(selectedFriend.id) : undefined) ?? (initialRecipientId ? Number(initialRecipientId) : undefined);
+const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(selectedFriend.id) : undefined) ?? (initialRecipientId ? Number(initialRecipientId) : undefined);
       if (recipientId) {
         try {
-          const listRes = await apiFetch(`${API_URL}/chat/conversations`);
+          const participantIds = localUserId != null ? [Number(localUserId), Number(recipientId)] : [Number(recipientId)];
+          const query = participantIds.map(String).join(',');
+          const listRes = await apiFetch(`${API_URL}/chat/conversations?participant_ids=${encodeURIComponent(query)}`);
           if (listRes.ok) {
             const listData = await listRes.json();
             if (Array.isArray(listData)) {
               const found = listData.find((c:any) => {
-                const members = c.participants ?? c.members ?? c.participants_ids ?? c.user_ids ?? [];
-                if (Array.isArray(members) && members.some((id:any) => Number(id) === Number(recipientId))) return true;
-                if (c.recipient_id && Number(c.recipient_id) === Number(recipientId)) return true;
-                if (c.other_user_id && Number(c.other_user_id) === Number(recipientId)) return true;
-                return false;
+                if (c?.community_id) return false;
+                return true;
               });
-                if (found?.id) {
-                router.replace({ pathname: '/chat/[conversationId]', params: { conversationId: String(found.id) } });
+              if (found?.id) {
+                if (found?.community_id) {
+                  try { router.replace({ pathname: '/chat/community/[communityId]', params: { communityId: String(found.community_id) } }); } catch (e) { }
+                  return;
+                }
+                try { await openConversationOrCommunity(router, found.id, { replace: true }); } catch (e) { console.warn('[NewChat] openConversationOrCommunity fallback failed', e); }
                 return;
               }
             }
@@ -662,8 +847,8 @@ export default function NewChatScreen() {
         }
       }
 
-      Alert.alert('Başarılı', 'Mesaj gönderildi. Sohbet listesine yönlendiriliyorsunuz.');
-      router.replace('/chat/chat-list');
+      Alert.alert('Başarılı', 'Mesaj gönderildi. Sohbet ekranına yönlendiriliyorsunuz.');
+      router.replace('/chat/new');
     } catch (e) {
       console.warn('[NewChat] send error', e);
       Alert.alert('Hata', 'Mesaj gönderilirken hata oluştu.');
@@ -682,50 +867,50 @@ export default function NewChatScreen() {
       try { await markRead(convId); } catch (e) { }
       localReadOverlayRef.current.set(String(convId), Date.now());
       try {
-        setConversations(prev => {
-          try {
-            const out = Array.isArray(prev) ? prev.map((c:any) => {
-              const id = c?.id ?? c?.conversation_id ?? c?.conversation?.id;
-              if (String(id) === String(convId)) return { ...c, unread_count: 0 };
-              return c;
-            }) : prev;
+          setConversations(prev => {
             try {
-              const totalUnread = Array.isArray(out) ? out.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0) : 0;
-              setTimeout(() => {
-                try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) { }
-              }, 0);
-            } catch (e) { }
-            return out;
-          } catch (e) { return prev; }
-        });
-        setConvIndex(prev => {
-          try {
-            const byId = new Map(prev.byId);
-            const byUsername = new Map(prev.byUsername);
-            for (const [key, value] of prev.byId.entries()) {
-              const id = value?.id ?? value?.conversation_id ?? value?.conversation?.id;
-              if (String(id) === String(convId)) {
-                byId.set(key, { ...value, unread_count: 0 });
+              const out = Array.isArray(prev) ? prev.map((c:any) => {
+                const id = c?.id ?? c?.conversation_id ?? c?.conversation?.id;
+                if (String(id) === String(convId)) return { ...c, unread_count: 0 };
+                return c;
+              }) : prev;
+              try {
+                const totalUnread = sumPersonalUnread(out);
+                setTimeout(() => {
+                  try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) { }
+                }, 0);
+              } catch (e) { }
+              return out;
+            } catch (e) { return prev; }
+          });
+          setConvIndex(prev => {
+            try {
+              const byId = new Map(prev.byId);
+              const byUsername = new Map(prev.byUsername);
+              for (const [key, value] of prev.byId.entries()) {
+                const id = value?.id ?? value?.conversation_id ?? value?.conversation?.id;
+                if (String(id) === String(convId)) {
+                  byId.set(key, { ...value, unread_count: 0 });
+                }
               }
-            }
-            for (const [key, value] of prev.byUsername.entries()) {
-              const id = value?.id ?? value?.conversation_id ?? value?.conversation?.id;
-              if (String(id) === String(convId)) {
-                byUsername.set(key, { ...value, unread_count: 0 });
+              for (const [key, value] of prev.byUsername.entries()) {
+                const id = value?.id ?? value?.conversation_id ?? value?.conversation?.id;
+                if (String(id) === String(convId)) {
+                  byUsername.set(key, { ...value, unread_count: 0 });
+                }
               }
+              return { byId, byUsername };
+            } catch (e) {
+              return prev;
             }
-            return { byId, byUsername };
-          } catch (e) {
-            return prev;
-          }
-        });
-      } catch (e) { }
-      try { setTimeout(() => { try { emitChatEvent({ type: 'mark_read', payload: { convId } }); } catch (e) { } }, 0); } catch (e) { }
+          });
+        } catch (e) { }
+        try { setTimeout(() => { try { emitChatEvent({ type: 'mark_read', payload: { convId } }); } catch (e) { } }, 0); } catch (e) { }
     } catch (e) {
       // ignore
     }
     try { await AsyncStorage.setItem(LAST_OPENED_KEY, String(convId)); } catch (e) { }
-    router.replace({ pathname: '/chat/[conversationId]', params: { conversationId: String(convId) } });
+    try { await openConversationOrCommunity(router, convId, { replace: true }); } catch (e) { console.warn('[NewChat] openConversationOrCommunity failed', e); }
   }, [router]);
 
   const handleStartWithFriend = useCallback((friend: any) => {
@@ -737,10 +922,15 @@ export default function NewChatScreen() {
 
   const handleStartWithCommunity = useCallback((community: any) => {
     if (!community?.id) { Alert.alert('Hata', 'Topluluk id yok'); return; }
-    setSelectedCommunity(community);
-    setSelectedFriend(null);
-    setComposerText('');
-  }, []);
+    // Always open the community-specific chat screen (shared view for all members)
+    try {
+      router.push({ pathname: '/chat/community/[communityId]', params: { communityId: String(community.id) } });
+    } catch (e) {
+      setSelectedCommunity(community);
+      setSelectedFriend(null);
+      setComposerText('');
+    }
+  }, [router]);
 
   const handleDeleteConversation = useCallback(async (conv: any) => {
     const convId = conv?.id ?? conv?.conversation_id ?? conv?.conversation?.id;
@@ -809,7 +999,7 @@ export default function NewChatScreen() {
               if (listRes && listRes.ok) {
                 const listData = await listRes.json();
                 if (Array.isArray(listData)) {
-                  const totalUnread = listData.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
+                  const totalUnread = sumPersonalUnread(listData);
                   try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) {}
                 }
               }
@@ -827,43 +1017,70 @@ export default function NewChatScreen() {
     ]);
   }, []);
 
+  useEffect(() => {
+    try {
+      const totalUnread = sumPersonalUnread(conversations);
+      emitUnreadUpdated(totalUnread);
+    } catch (e) {
+      // ignore when recalculating only
+    }
+  }, [localUserId, conversations]);
+
   const filteredFriends = useMemo(() => friends.filter(f => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
     return (f.name || '').toLowerCase().includes(q) || (f.username || '').toLowerCase().includes(q);
   }), [friends, query]);
 
-  const renderFriendItem = useCallback(({ item }: { item: any }) => (
-    <FriendRow
-      item={item}
-      colors={colors}
-      convIndex={convIndex}
-      conversations={conversations}
-      onContinue={handleContinueConversation}
-      onStart={handleStartWithFriend}
-      onDelete={handleDeleteConversation}
-    />
-  ), [colors, convIndex, conversations, handleContinueConversation, handleStartWithFriend, handleDeleteConversation]);
+  const renderFriendItem = useCallback(({ item }: { item: any }) => {
+    // resolve conversation from latest state each render to keep unread in sync
+    const conv = getFriendConversation(item, convIndex, conversations);
+    const showUnread = Boolean(conv && Number(conv?.unread_count) > 0 && !isUnreadFromSelf(conv));
+    return (
+      <FriendRow
+        item={item}
+        colors={colors}
+        convIndex={convIndex}
+        conversations={conversations}
+        conv={conv}
+        showUnread={showUnread}
+        onContinue={handleContinueConversation}
+        onStart={handleStartWithFriend}
+        onDelete={handleDeleteConversation}
+      />
+    );
+  }, [colors, convIndex, conversations, handleContinueConversation, handleStartWithFriend, handleDeleteConversation, localUserId]);
 
-  const renderCommunityItem = useCallback(({ item }: { item: any }) => (
-    <CommunityRow
-      item={item}
-      colors={colors}
-      onStart={handleStartWithCommunity}
-    />
-  ), [colors, handleStartWithCommunity]);
+  const renderCommunityItem = useCallback(({ item }: { item: any }) => {
+    const conv = Array.isArray(conversations) ? conversations.find((c:any) => {
+      try {
+        const cid = c?.community_id ?? c?.community?.id ?? c?.metadata?.community_id ?? c?.meta?.community_id ?? c?.conversation?.community_id ?? null;
+        return cid && Number(cid) === Number(item.id);
+      } catch (e) { return false; }
+    }) : null;
+    const showUnread = Boolean(conv && Number(conv?.unread_count) > 0 && !isUnreadFromSelf(conv));
+    return (
+      <CommunityRow
+        item={item}
+        colors={colors}
+        showUnread={showUnread}
+        onStart={handleStartWithCommunity}
+        conversations={conversations}
+      />
+    );
+  }, [colors, handleStartWithCommunity, conversations, localUserId]);
 
   const communityKeyExtractor = useCallback((item:any, index:number) => String(item.id ?? `community-${index}`), []);
 
   if (loading) return <SafeAreaView style={{flex:1,justifyContent:'center',alignItems:'center',backgroundColor:colors.background}}><ActivityIndicator/></SafeAreaView>;
 
   return (
-    <>
-      <Stack.Screen options={{ title: 'Sohbet', headerRight: () => (<ThemedIcon name="MessageCircle" size={20} />) }} />
-      <SafeAreaView style={{flex:1, backgroundColor: colors.background}}>
-      <View style={{padding:16, backgroundColor: colors.background}}>
-        <Text style={{fontSize:18,fontWeight:'600',marginBottom:8,color:colors.text}}>Sohbet</Text>
-        <Text style={{color:colors.muted,marginBottom:12}}>Bir kişiye veya topluluğa mesaj göndermek için seçin.</Text>
+    <SafeAreaView edges={['left','right']} style={themed.screenContainer}>
+      <View style={themed.screenHeader}>
+        <Text style={themed.screenHeaderTitle}>Sohbet</Text>
+        <Text style={themed.screenHeaderSubtitle}>Bir kişiye veya topluluğa mesaj göndermek için seçin.</Text>
+      </View>
+      <View style={{flex:1, paddingHorizontal:16, paddingBottom:16, backgroundColor: colors.background}}>
         {__DEV__ ? (
           <Text style={{color:'#888',marginBottom:12,fontSize:12}}>Konuşmalar yüklendi: {conversations.length}  — index: {convIndex?.byId?.size ?? 0}/{convIndex?.byUsername?.size ?? 0}</Text>
         ) : null}
@@ -894,16 +1111,28 @@ export default function NewChatScreen() {
             data={filteredFriends}
             keyExtractor={(item, index) => String(item.id ?? item.username ?? `friend-${index}`)}
             renderItem={renderFriendItem}
+            extraData={{ conversations, convIndex, localUserId }}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ flexGrow: 1, paddingBottom: 16 }}
           />
         ) : (
-          <FlatList
-            data={communities}
-            keyExtractor={communityKeyExtractor}
-            renderItem={renderCommunityItem}
-          />
+          communities.length === 0 ? (
+            <View style={{padding:12}}>
+              <Text style={{color: colors.muted}}>Henüz bir topluluğa üye değilsiniz. Topluluğa katılmak için </Text>
+              <Text onPress={() => router.push('/(auth)/community')} style={{color: colors.primary, marginTop:8}}>Topluluklar sayfasını ziyaret edin.</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={communities}
+              keyExtractor={communityKeyExtractor}
+              renderItem={renderCommunityItem}
+              extraData={{ conversations, convIndex, localUserId }}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ flexGrow: 1, paddingBottom: 16 }}
+            />
+          )
         )}
       </View>
       </SafeAreaView>
-    </>
   );
 }

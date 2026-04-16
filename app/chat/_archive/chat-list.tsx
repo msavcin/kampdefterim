@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useTheme } from '@/components/ThemeProvider';
 import { apiFetch } from '@/lib/apiFetch';
 import { API_URL } from '@/lib/config';
+import { openConversationOrCommunity } from '@/lib/chatNavigation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import FriendAvatar from '@/components/FriendAvatar';
 import { onChatEvent, emitChatEvent } from '@/lib/chatEvents';
 import { createChatSocket } from '@/lib/chatSocket';
 import { getToken } from '@/lib/auth';
+import { getMe } from '@/lib/userCommunityApi';
 
 const DELETED_KEY = '@chat_deleted_v1';
 
@@ -43,7 +46,33 @@ function extractParticipant(item:any) {
 export default function ChatList() {
   const [conversations, setConversations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [localUserId, setLocalUserId] = useState<number | string | null>(null);
   const router = useRouter();
+  const { colors } = useTheme();
+
+  const getLastMessageSenderId = (conv:any) => {
+    const last = conv?.last_message ?? conv?.lastMessage ?? conv?.conversation?.last_message ?? conv?.conversation?.lastMessage;
+    if (!last || typeof last !== 'object') return null;
+    return last?.sender_id ?? last?.senderId ?? last?.from_id ?? last?.user_id ?? last?.userId ?? null;
+  };
+
+  const isUnreadFromSelf = (conv:any) => {
+    if (!conv || Number(conv?.unread_count) <= 0) return false;
+    if (localUserId == null) return false;
+    const senderId = getLastMessageSenderId(conv);
+    return senderId != null && String(senderId) === String(localUserId);
+  };
+
+  const sumPersonalUnread = (arr: any[]) => Array.isArray(arr) ? arr.reduce((acc:number, c:any) => {
+    try {
+      const t = String(c?.type ?? '').toLowerCase();
+      if (t === 'community') return acc;
+    } catch (e) { }
+    const communityId = c?.community_id ?? c?.community?.id ?? null;
+    if (communityId) return acc;
+    if (isUnreadFromSelf(c)) return acc;
+    return acc + (Number(c?.unread_count) || 0);
+  }, 0) : 0;
 
   useEffect(() => {
     let mounted = true;
@@ -51,6 +80,9 @@ export default function ChatList() {
 
     const load = async () => {
       try {
+        const me = await getMe().catch(() => null);
+        const resolvedMeId = me?.id ?? me?.user_id ?? me?.userId ?? null;
+        if (resolvedMeId != null) setLocalUserId(resolvedMeId);
         const res = await apiFetch(`${API_URL}/chat/conversations`);
         const data = await res.json();
         if (!mounted) return;
@@ -75,7 +107,7 @@ export default function ChatList() {
               if (Array.isArray(c?.participants)) {
                 for (const p of c.participants) {
                   if (!p) continue;
-                  if (typeof p === 'object') pIds.push(String(p.id ?? p.user_id ?? p.recipient_id ?? p.other_user_id));
+                  if (typeof p === 'object') pIds.push(String(p.user_id ?? p.recipient_id ?? p.other_user_id ?? p.id));
                   else pIds.push(String(p));
                 }
               }
@@ -101,14 +133,14 @@ export default function ChatList() {
               } catch (e) {}
               return c;
             }) : arrFiltered;
-            const totalUnread = arrWithRead.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
+            const totalUnread = sumPersonalUnread(arrWithRead);
             try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) { }
             setConversations(arrWithRead);
           } catch (e) { setConversations(arrFiltered); }
         } catch (e) {
           setConversations(arr);
           try {
-            const totalUnread = arr.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
+            const totalUnread = sumPersonalUnread(arr);
             try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) { }
           } catch (e) { }
         }
@@ -137,7 +169,7 @@ export default function ChatList() {
               return c;
             }) : prev;
             try {
-              const totalUnread = Array.isArray(out) ? out.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0) : 0;
+              const totalUnread = sumPersonalUnread(out);
               emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } });
             } catch (err) { }
             return out;
@@ -185,6 +217,33 @@ export default function ChatList() {
         renderItem={({ item }) => {
           const convId = item.id ?? item.conversation_id ?? item.conversation?.id;
           const recipientId = item.recipient_id ?? item.other_user_id ?? item.user_id ?? item.participant_id;
+          const communityId = item.community_id ?? item.community?.id ?? null;
+
+          // If this conversation belongs to a community, show it as a community entry
+          if (communityId) {
+            const handleCommunityPress = () => {
+              try { router.push(`/chat/community/${communityId}`); } catch (e) { console.warn('[ChatList] nav to community failed', e); }
+            };
+            return (
+              <TouchableOpacity onPress={handleCommunityPress}>
+                <View style={{ flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderColor: '#eee', alignItems: 'center' }}>
+                  <View style={{ width: 48, height: 48, borderRadius: 8, backgroundColor: '#f0f0f0', alignItems:'center', justifyContent:'center' }}>
+                    <Text>🏘️</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={{ fontWeight: '600' }}>{item.title ?? item.community?.name ?? `Topluluk ${communityId}`}</Text>
+                    <Text numberOfLines={1} style={{ color: '#666' }}>{item.last_message?.text ?? ''}</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                      <Text numberOfLines={1} style={{ color: '#666', flex: 1 }}>{item.community?.description ?? ''}</Text>
+                      {item.unread_count > 0 && !isUnreadFromSelf(item) && (
+                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.info, marginLeft: 8 }} />
+                      )}
+                    </View>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          }
 
           const participant = extractParticipant(item);
           const participantName = participant?.name ?? null;
@@ -202,14 +261,19 @@ export default function ChatList() {
                       return c;
                     }) : prev;
                     try {
-                      const totalUnread = Array.isArray(out) ? out.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0) : 0;
+                      const totalUnread = sumPersonalUnread(out);
                       emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } });
                     } catch (e) { /* ignore */ }
                     return out;
                   } catch (e) { return prev; }
                 });
               } catch (e) { }
-                    router.push({ pathname: '/chat/[conversationId]', params: { conversationId: String(convId) } });
+                    // route using centralized helper so community-bound conversations open the community screen
+                    try {
+                      openConversationOrCommunity(router, convId).catch((err:any) => { console.warn('[ChatList] openConversationOrCommunity failed', err); });
+                    } catch (e) {
+                      console.warn('[ChatList] openConversationOrCommunity sync failed', e);
+                    }
             } else if (recipientId) {
               router.push({ pathname: '/chat/new', params: { recipientId: String(recipientId) } });
             } else {
@@ -226,8 +290,8 @@ export default function ChatList() {
                   <Text numberOfLines={1} style={{ color: '#666' }}>{item.last_message?.text ?? ''}</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
                     <Text numberOfLines={1} style={{ color: '#666', flex: 1 }}>{participantName ? participantName : ''}</Text>
-                    {item.unread_count > 0 && (
-                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#e53935', marginLeft: 8 }} />
+                    {item.unread_count > 0 && !isUnreadFromSelf(item) && (
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger, marginLeft: 8 }} />
                     )}
                   </View>
                 </View>

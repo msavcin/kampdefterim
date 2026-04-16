@@ -1,17 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, FlatList, TextInput, Text, KeyboardAvoidingView, Platform, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { View, FlatList, TextInput, Text, KeyboardAvoidingView, Platform, ActivityIndicator, TouchableOpacity, Alert, Keyboard } from 'react-native';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { apiFetch } from '@/lib/apiFetch';
 import { API_URL } from '@/lib/config';
+import { openConversationOrCommunity } from '@/lib/chatNavigation';
+import { getMe } from '@/lib/userCommunityApi';
 import { getToken } from '@/lib/auth';
 import { createChatSocket } from '@/lib/chatSocket';
 import { emitChatEvent } from '@/lib/chatEvents';
 import { markRead } from '@/lib/readMap';
 import MessageBubble from '@/components/MessageBubble';
+import ThemedIcon from '@/components/ThemedIcon';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Map, Heart, User, SquareCheck as CheckSquare, Bell, MessageCircle } from 'lucide-react-native';
 import { useTheme } from '../../components/ThemeProvider';
+import { createThemedStyles } from '../../constants/theme/sharedStyles';
 
 const DELETED_KEY = '@chat_deleted_v1';
 const LAST_OPENED_KEY = '@chat_last_opened_v1';
@@ -21,24 +24,21 @@ export default function ChatScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const themed = createThemedStyles(colors);
   const conversationId = (params as any).conversationId;
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [friendMapById, setFriendMapById] = useState<Record<string, { name?: string; avatar_url?: string }>>({});
+  const [friendMapByName, setFriendMapByName] = useState<Record<string, { name?: string; avatar_url?: string }>>({});
+  const [conversationMeta, setConversationMeta] = useState<any>(null);
   const socketRef = useRef<any>(null);
   const listRef = useRef<FlatList<any> | null>(null);
   const shouldScrollRef = useRef<boolean>(false);
   const tokenRef = useRef<string | null>(null);
   const [localUserId, setLocalUserId] = useState<number | string | null>(null);
-
-  const footerItems = [
-    { name: '/', label: 'Harita', icon: Map },
-    { name: '/announcements', label: 'Duyurular', icon: Bell },
-    { name: '/checklist', label: 'Checklist', icon: CheckSquare },
-    { name: '/favorites', label: 'Favoriler', icon: Heart },
-    { name: '/new', label: 'Sohbet', icon: MessageCircle },
-    { name: '/profile', label: 'Profil', icon: User },
-  ];
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const getMsgTime = (m:any) => {
     const t = m?.created_at ?? m?.createdAt ?? m?.sent_at ?? m?.timestamp;
@@ -56,6 +56,30 @@ export default function ChatScreen() {
   const getMessageId = (message:any) => {
     return message?.id ?? message?.message_id ?? message?.messageId ?? null;
   };
+
+  function isCommunityConversationObj(c:any) {
+    if (!c) return false;
+    try {
+      const type = String(c?.type ?? c?.conversation_type ?? c?.kind ?? '').toLowerCase();
+      const communityTypeNames = ['community','group','channel','community_chat','group_chat','community_conversation'];
+      if (type && communityTypeNames.includes(type)) return true;
+    } catch (e) { }
+    try {
+      if (c?.community_id) return true;
+      if (c?.community && (c.community.id || c.community.community_id)) return true;
+      if (c?.conversation && (c.conversation.community_id || (c.conversation.community && (c.conversation.community.id || c.conversation.community.community_id)))) return true;
+      if (c?.metadata && (c.metadata.community_id || c.metadata.communityId)) return true;
+      if (c?.meta && (c.meta.community_id || c.meta.communityId)) return true;
+    } catch (e) { }
+    return false;
+  }
+
+  const sumPersonalUnread = (arr:any[]) => Array.isArray(arr) ? arr.reduce((acc:number, c:any) => {
+    if (isCommunityConversationObj(c)) return acc;
+    const communityId = c?.community_id ?? c?.community?.id ?? null;
+    if (communityId) return acc;
+    return acc + (Number(c?.unread_count) || 0);
+  }, 0) : 0;
 
   const normalizeMessage = (message:any) => {
     if (!message || typeof message !== 'object') return message;
@@ -84,22 +108,203 @@ export default function ChatScreen() {
     });
   };
 
+  const getSenderInfo = (message:any) => {
+    const directSender = message?.sender ?? message?.from ?? message?.user ?? message?.author ?? message?.participant;
+    const name = (message?.sender_name ?? message?.senderName ?? message?.sender_username ?? message?.senderUsername ?? message?.username ?? message?.name)
+      || (directSender && (directSender.name || directSender.full_name || directSender.display_name || directSender.username));
+    const avatar_url = message?.sender_avatar_url ?? message?.senderAvatar ?? message?.avatar_url ?? (message?.avatar ??
+      (directSender && (directSender.avatar_url || directSender.avatar || directSender.avatarUrl || directSender.photo)));
+    const senderId = message?.sender_id ?? message?.senderId ?? message?.from_id ?? message?.user_id ?? message?.userId;
+    if (senderId != null) {
+      const mapped = friendMapById[String(senderId)];
+      if (mapped) {
+        return { name: mapped.name || name, avatar_url: mapped.avatar_url || avatar_url };
+      }
+    }
+    if (name) {
+      const mapped = friendMapByName[String(name).toLowerCase()];
+      if (mapped) {
+        return { name: mapped.name || name, avatar_url: mapped.avatar_url || avatar_url };
+      }
+    }
+    return { name, avatar_url };
+  };
+
+  const getConversationRecipientId = (conv:any, currentUserId:any) => {
+    if (!conv || typeof conv !== 'object') return null;
+    const candidate = conv.recipient_id ?? conv.other_user_id ?? conv.user_id ?? conv.participant_id;
+    if (candidate != null) return candidate;
+
+    const participantIds = Array.isArray(conv.participants) ? conv.participants : Array.isArray(conv.members) ? conv.members : Array.isArray(conv.user_ids) ? conv.user_ids : Array.isArray(conv.participants_ids) ? conv.participants_ids : [];
+    if (participantIds.length) {
+      const normalizedCurrentUser = currentUserId != null ? String(currentUserId) : null;
+      const ids = participantIds.map((item:any) => {
+        if (item == null) return null;
+        if (typeof item === 'object') return String(item.user_id ?? item.recipient_id ?? item.other_user_id ?? item.participant_id ?? item.id);
+        return String(item);
+      }).filter((id:any) => id);
+      if (ids.length === 1) return ids[0];
+      if (ids.length === 2 && normalizedCurrentUser) {
+        const other = ids.find((id:any) => id !== normalizedCurrentUser);
+        if (other) return other;
+      }
+      if (ids.length === 1) return ids[0];
+    }
+
+    const otherObj = conv.other_user ?? conv.recipient ?? conv.user ?? conv.participant_user ?? conv.participant ?? conv.other_user_object ?? conv.recipient_object ?? conv.participants?.[0] ?? conv.members?.[0];
+    if (otherObj && typeof otherObj === 'object') {
+      return otherObj.user_id ?? otherObj.recipient_id ?? otherObj.other_user_id ?? otherObj.participant_id ?? otherObj.id ?? null;
+    }
+
+    return null;
+  };
+
+  const inferRecipientIdFromMessages = (msgs:any[], currentUserId:any) => {
+    if (!Array.isArray(msgs) || msgs.length === 0) return null;
+    const normalizedCurrent = currentUserId != null ? String(currentUserId) : null;
+    const senderIds = new Set<string>();
+    const recipientIds = new Set<string>();
+
+    for (const msg of msgs) {
+      const senderId = msg?.sender_id ?? msg?.senderId ?? msg?.from_id ?? msg?.user_id ?? msg?.userId;
+      const recipientId = msg?.recipient_id ?? msg?.recipientId ?? msg?.recipient;
+      if (normalizedCurrent != null) {
+        if (senderId != null && String(senderId) !== normalizedCurrent) return senderId;
+        if (recipientId != null && String(recipientId) !== normalizedCurrent) return recipientId;
+      } else {
+        if (senderId != null) senderIds.add(String(senderId));
+        if (recipientId != null) recipientIds.add(String(recipientId));
+      }
+    }
+
+    if (normalizedCurrent == null) {
+      if (recipientIds.size === 1) return Array.from(recipientIds)[0];
+      if (senderIds.size === 1) return Array.from(senderIds)[0];
+    }
+    return null;
+  };
+
   useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (e:any) => {
+      setKeyboardVisible(true);
+      try { setKeyboardHeight(e?.endCoordinates?.height || 0); } catch (er) { setKeyboardHeight(0); }
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+      setKeyboardHeight(0);
+    });
     let mounted = true;
     (async () => {
       tokenRef.current = await getToken();
+      try {
+        const res = await apiFetch(`${API_URL}/friendships/list`);
+        if (res && res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            const byId: Record<string, { name?: string; avatar_url?: string }> = {};
+            const byName: Record<string, { name?: string; avatar_url?: string }> = {};
+            for (const f of data) {
+              const idCandidate = f.user_id ?? f.id ?? (typeof f.tag === 'string' && f.tag.startsWith('#') ? Number(f.tag.replace('#', '')) : undefined);
+              const resolvedId = typeof idCandidate !== 'undefined' && idCandidate !== null ? String(idCandidate) : null;
+              const name = f.name || f.username || '';
+              const avatar_url = f.avatar_url || '';
+              if (resolvedId) byId[resolvedId] = { name, avatar_url };
+              if (f.username) byName[String(f.username).toLowerCase()] = { name, avatar_url };
+              if (name) byName[String(name).toLowerCase()] = { name, avatar_url };
+            }
+            if (mounted) {
+              setFriendMapById(byId);
+              setFriendMapByName(byName);
+            }
+          }
+        }
+      } catch (e) { /* ignore friend lookup failures */ }
+
+      try {
+        const me = await getMe().catch(() => null);
+        if (mounted && me) {
+          const resolvedMeId = me.id ?? me.user_id ?? me.userId ?? null;
+          if (resolvedMeId != null) setLocalUserId(resolvedMeId);
+        }
+      } catch (e) { /* ignore user profile failures */ }
+
+      const paramsAny = params as any;
+      // if conversationId param is not a valid numeric id but a communityId was passed,
+      // try to find an existing conversation for that community and redirect to it
+      try {
+        const convNum = Number(conversationId);
+        if ((conversationId == null || Number.isNaN(convNum) || convNum <= 0) && paramsAny.communityId) {
+          try {
+            const listRes = await apiFetch(`${API_URL}/chat/conversations`);
+            if (listRes && listRes.ok) {
+              const listData = await listRes.json();
+              if (Array.isArray(listData)) {
+                const found = listData.find((c:any) => Number(c?.community_id) === Number(paramsAny.communityId) || (c?.community && Number(c.community?.id) === Number(paramsAny.communityId)));
+                const convIdFound = found?.id ?? found?.conversation_id ?? found?.conversation?.id;
+                if (convIdFound) {
+                  try { await AsyncStorage.setItem(LAST_OPENED_KEY, String(convIdFound)); } catch (e) { /* ignore */ }
+                  try { await openConversationOrCommunity(router, convIdFound, { replace: true }); } catch (e) { console.warn('[Chat] openConversationOrCommunity failed', e); }
+                  return;
+                }
+                  // if conversationId is numeric, check if it's tied to a community and enforce membership
+                  if (!Number.isNaN(convNum) && convNum > 0) {
+                    try {
+                      const listRes2 = await apiFetch(`${API_URL}/chat/conversations`);
+                      if (listRes2 && listRes2.ok) {
+                        const listData2 = await listRes2.json();
+                        if (Array.isArray(listData2)) {
+                          const foundConv = listData2.find((c:any) => Number(c?.id ?? c?.conversation_id ?? c?.conversation?.id) === convNum);
+                          const convCommunityId = foundConv?.community_id ?? (foundConv?.community && foundConv.community.id) ?? null;
+                            if (convCommunityId) {
+                            const me = await getMe().catch(() => null);
+                            if (!me || Number(me.community_id) !== Number(convCommunityId)) {
+                              Alert.alert('Erişim reddedildi', 'Bu konuşmaya erişim izniniz yok.');
+                              try { router.back(); } catch (e) { router.replace('/'); }
+                              return;
+                            }
+                            // If this conversation belongs to a community, keep users in the community screen
+                            try { await openConversationOrCommunity(router, convNum, { replace: true }); } catch (e) { console.warn('[Chat] openConversationOrCommunity failed', e); }
+                            return;
+                          }
+                        }
+                      }
+                    } catch (e) { /* ignore */ }
+                  }
+              }
+            }
+          } catch (e) { /* ignore */ }
+        }
+      } catch (e) { /* ignore parse errors */ }
+
       try {
         if (conversationId) {
           await AsyncStorage.setItem(LAST_OPENED_KEY, String(conversationId));
           try { emitChatEvent({ type: 'chat_viewed' }); } catch (e) { }
         }
       } catch (e) { /* ignore store errors */ }
+
+      if (conversationId) {
         try {
+          const metaRes = await apiFetch(`${API_URL}/chat/conversations/${conversationId}`);
+          if (metaRes && metaRes.ok) {
+            const metaData = await metaRes.json();
+            if (mounted) setConversationMeta(metaData);
+          }
+        } catch (e) { /* ignore conversation meta fetch failures */ }
+      }
+
+      try {
         const res = await apiFetch(`${API_URL}/chat/conversations/${conversationId}/messages?limit=50`);
         const data = await res.json();
         if (!mounted) return;
         // server may return reverse order; ensure chronological order for inverted FlatList
-        const arr = Array.isArray(data) ? data : [];
+        const rawArr = Array.isArray(data) ? data : [];
+        // Filter out any community-scoped messages when viewing a personal conversation
+        const arr = rawArr.filter((m:any) => {
+          try {
+            return !(m?.community_id || (m?.community && (m.community.id || m.community.community_id)) || m?.communityId);
+          } catch (e) { return true; }
+        });
         try {
             const raw = await AsyncStorage.getItem(DELETED_KEY);
             const deletedMap = raw ? JSON.parse(raw) : { conversations: {}, participants: {}, messages: {} };
@@ -140,7 +345,7 @@ export default function ChatScreen() {
               if (listRes && listRes.ok) {
                 const listData = await listRes.json();
                 if (Array.isArray(listData)) {
-                  const totalUnread = listData.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
+                  const totalUnread = sumPersonalUnread(listData);
                   try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) {}
                 }
               }
@@ -174,7 +379,7 @@ export default function ChatScreen() {
               if (listRes && listRes.ok) {
                 const listData = await listRes.json();
                 if (Array.isArray(listData)) {
-                  const totalUnread = listData.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
+                  const totalUnread = sumPersonalUnread(listData);
                   try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread } }); } catch (e) {}
                 }
               }
@@ -182,9 +387,9 @@ export default function ChatScreen() {
           }
         } catch (e) {
           // fallback: filter control messages and mark targets
-          const deleteTargetsFb = new Set<string>();
-          const nonControlFb: any[] = [];
-          for (const item of arr) {
+            const deleteTargetsFb = new Set<string>();
+            const nonControlFb: any[] = [];
+            for (const item of arr) {
             if (isDeleteControlMessage(item)) {
               const tgt = getControlTarget(item);
               if (tgt) deleteTargetsFb.add(String(tgt));
@@ -213,6 +418,9 @@ export default function ChatScreen() {
         } else if (msg.type === 'message' && msg.payload) {
           try {
             const payload = msg.payload;
+            // ignore community-scoped messages in personal conversation view
+            const payloadCommunity = payload?.community_id ?? (payload?.community && (payload.community.id || payload.community.community_id)) ?? payload?.communityId ?? null;
+            if (payloadCommunity) return;
             if (String(payload.conversation_id) === String(conversationId)) {
               // treat control messages (delete commands) specially
               if (isDeleteControlMessage(payload)) {
@@ -256,6 +464,9 @@ export default function ChatScreen() {
         } else if (msg.type === 'message_deleted' && msg.payload) {
           try {
             const payload = msg.payload;
+            // ignore community-scoped deletes here
+            const payloadCommunity = payload?.community_id ?? (payload?.community && (payload.community.id || payload.community.community_id)) ?? payload?.communityId ?? null;
+            if (payloadCommunity) return;
             const delId = payload?.message_id ?? payload?.id ?? null;
             if (String(payload.conversation_id) === String(conversationId)) {
               if (delId != null) {
@@ -267,7 +478,7 @@ export default function ChatScreen() {
                     try {
                     const res2 = await apiFetch(`${API_URL}/chat/conversations/${conversationId}/messages?limit=50`);
                     const data2 = await res2.json();
-                    const normalized = Array.isArray(data2) ? sortDesc(data2.map(normalizeMessage)) : [];
+                    const normalized = Array.isArray(data2) ? sortDesc(data2.map(normalizeMessage)).filter((m:any) => !(m?.community_id || (m?.community && (m.community.id || m.community.community_id)) || m?.communityId)) : [];
                     setMessages(normalized);
                   } catch (e) { /* ignore */ }
                 })();
@@ -283,6 +494,8 @@ export default function ChatScreen() {
     return () => {
       mounted = false;
       try { socketRef.current?.disconnect(); } catch {}
+      try { showSub.remove(); } catch {}
+      try { hideSub.remove(); } catch {}
     };
   }, [conversationId]);
 
@@ -321,11 +534,25 @@ export default function ChatScreen() {
       return;
     }
 
-    const optimistic = { id: tempId, text, sender_id: localUserId ?? 'me', created_at: new Date().toISOString(), sending: true, conversation_id: payload.conversation_id };
+    const recipientIdFromMeta = getConversationRecipientId(conversationMeta, localUserId);
+    if (payload.conversation_id && recipientIdFromMeta != null) {
+      payload.recipient_id = Number(recipientIdFromMeta);
+    }
+    let inferredRecipient: any = null;
+    if (payload.conversation_id && payload.recipient_id == null) {
+      inferredRecipient = inferRecipientIdFromMessages(messages, localUserId);
+      if (inferredRecipient != null) {
+        payload.recipient_id = Number(inferredRecipient);
+      }
+    }
+    if (payload.conversation_id && payload.recipient_id == null) {
+      console.warn('[Chat] send payload still missing recipient_id for conversation', { conversationId: payload.conversation_id, conversationMeta, recipientIdFromMeta, inferredRecipient });
+    }
+    const optimistic = { id: tempId, text, sender_id: localUserId ?? 'me', created_at: new Date().toISOString(), sending: true, conversation_id: payload.conversation_id, recipient_id: payload.recipient_id };
     setMessages(prev => [optimistic, ...prev]);
     setText('');
     try {
-      console.log('[Chat] send payload', payload);
+      console.log('[Chat] send payload', payload, { recipientIdFromMeta, conversationMeta, inferredRecipient });
       const res = await apiFetch(`${API_URL}/chat/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -368,6 +595,15 @@ export default function ChatScreen() {
           return prev.map(m => (String(getMessageId(m)) === String(tempId) ? normalizedSaved : m));
         }
       });
+      // Eğer sunucu yeni bir conversation id döndürdüyse, canonical route'a yönlendir
+        try {
+        const returnedConvId = saved?.conversation_id ?? saved?.conversation?.id ?? null;
+        if (returnedConvId && String(returnedConvId) !== String(conversationId)) {
+          try { await AsyncStorage.setItem(LAST_OPENED_KEY, String(returnedConvId)); } catch (e) { /* ignore */ }
+          try { await openConversationOrCommunity(router, returnedConvId, { replace: true }); } catch (e) { console.warn('[Chat] openConversationOrCommunity failed', e); }
+          return;
+        }
+      } catch (e) { /* ignore redirect errors */ }
       // Try to notify server via socket (if available) to speed up delivery/broadcast
       try {
         const notify = { type: 'client_message_sent', payload: { conversation_id: saved?.conversation_id ?? payload.conversation_id, message_id: saved?.id } };
@@ -380,16 +616,16 @@ export default function ChatScreen() {
           try { socketRef.current.send(notify2); console.log('[Chat] notified server via socket', notify2); } catch (e) { console.warn('[Chat] socket notify2 failed', e); }
         }
         // finally, update local unread totals for this client immediately
-        try {
-          const listRes2 = await apiFetch(`${API_URL}/chat/conversations`);
-          if (listRes2 && listRes2.ok) {
-            const listData2 = await listRes2.json();
-            if (Array.isArray(listData2)) {
-              const totalUnread2 = listData2.reduce((acc:number, c:any) => acc + (Number(c?.unread_count) || 0), 0);
-              try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread2 } }); } catch (e) {}
+            try {
+            const listRes2 = await apiFetch(`${API_URL}/chat/conversations`);
+            if (listRes2 && listRes2.ok) {
+              const listData2 = await listRes2.json();
+              if (Array.isArray(listData2)) {
+                const totalUnread2 = sumPersonalUnread(listData2);
+                try { emitChatEvent({ type: 'unread_updated', payload: { total: totalUnread2 } }); } catch (e) {}
+              }
             }
-          }
-        } catch (e) { console.warn('[Chat] emit unread update after send failed', e); }
+          } catch (e) { console.warn('[Chat] emit unread update after send failed', e); }
       } catch (e) { /* ignore */ }
     } catch (e) {
       setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, failed: true } : m)));
@@ -438,24 +674,34 @@ export default function ChatScreen() {
     };
 
   if (loading) return (
-    <SafeAreaView style={{flex:1, backgroundColor: colors.background, justifyContent:'center', alignItems:'center'}}>
-      <ActivityIndicator />
-    </SafeAreaView>
+    <KeyboardAvoidingView style={{ flex:1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <SafeAreaView style={{flex:1, backgroundColor: colors.background, justifyContent:'center', alignItems:'center'}}>
+        <ActivityIndicator />
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 
   return (
-    <SafeAreaView style={{flex:1, backgroundColor: colors.background}}>
-      <KeyboardAvoidingView
-        style={{flex:1}}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
+    <KeyboardAvoidingView style={{flex:1, backgroundColor: colors.background}} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <SafeAreaView edges={keyboardVisible ? ['left','right'] : ['left','right','bottom']} style={themed.screenContainer}>
+        <View style={{...themed.screenHeader, flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
+          <View>
+            <Text style={themed.screenHeaderTitle}>Sohbet</Text>
+          </View>
+          <TouchableOpacity onPress={() => router.push('/new')} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
+            <View style={{ alignItems: 'center' }}>
+              <ThemedIcon name="Menu" size="md" context="primary" style={{ marginBottom: 2 }} />
+              <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 12 }}>Menü</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
         <FlatList
           ref={listRef}
           data={messages}
           inverted
           style={{flex:1, backgroundColor: colors.background}}
-          contentContainerStyle={{ paddingTop: 0 + insets.bottom, paddingBottom: 18 + insets.bottom }}
+          contentContainerStyle={{ paddingTop: 18 + insets.bottom, paddingBottom: keyboardVisible ? 18 : 18 + insets.bottom }}
           keyboardShouldPersistTaps="handled"
           maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 20 }}
           onContentSizeChange={() => {
@@ -469,11 +715,17 @@ export default function ChatScreen() {
           }}
           keyExtractor={(m:any, index:number) => String(getMessageId(m) ?? `msg-${index}`)}
           renderItem={({ item }) => (
-            <MessageBubble message={item} isMe={String(item.sender_id) === String(localUserId) || String(item.sender_id) === 'me'} onDelete={handleDelete} />
+            <MessageBubble
+              message={item}
+              isMe={String(item.sender_id) === String(localUserId) || String(item.sender_id) === 'me'}
+              onDelete={handleDelete}
+              senderName={getSenderInfo(item).name}
+              senderAvatarUrl={getSenderInfo(item).avatar_url}
+            />
           )}
         />
 
-        <View style={{flexDirection:'row', padding:8, paddingBottom: 8 + insets.bottom, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border}}>
+        <View style={{flexDirection:'row', paddingHorizontal:8, paddingVertical:8, paddingBottom: keyboardVisible ? 8 : 8 + insets.bottom, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border}}>
           <TextInput
             style={{flex:1, borderWidth:1, borderColor:colors.border, borderRadius:8, padding:8, backgroundColor: colors.background, color: colors.text}}
             placeholderTextColor={colors.muted}
@@ -487,19 +739,7 @@ export default function ChatScreen() {
             <Text style={{color:'#fff'}}>Gönder</Text>
           </TouchableOpacity>
         </View>
-        <View style={{flexDirection:'row', justifyContent:'space-around', alignItems:'center', paddingVertical:10, paddingBottom: insets.bottom, backgroundColor: colors.tabBar, borderTopWidth: 1, borderTopColor: colors.tabBarBorder}}>
-          {footerItems.map(item => {
-            const Icon = item.icon;
-            const isActive = item.name === '/new';
-            return (
-              <TouchableOpacity key={item.name} onPress={() => router.push(item.name as any)} style={{alignItems:'center', width: 48}}>
-                <Icon color={isActive ? colors.tabBarActive : colors.tabBarInactive} size={20} />
-                <Text style={{fontSize:10, color: isActive ? colors.tabBarActive : colors.tabBarInactive, marginTop: 4, textAlign:'center'}}>{item.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }

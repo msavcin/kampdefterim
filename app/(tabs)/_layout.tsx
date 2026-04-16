@@ -71,7 +71,7 @@ export default function TabLayout() {
 
   // Guest ise erişilemeyen sekmeler
   const guestDisabled = userRole === 'guest';
-  const { unread } = useChatUnread();
+  const { personalUnread, communityUnread } = useChatUnread();
 
   // Sekme yapılandırması
   const tabScreens = [
@@ -156,18 +156,37 @@ export default function TabLayout() {
             tabBarIcon: ({ color, size }) => (
               <View style={{ position: 'relative' }}>
                 <tab.icon color={tab.disabled ? colors.muted : color} size={size} style={{ opacity: tab.disabled ? 0.5 : 1 }} />
-                {tab.name === 'new' && unread > 0 && (
-                  <View style={{
-                    position: 'absolute',
-                    top: -4,
-                    right: -4,
-                    width: 10,
-                    height: 10,
-                    borderRadius: 6,
-                    backgroundColor: '#ef4444',
-                    borderWidth: 1,
-                    borderColor: colors.tabBar,
-                  }} />
+                {tab.name === 'new' && (personalUnread > 0 || communityUnread > 0) && (
+                  <>
+                    {communityUnread > 0 && (
+                      <View style={{
+                        position: 'absolute',
+                        top: -10,
+                        right: -6,
+                        width: 10,
+                        height: 10,
+                        borderRadius: 6,
+                        backgroundColor: colors.info,
+                        borderWidth: 1,
+                        borderColor: colors.tabBar,
+                        zIndex: 2,
+                      }} />
+                    )}
+                    {personalUnread > 0 && (
+                      <View style={{
+                        position: 'absolute',
+                        top: -0,
+                        right: -6,
+                        width: 10,
+                        height: 10,
+                        borderRadius: 6,
+                        backgroundColor: colors.danger,
+                        borderWidth: 1,
+                        borderColor: colors.tabBar,
+                        zIndex: 1,
+                      }} />
+                    )}
+                  </>
                 )}
                 {/* Guest kullanıcı için disabled tab'larda Premium badge */}
                 {guestDisabled && tab.disabled && tab.name !== 'index' && tab.name !== 'favorites' && tab.name !== 'profile' && (

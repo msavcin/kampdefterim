@@ -64,9 +64,10 @@ export async function registerUser({ name, username, email, password, communityI
     await saveToken(data.token);
     console.log('[AUTH] Yeni access token kaydedildi:', data.token);
   }
-  if (data.refreshToken) {
-    await saveRefreshToken(data.refreshToken);
-    console.log('[AUTH] Yeni refresh token kaydedildi:', data.refreshToken);
+  const newRefresh1 = data?.refreshToken ?? data?.refresh_token ?? null;
+  if (newRefresh1) {
+    await saveRefreshToken(newRefresh1);
+    console.log('[AUTH] Yeni refresh token kaydedildi:', newRefresh1);
   }
   console.log('registerUser yanıtı:', data);
   return data;
@@ -91,9 +92,10 @@ export async function loginUser({ identifier, password }: { identifier: string, 
     await saveToken(data.token);
     console.log('[AUTH] Yeni access token kaydedildi:', data.token);
   }
-  if (data.refreshToken) {
-    await saveRefreshToken(data.refreshToken);
-    console.log('[AUTH] Yeni refresh token kaydedildi:', data.refreshToken);
+  const newRefresh2 = data?.refreshToken ?? data?.refresh_token ?? null;
+  if (newRefresh2) {
+    await saveRefreshToken(newRefresh2);
+    console.log('[AUTH] Yeni refresh token kaydedildi:', newRefresh2);
   }
   console.log('loginUser yanıtı:', data);
   return data; // JWT döner

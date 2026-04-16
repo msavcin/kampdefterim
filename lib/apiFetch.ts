@@ -35,16 +35,20 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
       });
       if (refreshRes.ok) {
         const data = await refreshRes.json();
-        if (data.token) await saveToken(data.token);
-        if (data.refreshToken) await saveRefreshToken(data.refreshToken);
-        // Orijinal isteği yeni token ile tekrar dene
+        const newToken = data?.token ?? null;
+        if (newToken) await saveToken(newToken);
+        const newRefresh = data?.refreshToken ?? data?.refresh_token ?? null;
+        if (newRefresh) await saveRefreshToken(newRefresh);
+        // Orijinal isteği yeni token ile tekrar dene (eğer yeni token geldiyse)
         if (typeof headers === 'object') {
-          headers['Authorization'] = `Bearer ${data.token}`;
+          if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
         }
         init.headers = headers;
-        response = await fetch(input, init);
-        if (response.status !== 401) {
-          return response;
+        if (newToken) {
+          response = await fetch(input, init);
+          if (response.status !== 401) {
+            return response;
+          }
         }
       }
     }
@@ -62,22 +66,24 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
       });
       if (__DEV__) console.log('[apiFetch] 403 refresh yanıtı:', refreshRes.status);
       if (refreshRes.ok) {
-        const data = await refreshRes.json();
-        if (data.token) {
-          await saveToken(data.token);
-          if (__DEV__) console.log('[apiFetch] 403 sonrası yeni token kaydedildi, istek tekrarlanıyor...');
+          const data = await refreshRes.json();
+          const newToken = data?.token ?? null;
+          if (newToken) {
+            await saveToken(newToken);
+            if (__DEV__) console.log('[apiFetch] 403 sonrası yeni token kaydedildi, istek tekrarlanıyor...');
+          }
+          const newRefresh = data?.refreshToken ?? data?.refresh_token ?? null;
+          if (newRefresh) await saveRefreshToken(newRefresh);
+          // Orijinal isteği yeni token ile tekrar dene
+          if (typeof headers === 'object') {
+            if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
+          }
+          init.headers = headers;
+          response = await fetch(input, init);
+          if (__DEV__) console.log('[apiFetch] 403 retry yanıtı:', response.status);
+          // Yine 403 gelirse direkt döndür (gerçek yetki hatası)
+          return response;
         }
-        if (data.refreshToken) await saveRefreshToken(data.refreshToken);
-        // Orijinal isteği yeni token ile tekrar dene
-        if (typeof headers === 'object') {
-          headers['Authorization'] = `Bearer ${data.token}`;
-        }
-        init.headers = headers;
-        response = await fetch(input, init);
-        if (__DEV__) console.log('[apiFetch] 403 retry yanıtı:', response.status);
-        // Yine 403 gelirse direkt döndür (gerçek yetki hatası)
-        return response;
-      }
     }
   }
   return response;
