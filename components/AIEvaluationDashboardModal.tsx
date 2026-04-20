@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../app/icons';
 import WeatherIcon from './WeatherIcon';
 import { useTheme, defaultCategoryMap, DEFAULT_CATEGORY_ACCENTS } from './ThemeProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type {
   AIEvaluationResponse,
   EvalStructuredData, EvalCategory, EvalItem, EvalSeverity, EvalStat,
@@ -773,6 +774,7 @@ export default function AIEvaluationDashboardModal({
 }: AIEvaluationDashboardModalProps) {
   const { theme, scheme } = useTheme();
   const isDark = scheme === 'dark';
+  const insets = useSafeAreaInsets();
 
   // ─── Structured-first: backend yapısal veri gönderdiyse onu kullan, yoksa markdown parse ───
   const structuredResult = useMemo(() => {
@@ -821,24 +823,66 @@ export default function AIEvaluationDashboardModal({
   }, [structuredResult, rawCategories, weatherData]);
 
   // Puan: structured data'da score varsa doğrudan, yoksa metin tarama
-  const mainScore = useMemo(() => {
-    if (structuredResult?.score) return structuredResult.score;
-    const findScore = (cat: ParsedCategory) => {
-      if (cat.highlight?.includes('/')) return cat.highlight;
-      for (const item of cat.items) {
-        const m = item.text.match(/(\d+(?:[.,]\d+)?\s*\/\s*\d+)/);
-        if (m) return m[1];
+  type ScoreOrigin = { kind: 'highlight'; catIndex: number } | { kind: 'item'; catIndex: number; itemIndex: number } | null;
+
+  const mainScoreInfo = useMemo< { score: string | null; origin: ScoreOrigin }>(() => {
+    if (structuredResult?.score) return { score: String(structuredResult.score), origin: null };
+
+    const scoreRe = /(\d+(?:[.,]\d+)?\s*\/\s*\d+)/;
+    const findScoreInCat = (cat: ParsedCategory, catIndex: number) => {
+      if (cat.highlight && typeof cat.highlight === 'string' && scoreRe.test(cat.highlight)) {
+        return { score: cat.highlight.match(scoreRe)![1], origin: { kind: 'highlight', catIndex } as ScoreOrigin };
+      }
+      for (let i = 0; i < cat.items.length; i++) {
+        const item = cat.items[i];
+        try {
+          const m = String(item.text).match(scoreRe);
+          if (m) return { score: m[1], origin: { kind: 'item', catIndex, itemIndex: i } as ScoreOrigin };
+        } catch (e) {}
       }
       return null;
     };
-    const campCat = categories.find(c => {
-      const l = c.title.toLowerCase();
+
+    const campIdx = categories.findIndex(c => {
+      const l = (c.title || '').toLowerCase();
       return l.includes('kamp') && (l.includes('alan') || l.includes('analiz') || l.includes('puan'));
     });
-    if (campCat) { const s = findScore(campCat); if (s) return s; }
-    for (const cat of categories) { const s = findScore(cat); if (s) return s; }
-    return null;
+    if (campIdx !== -1) {
+      const r = findScoreInCat(categories[campIdx], campIdx);
+      if (r) return { score: r.score, origin: r.origin as ScoreOrigin };
+    }
+
+    for (let ci = 0; ci < categories.length; ci++) {
+      const r = findScoreInCat(categories[ci], ci);
+      if (r) return { score: r.score, origin: r.origin as ScoreOrigin };
+    }
+    return { score: null, origin: null };
   }, [structuredResult, categories]);
+
+  const mainScore = mainScoreInfo.score ?? null;
+
+  // If we promoted a score to the header, remove it from the category highlight/item so it's not duplicated
+  const displayCategories = useMemo(() => {
+    if (!mainScoreInfo.origin) return categories;
+    const cloned = categories.map(cat => ({ ...cat, items: cat.items.map(it => ({ ...it })) }));
+    try {
+      const origin = mainScoreInfo.origin;
+      if (origin && origin.kind === 'highlight' && typeof origin.catIndex === 'number') {
+        cloned[origin.catIndex] = { ...cloned[origin.catIndex], highlight: undefined };
+      } else if (origin && origin.kind === 'item' && typeof origin.catIndex === 'number' && typeof origin.itemIndex === 'number') {
+        const it = cloned[origin.catIndex].items[origin.itemIndex];
+        if (it) {
+          const newText = String(it.text).replace(/(\d+(?:[.,]\d+)?\s*\/\s*\d+)/, '').trim();
+          if (newText === '') {
+            cloned[origin.catIndex].items.splice(origin.itemIndex, 1);
+          } else {
+            cloned[origin.catIndex].items[origin.itemIndex] = { ...it, text: newText };
+          }
+        }
+      }
+    } catch (e) {}
+    return cloned;
+  }, [categories, mainScoreInfo]);
 
   // Stat badge'ler: structured stats varsa doğrudan kullan, yoksa tarama
   const statBadges = useMemo(() => {
@@ -849,7 +893,7 @@ export default function AIEvaluationDashboardModal({
       }));
     }
     const badges: { icon: string; label: string; value: string; severity: Severity }[] = [];
-    for (const cat of categories) {
+    for (const cat of displayCategories) {
       for (const item of cat.items) {
         if (item.type === 'weather-day') {
           if (item.dayTemp != null && !badges.some(b => b.label === 'Sıcaklık'))
@@ -899,7 +943,7 @@ export default function AIEvaluationDashboardModal({
                 colors={isDark ? ['transparent', 'rgba(11,18,32,0.95)'] : ['transparent', 'rgba(255,255,255,0.97)']}
                 style={s.heroOverlay}
               >
-                {renderHeader(theme, isDark, mainScore, planTitle, onClose)}
+                {renderHeader(theme, isDark, mainScore, planTitle, onClose, insets.top)}
               </LinearGradient>
             </ImageBackground>
           ) : (
@@ -909,7 +953,7 @@ export default function AIEvaluationDashboardModal({
                 : [theme.colors.primaryLight + '70', '#FFFFFF']}
               style={s.heroGradient}
             >
-              {renderHeader(theme, isDark, mainScore, planTitle, onClose)}
+              {renderHeader(theme, isDark, mainScore, planTitle, onClose, insets.top)}
             </LinearGradient>
           )}
 
@@ -931,7 +975,7 @@ export default function AIEvaluationDashboardModal({
             {/* Durum badge'leri */}
             {evaluation && (
               <View style={s.statusBadgeRow}>
-                {evaluation.fallback && (
+                {evaluation.fallback && (typeof remaining !== 'number' || remaining > 0) && (
                   <View style={[s.statusBadge, { backgroundColor: isDark ? theme.colors.surfaceVariant : '#FEF3C7', borderWidth: 1, borderColor: isDark ? theme.colors.border : '#FBBF2440' }]}>
                     <Icon name="AlertTriangle" size={12} color={isDark ? '#FBBF24' : '#D97706'} />
                     <Text style={[s.statusBadgeText, { color: isDark ? '#FCD34D' : '#92400E' }]}>Kural tabanlı</Text>
@@ -953,7 +997,7 @@ export default function AIEvaluationDashboardModal({
             )}
 
             {/* Kategori kartları */}
-            {categories.map((cat, idx) => (
+            {displayCategories.map((cat, idx) => (
               <CategoryCard
                 key={idx}
                 category={cat}
@@ -1008,9 +1052,11 @@ function renderHeader(
   mainScore: string | null,
   planTitle: string | undefined,
   onClose: () => void,
+  safeTop?: number,
 ) {
+  const headerStyle = [s.headerContainer, { paddingTop: Math.max(16, (safeTop ?? 0) + 44) }];
   return (
-    <View style={s.headerContainer}>
+    <View style={headerStyle}>
       {/* Üst satır: Logo + Kapat */}
       <View style={s.headerTopRow}>
         <View style={s.headerTitleRow}>

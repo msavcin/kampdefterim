@@ -68,7 +68,7 @@
     "@babel/core": "^7.25.2",
     "@types/jwt-decode": "^3.1.0",
     "eslint": "^10.2.0",
-    "eslint-config-expo": "^55.0.0",
+    "eslint-config-expo": "~9.2.0",
     "typescript": "~5.8.3"
   }
 }

@@ -255,28 +255,60 @@ export interface EvalItemCampSuggestion {
  * Hata durumunda null döner (fallback mekanizması client tarafında devreye girer).
  */
 export async function getAIEvaluation(planData: AIEvaluationRequest): Promise<AIEvaluationResponse | null> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 90_000);
-  try {
-    const res = await apiFetch(`${API_URL}/planner/ai-evaluate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ planData }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      if (__DEV__) console.warn('[aiEvaluation] API yanıtı başarısız:', res.status);
+  const maxRetries = 3;
+  const baseDelay = 600; // ms
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90_000);
+    try {
+      const res = await apiFetch(`${API_URL}/planner/ai-evaluate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planData }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        // Rate limit: retry with exponential backoff
+        if (res.status === 429) {
+          let body: any = null;
+          try { body = await res.json(); } catch (e) { body = null; }
+          if (__DEV__) console.warn('[aiEvaluation] API yanıtı 429 (rate limit), attempt', attempt + 1, body);
+          if (attempt < maxRetries - 1) {
+            const delay = Math.round(baseDelay * Math.pow(2, attempt) + Math.random() * 300);
+            if (__DEV__) console.log('[aiEvaluation] retrying after', delay, 'ms');
+            await sleep(delay);
+            continue;
+          }
+          const err: any = new Error(body?.message || 'Too Many Requests');
+          err.status = 429;
+          err.body = body;
+          throw err;
+        }
+        if (__DEV__) console.warn('[aiEvaluation] API yanıtı başarısız:', res.status);
+        return null;
+      }
+
+      const data = await res.json();
+      if (!data || !data.evaluation) return null;
+      return data as AIEvaluationResponse;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        if (__DEV__) console.warn('[aiEvaluation] timeout/abort', err);
+        return null;
+      }
+      if (err?.status === 429) throw err; // rethrow our rate-limit error for caller to handle
+      if (__DEV__) console.warn('[aiEvaluation] hata:', err);
       return null;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    const data = await res.json();
-    if (!data || !data.evaluation) return null;
-    return data as AIEvaluationResponse;
-  } catch (err) {
-    if (__DEV__) console.warn('[aiEvaluation] hata:', err);
-    return null;
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  return null;
 }
 
 export interface AIEvalStatusResponse {

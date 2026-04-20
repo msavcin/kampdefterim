@@ -90,6 +90,17 @@ export default function ChatScreen() {
     return message;
   };
 
+  const isEmptyMessage = (msg:any) => {
+    if (!msg || typeof msg !== 'object') return true;
+    const rawText = msg?.text ?? msg?.body ?? '';
+    if (typeof rawText === 'string' && rawText.trim() !== '') return false;
+    const hasAttachment = Array.isArray(msg?.attachments) && msg.attachments.length > 0;
+    const hasMedia = Array.isArray(msg?.media) && msg.media.length > 0;
+    const hasFiles = Array.isArray(msg?.files) && msg.files.length > 0;
+    const hasImage = !!(msg?.image || msg?.image_url || msg?.photo);
+    return !(hasAttachment || hasMedia || hasFiles || hasImage);
+  };
+
   const isDeleteControlMessage = (item:any) => {
     if (!item || typeof item !== 'object') return false;
     const action = item?.metadata?.action ?? item?.meta?.control?.action ?? item?.action ?? item?.type;
@@ -300,9 +311,13 @@ export default function ChatScreen() {
         // server may return reverse order; ensure chronological order for inverted FlatList
         const rawArr = Array.isArray(data) ? data : [];
         // Filter out any community-scoped messages when viewing a personal conversation
+        // and ignore blank/empty messages created only to establish the conversation.
         const arr = rawArr.filter((m:any) => {
           try {
-            return !(m?.community_id || (m?.community && (m.community.id || m.community.community_id)) || m?.communityId);
+            const isCommunity = m?.community_id || (m?.community && (m.community.id || m.community.community_id)) || m?.communityId;
+            if (isCommunity) return false;
+            if (isEmptyMessage(m)) return false;
+            return true;
           } catch (e) { return true; }
         });
         try {
@@ -442,6 +457,7 @@ export default function ChatScreen() {
               setMessages(prev => {
                 try {
                   const normalizedPayload = normalizeMessage(payload);
+                  if (isEmptyMessage(normalizedPayload)) return prev;
                   const pid = getMessageId(normalizedPayload);
                   if (pid != null) {
                     const pidStr = String(pid);
@@ -451,7 +467,8 @@ export default function ChatScreen() {
                   }
                   return [normalizedPayload, ...prev];
                 } catch (e) { /* ignore dedupe errors */ }
-                return [normalizeMessage(payload), ...prev];
+                const normalizedFallback = normalizeMessage(payload);
+                return isEmptyMessage(normalizedFallback) ? prev : [normalizedFallback, ...prev];
               });
               (async () => {
                 try {
@@ -534,7 +551,19 @@ export default function ChatScreen() {
       return;
     }
 
-    const recipientIdFromMeta = getConversationRecipientId(conversationMeta, localUserId);
+    let recipientIdFromMeta = getConversationRecipientId(conversationMeta, localUserId);
+    if (payload.conversation_id && recipientIdFromMeta == null && !conversationMeta) {
+      try {
+        const metaRes = await apiFetch(`${API_URL}/chat/conversations/${payload.conversation_id}`);
+        if (metaRes && metaRes.ok) {
+          const metaJson = await metaRes.json();
+          setConversationMeta(metaJson);
+          recipientIdFromMeta = getConversationRecipientId(metaJson, localUserId);
+        }
+      } catch (e) {
+        console.warn('[Chat] failed to refresh conversationMeta before send', e);
+      }
+    }
     if (payload.conversation_id && recipientIdFromMeta != null) {
       payload.recipient_id = Number(recipientIdFromMeta);
     }
@@ -546,7 +575,8 @@ export default function ChatScreen() {
       }
     }
     if (payload.conversation_id && payload.recipient_id == null) {
-      console.warn('[Chat] send payload still missing recipient_id for conversation', { conversationId: payload.conversation_id, conversationMeta, recipientIdFromMeta, inferredRecipient });
+      // API artık conversation_id olabilir; logu hata değil bilgi olarak bırak.
+      console.info('[Chat] send payload has conversation_id only, no recipient_id determined yet', { conversationId: payload.conversation_id, conversationMeta, recipientIdFromMeta, inferredRecipient });
     }
     const optimistic = { id: tempId, text, sender_id: localUserId ?? 'me', created_at: new Date().toISOString(), sending: true, conversation_id: payload.conversation_id, recipient_id: payload.recipient_id };
     setMessages(prev => [optimistic, ...prev]);
@@ -580,21 +610,25 @@ export default function ChatScreen() {
       }
       const normalizedSaved = normalizeMessage(saved);
       console.log('[Chat] send response saved', normalizedSaved);
-      setMessages(prev => {
-        try {
-          const savedId = getMessageId(normalizedSaved);
-          const savedIdStr = savedId != null ? String(savedId) : null;
-          const out: any[] = [];
-          for (const m of prev) {
-            if (String(getMessageId(m)) === String(tempId)) continue; // remove temp placeholder
-            if (savedIdStr != null && String(getMessageId(m)) === savedIdStr) continue; // remove any existing dup
-            out.push(m);
+      if (isEmptyMessage(normalizedSaved)) {
+        setMessages(prev => prev.filter(m => String(getMessageId(m)) !== String(tempId)));
+      } else {
+        setMessages(prev => {
+          try {
+            const savedId = getMessageId(normalizedSaved);
+            const savedIdStr = savedId != null ? String(savedId) : null;
+            const out: any[] = [];
+            for (const m of prev) {
+              if (String(getMessageId(m)) === String(tempId)) continue; // remove temp placeholder
+              if (savedIdStr != null && String(getMessageId(m)) === savedIdStr) continue; // remove any existing dup
+              out.push(m);
+            }
+            return normalizedSaved ? [normalizedSaved, ...out] : out;
+          } catch (e) {
+            return prev.map(m => (String(getMessageId(m)) === String(tempId) ? normalizedSaved : m));
           }
-          return normalizedSaved ? [normalizedSaved, ...out] : out;
-        } catch (e) {
-          return prev.map(m => (String(getMessageId(m)) === String(tempId) ? normalizedSaved : m));
-        }
-      });
+        });
+      }
       // Eğer sunucu yeni bir conversation id döndürdüyse, canonical route'a yönlendir
         try {
         const returnedConvId = saved?.conversation_id ?? saved?.conversation?.id ?? null;
@@ -698,7 +732,7 @@ export default function ChatScreen() {
 
         <FlatList
           ref={listRef}
-          data={messages}
+          data={messages.filter((m:any) => !isEmptyMessage(m))}
           inverted
           style={{flex:1, backgroundColor: colors.background}}
           contentContainerStyle={{ paddingTop: 18 + insets.bottom, paddingBottom: keyboardVisible ? 18 : 18 + insets.bottom }}

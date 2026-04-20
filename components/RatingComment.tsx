@@ -51,7 +51,7 @@ export default function RatingComment({ campingAreaId, currentUserId, perPage = 
   useEffect(() => {
     setPage(1);
     if (campingAreaId) loadPage(1);
-  }, [campingAreaId, refreshKey]);
+  }, [campingAreaId, refreshKey, currentUserId]);
 
   const loadMore = async () => {
     if (loading) return;

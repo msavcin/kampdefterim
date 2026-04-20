@@ -71,6 +71,8 @@ import { /* rejectMember, */ removeMember } from '../../lib/userCommunityApi';
 import { Picker } from '@react-native-picker/picker';
 import { getToken, removeToken } from '../../lib/auth';
 import { useRouter } from 'expo-router';
+import { apiFetch } from '@/lib/apiFetch';
+import { openConversationOrCommunity } from '@/lib/chatNavigation';
 // Yardımcı: Kullanıcının topluluk üyeliğini getir
 async function getUserMembershipRemote(communityId: number, userId: number) {
   const token = await getToken();
@@ -277,6 +279,92 @@ export default function ProfileScreen(props: any) {
     } catch (e) {
       setFriendError('Arkadaşlar alınamadı');
     }
+  };
+
+  const handleOpenFriendConversation = async (friend: any) => {
+    if (!friend?.id) {
+      Alert.alert('Hata', 'Bu kullanıcı için alıcı kimliği yok.');
+      return;
+    }
+
+    const currentUserId = user?.id ?? user?.user_id ?? user?.userId ?? user?.member?.user?.id;
+    const recipientId = Number(friend.id);
+    const participantIds = [String(recipientId)];
+    if (currentUserId != null) participantIds.unshift(String(currentUserId));
+
+    if (currentUserId) {
+      try {
+        const buildQuery = (order: [string, string]) => `${order[0]},${order[1]}`;
+        const queries = [
+          buildQuery([String(currentUserId), String(friend.id)]),
+          buildQuery([String(friend.id), String(currentUserId)]),
+        ];
+        for (const query of queries) {
+          try {
+            const res = await apiFetch(`${API_URL}/chat/conversations?participant_ids=${encodeURIComponent(query)}`);
+            if (!res.ok) continue;
+            const data = await res.json();
+            if (!Array.isArray(data)) continue;
+            const found = data.find((c:any) => {
+              const convId = c?.id ?? c?.conversation_id ?? c?.conversation?.id;
+              return convId != null && !c?.community_id;
+            });
+            const convId = found?.id ?? found?.conversation_id ?? found?.conversation?.id;
+            if (convId) {
+              try {
+                await openConversationOrCommunity(router, convId, { replace: false });
+                return;
+              } catch (e) {
+                console.warn('[Profile] open existing friend conversation failed', e);
+              }
+            }
+          } catch (e) {
+            console.warn('[Profile] friend conversation lookup attempt failed', e);
+          }
+        }
+      } catch (e) {
+        console.warn('[Profile] friend conversation lookup failed', e);
+      }
+    }
+
+    try {
+      const msgPayload: any = {
+        actualRecipientId: recipientId,
+        recipient_id: recipientId,
+        participant_ids: participantIds.map((id) => Number(id)).filter((id) => !Number.isNaN(id)),
+      };
+      console.log('[Profile] create friend conversation via message payload', msgPayload);
+      const res = await apiFetch(`${API_URL}/chat/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(msgPayload),
+      });
+      console.log('[Profile] create friend conversation via message response', { ok: Boolean(res?.ok), status: res?.status });
+      if (res) {
+        const text = await res.text();
+        console.log('[Profile] create friend conversation via message response body', text);
+        let responseData: any = null;
+        try {
+          responseData = text ? JSON.parse(text) : null;
+        } catch (parseErr) {
+          console.warn('[Profile] create friend conversation via message response parse failed', parseErr);
+        }
+        const convId = responseData?.conversation_id
+          ?? responseData?.conversation?.id
+          ?? responseData?.conversation?.conversation_id
+          ?? responseData?.id
+          ?? responseData?.message?.conversation_id
+          ?? responseData?.message?.conversation?.id;
+        if (convId) {
+          await openConversationOrCommunity(router, convId, { replace: false });
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('[Profile] create friend conversation via message failed', e);
+    }
+
+    router.push({ pathname: '/chat/new', params: { recipientId: String(friend.id) } } as any);
   };
 
   // Kullanıcı adı ile arama
@@ -1394,11 +1482,7 @@ export default function ProfileScreen(props: any) {
                    </View>
                    <TouchableOpacity
                      onPress={() => {
-                       if (!f.id) {
-                         Alert.alert('Hata', 'Bu kullanıcı için alıcı kimliği yok.');
-                         return;
-                       }
-                      router.push({ pathname: '/(tabs)/chat/new', params: { recipientId: String(f.id) } });
+                       handleOpenFriendConversation(f);
                      }}
                      style={{ padding: 0, borderRadius: 16 }}
                    >

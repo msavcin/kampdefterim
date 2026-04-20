@@ -6,6 +6,19 @@ import { getSVGIcon } from '@/app/icons/svgIcons';
 import { SvgXml } from 'react-native-svg';
 import { Dimensions } from 'react-native';
 import { useTheme } from './ThemeProvider';
+import { ActivityIndicator, View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image, Alert, Linking, TextInput, Share } from 'react-native';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
+import * as Clipboard from 'expo-clipboard';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle, Share2 } from 'lucide-react-native';
+import ThemedButton from './ThemedButton';
+import AIEvalButton from './AIEvalButton';
+import { getCachedImagePath } from '@/lib/imageCache';
+import { CampingArea, getDatabase } from '@/lib/database';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+import { deleteCampingAreaSmart } from '@/lib/syncManager';
 // Arkadaş tipini tanımla
 // API /friends?user_id=X endpoint'i { id, name, email, avatar_url } formatında döner
 // (types/friend.ts ile uyumlu). user_id de olabilir — her iki alanı destekliyoruz.
@@ -155,19 +168,7 @@ const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: s
     </TouchableOpacity>
   );
 };
-import { ActivityIndicator } from 'react-native';
-import { getCachedImagePath } from '@/lib/imageCache';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image, Alert, Linking, TextInput, Share } from 'react-native';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
-import * as Clipboard from 'expo-clipboard';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle, Share2 } from 'lucide-react-native';
-import ThemedButton from './ThemedButton';
-import { CampingArea, getDatabase } from '@/lib/database';
-import { useNetworkStatus } from '@/hooks/useNetworkStatus';
-import { deleteCampingAreaSmart } from '@/lib/syncManager';
+
 
 // Lightbox için büyük fotoğraf bileşeni
 const LightboxImage = ({ img, refreshKey }: { img: string, refreshKey?: number }) => {
@@ -291,6 +292,15 @@ const getPriceRangeLabel = (priceRange: string) => {
     case 'premium': return 'Premium (1500₺+)';
     default: return 'Belirtilmemiş';
   }
+};
+
+const getCampgroundApiId = (area: CampingArea | null) => {
+  if (!area) return '';
+  const externalId = (area as any).external_id;
+  if (externalId !== undefined && externalId !== null && String(externalId).trim() !== '') {
+    return String(externalId);
+  }
+  return String(area.id ?? '');
 };
 
 // opening_hours stringini günlere göre ayrıştıran yardımcı fonksiyon
@@ -493,6 +503,7 @@ export default function CampingAreaDetailModal({
   currentUserId
 }: CampingAreaDetailModalProps & { isSuperAdmin?: boolean; currentUserId?: string | number }) {
   const { colors, scheme } = useTheme();
+  const campgroundApiId = getCampgroundApiId(campingArea);
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
   const [showRatingForm, setShowRatingForm] = useState(false);
   const [ratingRefreshKey, setRatingRefreshKey] = useState(0);
@@ -501,6 +512,8 @@ export default function CampingAreaDetailModal({
   const [userQuickRating, setUserQuickRating] = useState<number | null>(null);
   const [ratingFormLoading, setRatingFormLoading] = useState(false);
   const [ratingFormDefaults, setRatingFormDefaults] = useState<{ rating?: number; comment?: string; anon_name?: string } | null>(null);
+
+  
 
   // Modal açıldığında görselleri yeniden kontrol et
   useEffect(() => {
@@ -600,12 +613,11 @@ export default function CampingAreaDetailModal({
   // Kamp Defterim özetini çek
   const fetchKDAggregate = async () => {
     try {
-      const id = (campingArea as any)?.id;
-      if (!id) {
+      if (!campgroundApiId) {
         setKdAggregate(null);
         return;
       }
-      const sum = await getRatingsSummary(id);
+      const sum = await getRatingsSummary(campgroundApiId);
       if (sum && (typeof sum.rating === 'number' || typeof sum.review_count === 'number')) {
         setKdAggregate({ rating: Number(sum.rating ?? 0), review_count: Number(sum.review_count ?? 0) });
       } else {
@@ -617,15 +629,15 @@ export default function CampingAreaDetailModal({
   };
 
   useEffect(() => {
-    if ((campingArea as any)?.id) fetchKDAggregate();
-  }, [campingArea?.id, ratingRefreshKey]);
+    if (campgroundApiId) fetchKDAggregate();
+  }, [campgroundApiId, ratingRefreshKey]);
 
   const handleQuickVote = async (value: number) => {
     if (!campingArea || quickVoteLoading) return;
     setQuickVoteLoading(true);
     setUserQuickRating(value);
     try {
-      await postRatingForCampground((campingArea as any).id, { rating: value });
+      await postRatingForCampground(campgroundApiId, { rating: value });
       // yenile
       setRatingRefreshKey(k => k + 1);
       await fetchKDAggregate();
@@ -1095,6 +1107,13 @@ export default function CampingAreaDetailModal({
                 </View>
               </View>
             </View>
+            <View style={{ marginTop: 8 }}>
+              <AIEvalButton
+                campingArea={campingArea}
+                campingAreaImage={Array.isArray(campingArea.images) && campingArea.images.length > 0 ? String(campingArea.images[0]) : null}
+                planTitle={campingArea.name ?? 'Kamp Defterim Değerlendirmesi'}
+              />
+            </View>
 
             <View style={styles.locationRow}>
               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
@@ -1372,16 +1391,16 @@ export default function CampingAreaDetailModal({
 
           {/* Kamp Defterim yorum listesi (sayfanın en altında) */}
           <View style={[styles.section, { backgroundColor: colors.surface }]}> 
-            <RatingComment campingAreaId={(campingArea as any).id} currentUserId={currentUserId} perPage={5} refreshKey={ratingRefreshKey} onDeleted={() => setRatingRefreshKey(k => k + 1)} />
+            <RatingComment campingAreaId={campgroundApiId} currentUserId={currentUserId} perPage={5} refreshKey={ratingRefreshKey} onDeleted={() => setRatingRefreshKey(k => k + 1)} />
             <View style={{ height: 12 }} />
             <ThemedButton variant="primary" onPress={async () => {
-              if (!campingArea || !(campingArea as any).id) {
+              if (!campingArea || !campgroundApiId) {
                 setShowRatingForm(true);
                 return;
               }
               setRatingFormLoading(true);
               try {
-                const my = await getMyRating((campingArea as any).id);
+                const my = await getMyRating(campgroundApiId);
                 if (my) setRatingFormDefaults({ rating: my.rating ? Number(my.rating) : undefined, comment: my.comment ?? undefined, anon_name: my.anon_name ?? undefined });
                 else setRatingFormDefaults(null);
               } catch (e) {
@@ -1406,11 +1425,13 @@ export default function CampingAreaDetailModal({
           )}
         </ScrollView>
 
+        
+
         {/* Rating form modal */}
         <RatingFormModal
           visible={showRatingForm}
           onClose={() => { setShowRatingForm(false); setRatingFormDefaults(null); }}
-          campingAreaId={(campingArea as any).id}
+          campingAreaId={campgroundApiId}
           onSubmitted={() => setRatingRefreshKey(k => k + 1)}
           defaultRating={ratingFormDefaults?.rating ?? userQuickRating ?? (kdAggregate ? Math.round(kdAggregate.rating) : 3)}
           defaultComment={ratingFormDefaults?.comment}
@@ -1750,6 +1771,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 15,
   },
+  aiEvalPremiumIcon: { position: 'absolute', right: 8, top: -6, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e6eef6' },
   // Styles aynen senin verdiğin şekilde kaldı
   container: { flex: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1 },

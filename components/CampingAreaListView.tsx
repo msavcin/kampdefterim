@@ -17,6 +17,7 @@ import { MapPin, Navigation, Info } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from './ThemeProvider';
+import AIEvalButton from './AIEvalButton';
 import { createThemedStyles } from '../constants/theme/sharedStyles';
 import { eventBus } from '@/lib/eventBus';
 import type { CampingArea } from '@/lib/database';
@@ -411,6 +412,8 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
               <Text style={[styles.actionButtonText, { color: colors.info }, disabled && { color: colors.muted }]}>Yol Tarifi</Text>
             </TouchableOpacity>
 
+            {/* Kamp Defterim ile Değerlendir: ayrı satırda */}
+
             {/* Bu kampı seç (Camp Plan) - sadece camp-plan modunda görünür */}
             {showSelectMode && (
               <TouchableOpacity
@@ -448,6 +451,11 @@ const CampingAreaListView: React.FC<CampingAreaListViewProps> = ({
                 <Text style={[styles.actionButtonText, { color: colors.primary }, disabled && { color: colors.muted }]}>Bu kampı seç</Text>
               </TouchableOpacity>
             )}
+          </View>
+
+          {/* Değerlendirme butonu: alt satır, tam genişlik */}
+          <View style={{ marginTop: 8, width: '100%' }}>
+            <AIEvalButton campingArea={item} campingAreaImage={coverImage ? coverImage : null} planTitle={item.name} fullWidth={true} />
           </View>
         </View>
       </TouchableOpacity>

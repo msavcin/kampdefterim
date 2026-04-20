@@ -103,7 +103,7 @@ export default function TabLayout() {
       name: 'new',
       label: 'Sohbet',
       icon: MessageCircle,
-      disabled: false,
+      disabled: guestDisabled || !isPremium,
     },
     {
       name: 'profile',
@@ -188,8 +188,8 @@ export default function TabLayout() {
                     )}
                   </>
                 )}
-                {/* Guest kullanıcı için disabled tab'larda Premium badge */}
-                {guestDisabled && tab.disabled && tab.name !== 'index' && tab.name !== 'favorites' && tab.name !== 'profile' && (
+                {/* Premium olmayan kullanıcılar için disabled tab'larda Premium badge */}
+                {tab.disabled && !isPremium && tab.name !== 'index' && tab.name !== 'favorites' && tab.name !== 'profile' && (
                   <TouchableOpacity
                     onPress={() => router.push('/premium' as any)}
                     style={{
@@ -216,8 +216,8 @@ export default function TabLayout() {
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() => {
-                    // Guest veya non-premium kullanıcı için disabled tab'lara tıklandığında premium sayfasına yönlendir (özellikle sohbet)
-                    if (tab.name === 'announcements' || tab.name === 'checklist') {
+                    // Non-premium kullanıcılar için belirli disabled tab'lara tıklandığında premium sayfasına yönlendir
+                    if (!isPremium && (tab.name === 'announcements' || tab.name === 'checklist' || tab.name === 'new')) {
                       router.push('/premium' as any);
                       return;
                     }

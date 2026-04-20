@@ -900,52 +900,59 @@ export default function CampPlanPage() {
           // ignore
         }
       } else {
+        // Eğer AI yanıtı gelmediyse önce quota durumunu kontrol et; quota bitmişse popup göster ve kural tabanlı fallback göstermeyelim
+        let statusAfter: AIEvalStatusResponse | null = null;
+        try {
+          const s = await getAIEvalStatus();
+          if (s) {
+            setAiEvalStatus(s);
+            statusAfter = s;
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        if (statusAfter && typeof statusAfter.remaining === 'number' && statusAfter.remaining <= 0) {
+          Alert.alert('Kotaya ulaşıldı', 'Bugünkü değerlendirme kotanız doldu. Yarın tekrar deneyebilirsiniz.');
+          // Do not show rule-based fallback when quota exhausted
+        } else {
+          const fallbackText = evaluateForecast(weathermap?.days);
+          const fallbackObj: AIEvaluationResponse = {
+            evaluation: fallbackText
+              ? `${fallbackText}`
+              : 'AI değerlendirmesi şu an kullanılamıyor. Lütfen daha sonra tekrar deneyin.',
+            generatedAt: new Date().toISOString(), modules: [], cached: false, fallback: true,
+          } as any;
+          setPlanAIEvaluations(prev => ({ ...prev, [plan.id]: fallbackObj }));
+          try { await persistAIEvalToStorage(currentUserId, plan.id, fallbackObj); } catch (e) {}
+        }
+      }
+    } catch (err) {
+      if (__DEV__) console.warn('[camp-plan] plan AI eval hata:', err);
+      // Hata durumunda önce quota bilgisini sorgula; quota bitmişse popup göster ve kural-tabanlı fallback göstermeyelim
+      let statusAfter: AIEvalStatusResponse | null = null;
+      try {
+        const s = await getAIEvalStatus();
+        if (s) {
+          setAiEvalStatus(s);
+          statusAfter = s;
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      if (statusAfter && typeof statusAfter.remaining === 'number' && statusAfter.remaining <= 0) {
+        Alert.alert('Kotaya ulaşıldı', 'Bugünkü değerlendirme kotanız doldu. Yarın tekrar deneyebilirsiniz.');
+      } else {
         const fallbackText = evaluateForecast(weathermap?.days);
         const fallbackObj: AIEvaluationResponse = {
           evaluation: fallbackText
-            ? `${fallbackText}\n\n*(AI değerlendirmesi şu an kullanılamıyor, kural tabanlı analiz gösterilmektedir.)*`
+            ? `${fallbackText}`
             : 'AI değerlendirmesi şu an kullanılamıyor. Lütfen daha sonra tekrar deneyin.',
           generatedAt: new Date().toISOString(), modules: [], cached: false, fallback: true,
         } as any;
         setPlanAIEvaluations(prev => ({ ...prev, [plan.id]: fallbackObj }));
         try { await persistAIEvalToStorage(currentUserId, plan.id, fallbackObj); } catch (e) {}
-
-        // Eğer POST başarısız olduysa (ör. 429) orada kalan bilgi olmayabilir; durumu sorgula ve UI'yı güncelle
-        try {
-          const s = await getAIEvalStatus();
-          if (s) {
-            setAiEvalStatus(s);
-            if (typeof s.remaining === 'number' && s.remaining <= 0) {
-              Alert.alert('Kotaya ulaşıldı', 'Bugünkü değerlendirme kotanız doldu. Yarın tekrar deneyebilirsiniz.');
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
-      }
-    } catch (err) {
-      if (__DEV__) console.warn('[camp-plan] plan AI eval hata:', err);
-      const fallbackText = evaluateForecast(weathermap?.days);
-      const fallbackObj: AIEvaluationResponse = {
-        evaluation: fallbackText
-          ? `${fallbackText}\n\n*(AI değerlendirmesi şu an kullanılamıyor, kural tabanlı analiz gösterilmektedir.)*`
-          : 'AI değerlendirmesi şu an kullanılamıyor. Lütfen daha sonra tekrar deneyin.',
-        generatedAt: new Date().toISOString(), modules: [], cached: false, fallback: true,
-      } as any;
-      setPlanAIEvaluations(prev => ({ ...prev, [plan.id]: fallbackObj }));
-      try { await persistAIEvalToStorage(currentUserId, plan.id, fallbackObj); } catch (e) {}
-
-      // Hata durumunda da quota bilgisini yeniden sorgulayalım (ör. 429 gibi)
-      try {
-        const s = await getAIEvalStatus();
-        if (s) {
-          setAiEvalStatus(s);
-          if (typeof s.remaining === 'number' && s.remaining <= 0) {
-            Alert.alert('Kotaya ulaşıldı', 'Bugünkü değerlendirme kotanız doldu. Yarın tekrar deneyebilirsiniz.');
-          }
-        }
-      } catch (e) {
-        // ignore
       }
     } finally {
       setPlanAIEvalLoadings(prev => ({ ...prev, [plan.id]: false }));
@@ -999,33 +1006,8 @@ export default function CampPlanPage() {
             <Text style={{ color: '#fff', fontSize: 15, marginLeft: 8, fontWeight: '600', flex: 1 }}>Kamp Defterim Değerlendirmesini Gör</Text>
             <Icon name="ChevronRight" size={16} color="#fff" />
           </TouchableOpacity>
-          {isRecentlyEvaluated ? (
+          {isRecentlyEvaluated && (
             <Text style={[themedStyles.helpText, { marginTop: 8 }]}>Bu plan {timeSince(evaluation.generatedAt)} değerlendirildi. Yeni değerlendirme 1 gün sonra aktif olacak.</Text>
-          ) : (
-            // 24 saatten eskiyse yeniden değerlendirme butonunu göster (kota ve premium kontrolü uygulanır)
-            <View style={{ marginTop: 8, position: 'relative' }}>
-              <TouchableOpacity
-                style={[
-                  { padding: 12, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
-                  !isPremium
-                    ? { backgroundColor: theme.colors.surfaceVariant ?? '#f1f5f9', borderColor: theme.colors.border ?? '#cbd5e1', opacity: 0.9 }
-                    : { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-                ]}
-                activeOpacity={isPremium ? 0.7 : 0.9}
-                onPress={() => {
-                  if (!isPremium) { router.push('/premium'); return; }
-                  fetchAIEvaluationForPlan(plan);
-                }}
-              >
-                <Icon name="Sparkles" size={16} color={isPremium ? '#fff' : theme.colors.muted} />
-                <Text style={{ color: isPremium ? '#fff' : theme.colors.muted, fontSize: 15, marginLeft: 8, fontWeight: '600' }}>Kamp Defterim ile Yeniden Değerlendir</Text>
-              </TouchableOpacity>
-              {!isPremium && (
-                <View style={[styles.aiEvalPremiumIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]} pointerEvents="none">
-                  <Icon name="Crown" size={14} color={theme.colors.primary} />
-                </View>
-              )}
-            </View>
           )}
         </View>
       );
@@ -1918,17 +1900,18 @@ export default function CampPlanPage() {
                           </TouchableOpacity>
                           <TouchableOpacity style={[themedStyles.headerDeleteBtn, { marginTop: 0 }]} onPress={async () => {
                             try {
-                              const existing = await AsyncStorage.getItem(SAVED_PLANS_KEY);
+                              const storageKey = makeStorageKey(SAVED_PLANS_KEY, currentUserId);
+                              const existing = await AsyncStorage.getItem(storageKey);
                               let list: CampPlan[] = [];
                               if (existing) {
                                 const parsed = JSON.parse(existing);
                                 if (Array.isArray(parsed)) list = parsed;
                               }
                               const newList = list.filter(p => p.id !== plan.id);
-                              await AsyncStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(newList));
+                              await AsyncStorage.setItem(storageKey, JSON.stringify(newList));
                               setSavedPlans(newList);
                               Alert.alert('Silindi', 'Plan başarıyla silindi.');
-                              if (expanded) setExpandedPlanId(null);
+                              setExpandedPlanId(null);
                             } catch (err) {
                               console.warn('[camp-plan] plan silme hata', err);
                               Alert.alert('Hata', 'Plan silinemedi. Lütfen tekrar deneyin.');
@@ -2097,15 +2080,17 @@ export default function CampPlanPage() {
                                 </TouchableOpacity>
                                 <TouchableOpacity style={[themedStyles.headerDeleteBtn, { marginTop: 0 }]} onPress={async () => {
                                   try {
-                                    const existing = await AsyncStorage.getItem(SAVED_PLANS_KEY);
+                                    const storageKey = makeStorageKey(SAVED_PLANS_KEY, currentUserId);
+                                    const existing = await AsyncStorage.getItem(storageKey);
                                     let list: CampPlan[] = [];
                                     if (existing) {
                                       const parsed = JSON.parse(existing);
                                       if (Array.isArray(parsed)) list = parsed;
                                     }
                                     const newList = list.filter(p => p.id !== plan.id);
-                                    await AsyncStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(newList));
+                                    await AsyncStorage.setItem(storageKey, JSON.stringify(newList));
                                     setSavedPlans(newList);
+                                    setExpandedPlanId(null);
                                     Alert.alert('Silindi', 'Plan başarıyla silindi.');
                                   } catch (err) {
                                     console.warn('[camp-plan] plan silme hata', err);

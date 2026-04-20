@@ -299,6 +299,7 @@ export default function NewChatScreen() {
   const lastUnreadTotalRef = useRef<number | null>(null);
   const suppressUnreadUpdatedRef = useRef(false);
   const localReadOverlayRef = useRef<Map<string, number>>(new Map());
+  const autoOpenedRecipientConversationRef = useRef(false);
   const [tab, setTab] = useState<'friends'|'communities'>('friends');
   const [friendConvMap, setFriendConvMap] = useState<Record<string, any>>({});
 
@@ -557,6 +558,24 @@ export default function NewChatScreen() {
     });
     return () => { try { unsub(); } catch {} };
   }, []);
+
+  useEffect(() => {
+    if (autoOpenedRecipientConversationRef.current) return;
+    if (!initialRecipientId) return;
+    if (!Array.isArray(conversations) || conversations.length === 0) return;
+    const recipientId = Number(initialRecipientId);
+    if (!recipientId || Number.isNaN(recipientId)) return;
+    const existingConv = getFriendConversation({ id: recipientId }, convIndex, conversations);
+    const convId = existingConv?.id ?? existingConv?.conversation_id ?? existingConv?.conversation?.id;
+    if (convId) {
+      autoOpenedRecipientConversationRef.current = true;
+      try {
+        openConversationOrCommunity(router, convId, { replace: true });
+      } catch (e) {
+        console.warn('[NewChat] open existing recipient conversation failed', e);
+      }
+    }
+  }, [initialRecipientId, convIndex, conversations, router]);
 
   // build a quick lookup map of friend -> conversation when lists change
   useEffect(() => {
@@ -913,12 +932,107 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
     try { await openConversationOrCommunity(router, convId, { replace: true }); } catch (e) { console.warn('[NewChat] openConversationOrCommunity failed', e); }
   }, [router]);
 
-  const handleStartWithFriend = useCallback((friend: any) => {
+  const handleOpenFriendConversation = useCallback(async (friend: any) => {
+    if (!friend?.id) return false;
+
+    const existingConv = getFriendConversation(friend, convIndex, conversations);
+    const convId = existingConv?.id ?? existingConv?.conversation_id ?? existingConv?.conversation?.id;
+    if (convId) {
+      await openConversationOrCommunity(router, convId, { replace: true });
+      return true;
+    }
+
+    const recipientId = Number(friend.id);
+    if (!recipientId || Number.isNaN(recipientId)) return false;
+
+    let effectiveLocalUserId = localUserId;
+    if (effectiveLocalUserId == null) {
+      try {
+        const me = await getMe();
+        const resolvedMeId = me?.id ?? me?.user_id ?? me?.userId ?? null;
+        if (resolvedMeId != null) {
+          effectiveLocalUserId = resolvedMeId;
+          setLocalUserId(resolvedMeId);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    const participantIds = [String(recipientId)];
+    if (effectiveLocalUserId != null) {
+      participantIds.unshift(String(effectiveLocalUserId));
+    }
+
+    try {
+      const query = participantIds.join(',');
+      console.log('[NewChat] find existing friend conversation query', { query, participantIds });
+      const listRes = await apiFetch(`${API_URL}/chat/conversations?participant_ids=${encodeURIComponent(query)}`);
+      console.log('[NewChat] existing friend conv response', { ok: Boolean(listRes?.ok), status: listRes?.status });
+      if (listRes && listRes.ok) {
+        const listData = await listRes.json();
+        console.log('[NewChat] existing friend conv payload', { listData });
+        if (Array.isArray(listData)) {
+          const foundConv = listData.find((c:any) => {
+            try {
+              if (c?.community_id) return false;
+              return true;
+            } catch (e) { return false; }
+          });
+          const foundId = foundConv?.id ?? foundConv?.conversation_id ?? foundConv?.conversation?.id;
+          if (foundId) {
+            await openConversationOrCommunity(router, foundId, { replace: true });
+            return true;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[NewChat] find existing friend conversation failed', e);
+    }
+
+    try {
+      const msgPayload: any = {
+        actualRecipientId: recipientId,
+        recipient_id: recipientId,
+        participant_ids: participantIds.map((id) => Number(id)).filter((id) => !Number.isNaN(id)),
+      };
+      console.log('[NewChat] create friend conversation via message payload', msgPayload);
+      const msgRes = await apiFetch(`${API_URL}/chat/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(msgPayload),
+      });
+      console.log('[NewChat] create friend conversation via message response', { ok: Boolean(msgRes?.ok), status: msgRes?.status });
+      if (msgRes) {
+        const bodyText = await msgRes.text();
+        console.log('[NewChat] create friend conversation via message response body', bodyText);
+        let msgData: any = null;
+        try { msgData = bodyText ? JSON.parse(bodyText) : null; } catch (parseErr) { console.warn('[NewChat] create friend conversation via message response parse failed', parseErr); }
+        const createdId = msgData?.conversation_id ?? msgData?.conversation?.id ?? msgData?.conversation?.conversation_id ?? msgData?.conversation?.id ?? msgData?.id ?? msgData?.message?.conversation_id ?? msgData?.message?.conversation?.id;
+        if (createdId) {
+          await openConversationOrCommunity(router, createdId, { replace: true });
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('[NewChat] create friend conversation via message failed', e);
+    }
+
+    return false;
+  }, [router, convIndex, conversations, localUserId]);
+
+  const handleStartWithFriend = useCallback(async (friend: any) => {
     if (!friend?.id) { Alert.alert('Hata', 'Bu kullanıcıda geçerli bir id yok.'); return; }
+    try {
+      const opened = await handleOpenFriendConversation(friend);
+      if (opened) return;
+    } catch (e) {
+      console.warn('[NewChat] handleOpenFriendConversation failed', e);
+    }
     setSelectedFriend(friend);
     setSelectedCommunity(null);
     setComposerText('');
-  }, []);
+  }, [handleOpenFriendConversation]);
 
   const handleStartWithCommunity = useCallback((community: any) => {
     if (!community?.id) { Alert.alert('Hata', 'Topluluk id yok'); return; }
