@@ -24,7 +24,6 @@ const BRIDGING_HEADER_SOURCE = `\
 // - getGatewayIp: SCDynamicStore üzerinden varsayılan ağ geçidini döndürür
 const SWIFT_SOURCE = `\
 import Foundation
-import SystemConfiguration
 
 // RCT tip tanımları: ObjC bridge üzerinden otomatik gelir ancak
 // bazı toolchain versiyonlarında Swift'e görünür olmayabilir.
@@ -77,22 +76,14 @@ class NetworkIf: NSObject {
     resolve([])
   }
 
-  /// SCDynamicStore üzerinden varsayılan ağ geçidi (router) IP'sini döndürür.
-  /// net/route.h gerektiren eski sysctl yaklaşımının iOS-uyumlu alternatifi.
+  /// iOS public API'sinde routing tablosuna doğrudan erişim bulunmuyor.
+  /// WifiLanTransport nil döndüğünde gracefully handle ediyor.
   @objc(getGatewayIp:rejecter:)
   func getGatewayIp(
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    guard
-      let store = SCDynamicStoreCreate(nil, "KampDefterim" as CFString, nil, nil),
-      let globalIPv4 = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
-      let router = globalIPv4["Router"] as? String
-    else {
-      resolve(nil)
-      return
-    }
-    resolve(router)
+    resolve(nil)
   }
 
   @objc static func requiresMainQueueSetup() -> Bool { return false }
