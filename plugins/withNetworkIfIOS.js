@@ -6,6 +6,14 @@ const path = require('path');
 const SWIFT_SOURCE = `\
 import Foundation
 
+// Fallback typealiases for React Native promise blocks. Some Xcode/toolchain
+// combinations (notably newer Apple Clang versions) may not expose the
+// Objective-C typedefs to Swift during plugin prebuild; defining these
+// ensures the Swift source compiles even if the React headers aren't
+// directly imported into Swift's translation unit.
+typealias RCTPromiseResolveBlock = (Any?) -> Void
+typealias RCTPromiseRejectBlock = (String?, String?, Error?) -> Void
+
 @objc(NetworkIf)
 class NetworkIf: NSObject {
 
