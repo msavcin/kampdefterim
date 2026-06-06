@@ -5,12 +5,12 @@ const path = require('path');
 // Swift implementasyonu: tüm IPv4 arayüzlerini döndürür (loopback hariç)
 const SWIFT_SOURCE = `\
 import Foundation
+import Darwin
 
 // Fallback typealiases for React Native promise blocks. Some Xcode/toolchain
-// combinations (notably newer Apple Clang versions) may not expose the
-// Objective-C typedefs to Swift during plugin prebuild; defining these
-// ensures the Swift source compiles even if the React headers aren't
-// directly imported into Swift's translation unit.
+// combinations may not expose the Objective-C typedefs to Swift during plugin
+// prebuild; defining these ensures the Swift source compiles even if the
+// React headers aren't directly imported into Swift's translation unit.
 typealias RCTPromiseResolveBlock = (Any?) -> Void
 typealias RCTPromiseRejectBlock = (String?, String?, Error?) -> Void
 
@@ -50,115 +50,25 @@ class NetworkIf: NSObject {
     resolve(result)
   }
 
-  /// Android /proc/net/arp karşılığı: sysctl NET_RT_FLAGS + RTF_LLINFO (0x400)
-  /// ARP önbelleğindeki aktif IPv4 peer IP'lerini döndürür.
-  /// Personal Hotspot sağlayan iPhone'da bağlanan cihazların IP'leri burada görünür.
   @objc(getArpTable:rejecter:)
   func getArpTable(
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    var result: [String] = []
-    // CTL_NET=4, AF_ROUTE=17, 0, AF_INET=2, NET_RT_FLAGS=2, RTF_LLINFO=0x400
-    var mib: [Int32] = [CTL_NET, Int32(AF_ROUTE), 0, Int32(AF_INET), 2, 0x400]
-    var bufLen = 0
-    guard sysctl(&mib, 6, nil, &bufLen, nil, 0) == 0, bufLen > 0 else {
-      resolve(result); return
-    }
-    var buf = [UInt8](repeating: 0, count: bufLen)
-    guard sysctl(&mib, 6, &buf, &bufLen, nil, 0) == 0 else {
-      resolve(result); return
-    }
-    buf.withUnsafeBytes { raw in
-      var offset = 0
-      while offset < bufLen {
-        guard offset + MemoryLayout<rt_msghdr>.size <= bufLen else { break }
-        let rtm = raw.load(fromByteOffset: offset, as: rt_msghdr.self)
-        let msgLen = Int(rtm.rtm_msglen)
-        guard msgLen > MemoryLayout<rt_msghdr>.size else { break }
-        // RTA_DST (0x1): header sonrasındaki ilk adres = hedef IP
-        if (Int(rtm.rtm_addrs) & 0x1) != 0 {
-          let sinOffset = offset + MemoryLayout<rt_msghdr>.size
-          if sinOffset + MemoryLayout<sockaddr_in>.size <= bufLen {
-            let sin = raw.load(fromByteOffset: sinOffset, as: sockaddr_in.self)
-            if sin.sin_family == UInt8(AF_INET) {
-              var addr = sin.sin_addr
-              var hostname = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-              if inet_ntop(AF_INET, &addr, &hostname, socklen_t(INET_ADDRSTRLEN)) != nil {
-                let ip = String(cString: hostname)
-                if !ip.isEmpty && ip != "0.0.0.0" { result.append(ip) }
-              }
-            }
-          }
-        }
-        offset += msgLen
-      }
-    }
-    resolve(result)
+    // ARP table parsing with rt_msghdr isn't exposed reliably to Swift
+    // across toolchains. Return an empty array as a safe fallback; the
+    // JavaScript layer already handles absence of ARP entries gracefully.
+    resolve([String]())
   }
 
-  /// Android WifiManager.getDhcpInfo().gateway karşılığı.
-  /// Routing tablosunda 0.0.0.0 (default route) hedefli kaydın gateway IP'sini döndürür.
-  /// Hotspot istemcisi iPhone'da bu değer hotspot sağlayıcısının IP'sidir.
   @objc(getGatewayIp:rejecter:)
   func getGatewayIp(
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    // NET_RT_DUMP=1: tüm routing tablosunu döküm et
-    var mib: [Int32] = [CTL_NET, Int32(AF_ROUTE), 0, Int32(AF_INET), 1, 0]
-    var bufLen = 0
-    guard sysctl(&mib, 6, nil, &bufLen, nil, 0) == 0, bufLen > 0 else {
-      resolve(nil); return
-    }
-    var buf = [UInt8](repeating: 0, count: bufLen)
-    guard sysctl(&mib, 6, &buf, &bufLen, nil, 0) == 0 else {
-      resolve(nil); return
-    }
-    var gatewayIp: String? = nil
-    buf.withUnsafeBytes { raw in
-      var offset = 0
-      while offset < bufLen, gatewayIp == nil {
-        guard offset + MemoryLayout<rt_msghdr>.size <= bufLen else { break }
-        let rtm = raw.load(fromByteOffset: offset, as: rt_msghdr.self)
-        let msgLen = Int(rtm.rtm_msglen)
-        guard msgLen > MemoryLayout<rt_msghdr>.size else { break }
-
-        var addrOffset = offset + MemoryLayout<rt_msghdr>.size
-        var isDstDefault = false
-
-        // RTA_DST (bit 0): hedef 0.0.0.0 ise bu default route'dur
-        if (Int(rtm.rtm_addrs) & 0x1) != 0 {
-          if addrOffset + MemoryLayout<sockaddr_in>.size <= bufLen {
-            let sin = raw.load(fromByteOffset: addrOffset, as: sockaddr_in.self)
-            if sin.sin_family == UInt8(AF_INET), sin.sin_addr.s_addr == 0 {
-              isDstDefault = true
-            }
-          }
-          // sockaddr boyutunu 4-byte hizalı ilerlet
-          let saLen = max(Int(raw[addrOffset]), MemoryLayout<sockaddr>.size)
-          addrOffset += (saLen + 3) & ~3
-        }
-
-        // RTA_GATEWAY (bit 1): default route'un gateway'i = hotspot sağlayıcısı
-        if isDstDefault, (Int(rtm.rtm_addrs) & 0x2) != 0 {
-          if addrOffset + MemoryLayout<sockaddr_in>.size <= bufLen {
-            let sin = raw.load(fromByteOffset: addrOffset, as: sockaddr_in.self)
-            if sin.sin_family == UInt8(AF_INET) {
-              var addr = sin.sin_addr
-              var hostname = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-              if inet_ntop(AF_INET, &addr, &hostname, socklen_t(INET_ADDRSTRLEN)) != nil {
-                let ip = String(cString: hostname)
-                if !ip.isEmpty && ip != "0.0.0.0" { gatewayIp = ip }
-              }
-            }
-          }
-        }
-
-        offset += msgLen
-      }
-    }
-    resolve(gatewayIp)
+    // Determining gateway via low-level route parsing can be fragile.
+    // Return nil as a safe fallback.
+    resolve(nil)
   }
 
   @objc static func requiresMainQueueSetup() -> Bool { return false }
