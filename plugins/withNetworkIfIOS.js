@@ -249,35 +249,12 @@ function withNetworkIfIOS(config) {
     if (!existingFiles.some((f) => f.includes(objcFile))) {
       project.addSourceFile(`${appName}/${objcFile}`, opt, groupKey);
     }
-    // Bridging header dosyasını Xcode projesine ekle (kaynak değil, header olarak)
-    const pbxGroup = project.pbxGroupByKey(groupKey);
-    const headerAlreadyInGroup = pbxGroup && pbxGroup.children &&
-      pbxGroup.children.some((c) => c.comment === bridgingHeaderFile);
-    if (!headerAlreadyInGroup) {
-      project.addHeaderFile(`${appName}/${bridgingHeaderFile}`, { public: false }, groupKey);
-    }
 
     // SWIFT_OBJC_BRIDGING_HEADER build ayarını tüm konfigürasyonlara ekle
     // (Xcode 26'da rt_msghdr gibi BSD C tiplerini Swift'e açar)
+    // addBuildProperty tüm build konfigürasyonlarına property ekler
     const bridgingHeaderValue = `"${appName}/${bridgingHeaderFile}"`;
-    const buildConfigSection = project.pbxXCBuildConfigurationSection();
-    Object.keys(buildConfigSection).forEach((key) => {
-      const buildConfig = buildConfigSection[key];
-      if (
-        buildConfig &&
-        typeof buildConfig === 'object' &&
-        buildConfig.buildSettings &&
-        buildConfig.buildSettings.PRODUCT_NAME
-      ) {
-        const productName = buildConfig.buildSettings.PRODUCT_NAME.replace(/"/g, '');
-        if (productName === appName || productName === '$(TARGET_NAME)') {
-          const existing = buildConfig.buildSettings.SWIFT_OBJC_BRIDGING_HEADER;
-          if (!existing || existing === '""' || existing === '') {
-            buildConfig.buildSettings.SWIFT_OBJC_BRIDGING_HEADER = bridgingHeaderValue;
-          }
-        }
-      }
-    });
+    project.addBuildProperty('SWIFT_OBJC_BRIDGING_HEADER', bridgingHeaderValue);
 
     return mod;
   });
