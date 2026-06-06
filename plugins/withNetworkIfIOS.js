@@ -2,30 +2,34 @@ const { withXcodeProject } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
-// Bridging header: rt_msghdr ve ilgili BSD tipleri Xcode 26 SDK'da Swift'e
-// otomatik köprülenmiyor; bu header dosyası C tiplerini açıkça expose eder.
+// Bridging header: yalnızca iOS SDK'da var olan standart POSIX/network başlıkları.
+// NOT: net/route.h iOS 26 SDK'dan kaldırıldı; rt_msghdr artık kullanılamaz.
 const BRIDGING_HEADER_SOURCE = `\
 #ifndef NetworkIfBridgingHeader_h
 #define NetworkIfBridgingHeader_h
 
-// BSD routing socket types (rt_msghdr, etc.)
-#import <net/route.h>
 #import <sys/socket.h>
 #import <netinet/in.h>
 #import <arpa/inet.h>
 #import <ifaddrs.h>
 #import <net/if.h>
-#import <sys/sysctl.h>
 
 #endif /* NetworkIfBridgingHeader_h */
 `;
 
-// Swift implementasyonu: tüm IPv4 arayüzlerini döndürür (loopback hariç)
+// Swift implementasyonu
+// - getLocalIps : getifaddrs üzerinden tüm IPv4 adreslerini döndürür
+// - getArpTable : iOS SDK'da ARP tablo erişimi kaldırıldı → boş dizi döner
+//   (WifiLanTransport zaten boş dizi durumunu handle eder)
+// - getGatewayIp: SCDynamicStore üzerinden varsayılan ağ geçidini döndürür
 const SWIFT_SOURCE = `\
 import Foundation
+import SystemConfiguration
 
-// NOT: RCTPromiseResolveBlock ve RCTPromiseRejectBlock ObjC bridging
-// üzerinden gelir; rt_msghdr ve diğer C tipleri NetworkIfBridgingHeader.h üzerinden.
+// RCT tip tanımları: ObjC bridge üzerinden otomatik gelir ancak
+// bazı toolchain versiyonlarında Swift'e görünür olmayabilir.
+typealias RCTPromiseResolveBlock = (Any?) -> Void
+typealias RCTPromiseRejectBlock = (String?, String?, Error?) -> Void
 
 @objc(NetworkIf)
 class NetworkIf: NSObject {
@@ -63,115 +67,32 @@ class NetworkIf: NSObject {
     resolve(result)
   }
 
-  /// Android /proc/net/arp karşılığı: sysctl NET_RT_FLAGS + RTF_LLINFO (0x400)
-  /// ARP önbelleğindeki aktif IPv4 peer IP'lerini döndürür.
-  /// Personal Hotspot sağlayan iPhone'da bağlanan cihazların IP'leri burada görünür.
+  /// iOS 26 SDK'da net/route.h kaldırıldığı için ARP tablosuna erişilemiyor.
+  /// WifiLanTransport boş dizi durumunu zaten handle ediyor.
   @objc(getArpTable:rejecter:)
   func getArpTable(
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    var result: [String] = []
-    // CTL_NET=4, AF_ROUTE=17, 0, AF_INET=2, NET_RT_FLAGS=2, RTF_LLINFO=0x400
-    var mib: [Int32] = [CTL_NET, Int32(AF_ROUTE), 0, Int32(AF_INET), 2, 0x400]
-    var bufLen = 0
-    guard sysctl(&mib, 6, nil, &bufLen, nil, 0) == 0, bufLen > 0 else {
-      resolve(result); return
-    }
-    var buf = [UInt8](repeating: 0, count: bufLen)
-    guard sysctl(&mib, 6, &buf, &bufLen, nil, 0) == 0 else {
-      resolve(result); return
-    }
-    buf.withUnsafeBytes { raw in
-      var offset = 0
-      while offset < bufLen {
-        guard offset + MemoryLayout<rt_msghdr>.size <= bufLen else { break }
-        let rtm = raw.load(fromByteOffset: offset, as: rt_msghdr.self)
-        let msgLen = Int(rtm.rtm_msglen)
-        guard msgLen > MemoryLayout<rt_msghdr>.size else { break }
-        // RTA_DST (0x1): header sonrasındaki ilk adres = hedef IP
-        if (Int(rtm.rtm_addrs) & 0x1) != 0 {
-          let sinOffset = offset + MemoryLayout<rt_msghdr>.size
-          if sinOffset + MemoryLayout<sockaddr_in>.size <= bufLen {
-            let sin = raw.load(fromByteOffset: sinOffset, as: sockaddr_in.self)
-            if sin.sin_family == UInt8(AF_INET) {
-              var addr = sin.sin_addr
-              var hostname = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-              if inet_ntop(AF_INET, &addr, &hostname, socklen_t(INET_ADDRSTRLEN)) != nil {
-                let ip = String(cString: hostname)
-                if !ip.isEmpty && ip != "0.0.0.0" { result.append(ip) }
-              }
-            }
-          }
-        }
-        offset += msgLen
-      }
-    }
-    resolve(result)
+    resolve([])
   }
 
-  /// Android WifiManager.getDhcpInfo().gateway karşılığı.
-  /// Routing tablosunda 0.0.0.0 (default route) hedefli kaydın gateway IP'sini döndürür.
-  /// Hotspot istemcisi iPhone'da bu değer hotspot sağlayıcısının IP'sidir.
+  /// SCDynamicStore üzerinden varsayılan ağ geçidi (router) IP'sini döndürür.
+  /// net/route.h gerektiren eski sysctl yaklaşımının iOS-uyumlu alternatifi.
   @objc(getGatewayIp:rejecter:)
   func getGatewayIp(
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    // NET_RT_DUMP=1: tüm routing tablosunu döküm et
-    var mib: [Int32] = [CTL_NET, Int32(AF_ROUTE), 0, Int32(AF_INET), 1, 0]
-    var bufLen = 0
-    guard sysctl(&mib, 6, nil, &bufLen, nil, 0) == 0, bufLen > 0 else {
-      resolve(nil); return
+    guard
+      let store = SCDynamicStoreCreate(nil, "KampDefterim" as CFString, nil, nil),
+      let globalIPv4 = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
+      let router = globalIPv4["Router"] as? String
+    else {
+      resolve(nil)
+      return
     }
-    var buf = [UInt8](repeating: 0, count: bufLen)
-    guard sysctl(&mib, 6, &buf, &bufLen, nil, 0) == 0 else {
-      resolve(nil); return
-    }
-    var gatewayIp: String? = nil
-    buf.withUnsafeBytes { raw in
-      var offset = 0
-      while offset < bufLen, gatewayIp == nil {
-        guard offset + MemoryLayout<rt_msghdr>.size <= bufLen else { break }
-        let rtm = raw.load(fromByteOffset: offset, as: rt_msghdr.self)
-        let msgLen = Int(rtm.rtm_msglen)
-        guard msgLen > MemoryLayout<rt_msghdr>.size else { break }
-
-        var addrOffset = offset + MemoryLayout<rt_msghdr>.size
-        var isDstDefault = false
-
-        // RTA_DST (bit 0): hedef 0.0.0.0 ise bu default route'dur
-        if (Int(rtm.rtm_addrs) & 0x1) != 0 {
-          if addrOffset + MemoryLayout<sockaddr_in>.size <= bufLen {
-            let sin = raw.load(fromByteOffset: addrOffset, as: sockaddr_in.self)
-            if sin.sin_family == UInt8(AF_INET), sin.sin_addr.s_addr == 0 {
-              isDstDefault = true
-            }
-          }
-          // sockaddr boyutunu 4-byte hizalı ilerlet
-          let saLen = max(Int(raw[addrOffset]), MemoryLayout<sockaddr>.size)
-          addrOffset += (saLen + 3) & ~3
-        }
-
-        // RTA_GATEWAY (bit 1): default route'un gateway'i = hotspot sağlayıcısı
-        if isDstDefault, (Int(rtm.rtm_addrs) & 0x2) != 0 {
-          if addrOffset + MemoryLayout<sockaddr_in>.size <= bufLen {
-            let sin = raw.load(fromByteOffset: addrOffset, as: sockaddr_in.self)
-            if sin.sin_family == UInt8(AF_INET) {
-              var addr = sin.sin_addr
-              var hostname = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-              if inet_ntop(AF_INET, &addr, &hostname, socklen_t(INET_ADDRSTRLEN)) != nil {
-                let ip = String(cString: hostname)
-                if !ip.isEmpty && ip != "0.0.0.0" { gatewayIp = ip }
-              }
-            }
-          }
-        }
-
-        offset += msgLen
-      }
-    }
-    resolve(gatewayIp)
+    resolve(router)
   }
 
   @objc static func requiresMainQueueSetup() -> Bool { return false }
@@ -197,6 +118,7 @@ RCT_EXTERN_METHOD(
 )
 @end
 `;
+
 
 /**
  * iOS için NetworkIf native modülü ekler.
