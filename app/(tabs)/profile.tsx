@@ -437,10 +437,12 @@ export default function ProfileScreen(props: any) {
     }
   };
 
-  // İlk yüklemede arkadaşları getir
+  // İlk yüklemede ve online'a geçildiğinde arkadaşları getir
   useEffect(() => {
-    fetchFriends();
-  }, []);
+    if (isConnected) {
+      fetchFriends();
+    }
+  }, [isConnected]);
   // Tüm hook'lar en üstte, koşulsuz çağrılır
   const [user, setUser] = useState<any>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);

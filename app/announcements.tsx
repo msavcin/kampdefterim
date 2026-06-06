@@ -180,6 +180,7 @@ export default function AnnouncementsScreen() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editAnnouncementId, setEditAnnouncementId] = useState<number | null>(null);
   const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [activeTab, setActiveTab] = useState<'duyurular' | 'yol_calismalari'>('duyurular');
   const router = useRouter();
 
   // Detay linki için WebView modal state'i
@@ -570,15 +571,35 @@ export default function AnnouncementsScreen() {
       >
         <View style={{ padding: 16 }}>
           {/* Başlık */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 18 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
             <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryLight, justifyContent: 'center', alignItems: 'center', marginRight: 14, shadowColor: colors.primary, shadowOpacity: 0.12, shadowRadius: 6, elevation: 2 }}>
               <Bell size={22} color={colors.primary} />
             </View>
-            <Text style={{ fontSize: 22, fontWeight: 'bold', color: colors.primaryDark, letterSpacing: 0.2, flex: 1 }}>Duyurular</Text>
+            <Text style={{ fontSize: 22, fontWeight: 'bold', color: colors.primaryDark, letterSpacing: 0.2, flex: 1 }}>
+              {activeTab === 'yol_calismalari' ? 'Yol Çalışmaları' : 'Duyurular'}
+            </Text>
           </View>
-          
-          {/* Butonlar */}
-          {((user?.role === 'leader' || user?.role === 'superadmin') || user?.role === 'superadmin') && (
+
+          {/* Tab Switcher */}
+          <View style={{ flexDirection: 'row', marginBottom: 18, borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: colors.primaryLight }}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setActiveTab('duyurular')}
+              style={{ flex: 1, paddingVertical: 9, alignItems: 'center', backgroundColor: activeTab === 'duyurular' ? colors.primary : colors.surface }}
+            >
+              <Text style={{ fontWeight: 'bold', fontSize: 14, color: activeTab === 'duyurular' ? '#fff' : colors.primary }}>Duyurular</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setActiveTab('yol_calismalari')}
+              style={{ flex: 1, paddingVertical: 9, alignItems: 'center', backgroundColor: activeTab === 'yol_calismalari' ? colors.primary : colors.surface }}
+            >
+              <Text style={{ fontWeight: 'bold', fontSize: 14, color: activeTab === 'yol_calismalari' ? '#fff' : colors.primary }}>Yol Çalışmaları</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Butonlar - sadece Duyurular tabında */}
+          {activeTab === 'duyurular' && ((user?.role === 'leader' || user?.role === 'superadmin') || user?.role === 'superadmin') && (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 18, gap: 8 }}>
               {(user?.role === 'leader' || user?.role === 'superadmin') && (
                 <TouchableOpacity
@@ -591,8 +612,8 @@ export default function AnnouncementsScreen() {
               )}
             </View>
           )}
-          {/* Superadmin için filtreleme ve arama alanı */}
-          {user?.role === 'superadmin' && (
+          {/* Superadmin için filtreleme ve arama alanı - sadece Duyurular tabında */}
+          {activeTab === 'duyurular' && user?.role === 'superadmin' && (
             <View style={{ marginBottom: 18, backgroundColor: colors.surfaceVariant, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: colors.primaryLight }}>
               {/* Arama metni */}
               <View style={{ marginBottom: 8 }}>
@@ -643,11 +664,20 @@ export default function AnnouncementsScreen() {
               <ActivityIndicator color={colors.primary} size="large" />
               <Text style={{ color: colors.primary, fontSize: 16, marginTop: 12, fontStyle: 'italic' }}>Duyurular yükleniyor...</Text>
             </View>
-          ) : announcements.length === 0 ? (
-            <Text style={{ color: colors.muted, fontSize: 16, textAlign: 'center', marginTop: 32, fontStyle: 'italic' }}>Duyurular bulunamadı.</Text>
+          ) : announcements.filter(a => {
+              const isKgm = typeof a.source_url === 'string' && a.source_url.includes('kgm.gov.tr');
+              return activeTab === 'yol_calismalari' ? isKgm : !isKgm;
+            }).length === 0 ? (
+            <Text style={{ color: colors.muted, fontSize: 16, textAlign: 'center', marginTop: 32, fontStyle: 'italic' }}>
+              {activeTab === 'yol_calismalari' ? 'Yol çalışması bulunamadı.' : 'Duyurular bulunamadı.'}
+            </Text>
           ) : (
-            // Filtreleme motoru: sadece superadmin için filtre uygula, diğerleri için doğrudan göster
+            // Filtreleme motoru: önce tab'a göre filtrele, sonra superadmin için ek filtre uygula
             (user?.role === 'superadmin' ? announcements.filter(a => {
+              const isKgm = typeof a.source_url === 'string' && a.source_url.includes('kgm.gov.tr');
+              if (activeTab === 'yol_calismalari') return isKgm;
+              return !isKgm;
+            }).filter(a => {
               // Başlık veya içerik araması
               const search = searchText.trim().toLowerCase();
               const tag = tagText.trim().toLowerCase();
@@ -694,7 +724,10 @@ export default function AnnouncementsScreen() {
                 matches = matches && keywords.some(k => k.toLowerCase().includes(tag));
               }
               return matches;
-            }) : announcements).map((a, i) => {
+            }) : announcements.filter(a => {
+              const isKgm = typeof a.source_url === 'string' && a.source_url.includes('kgm.gov.tr');
+              return activeTab === 'yol_calismalari' ? isKgm : !isKgm;
+            })).map((a, i) => {
               // Etkinlik aktiflik kontrolü
               let etkinlikAktif = true;
               if (a.bitis_tarihi) {

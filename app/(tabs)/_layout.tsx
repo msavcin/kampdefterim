@@ -1,16 +1,20 @@
 import { Tabs, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getMe } from '../../lib/userCommunityApi';
 import { checkAndHandleAppVersion } from '../../lib/appVersion';
 import { getDatabase } from '../../lib/database';
 import { Map, Heart, User, SquareCheck as CheckSquare, Bell, Crown, MessageCircle } from 'lucide-react-native';
-import { View, TouchableOpacity, Text } from 'react-native';
+import { View, TouchableOpacity, Text, AppState } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { emit } from '../../lib/eventBus';
 import { useTheme } from '../../components/ThemeProvider';
 import { useChatUnread } from '../../hooks/useChatUnread';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { offlineTransportManager } from '../../lib/offlineTransport';
+import { incrementOfflineUnread, clearAllOfflineUnread } from '../../lib/offlineUnread';
+import { emitChatEvent } from '../../lib/chatEvents';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -43,11 +47,26 @@ export default function TabLayout() {
       }
       try {
         const me = await getMe();
-        setUserRole(me?.role || (me?.user?.role ?? null));
-        setIsPremium(!!(me?.is_premium || me?.user?.is_premium || me?.offline_enabled || me?.user?.offline_enabled));
+        const role = me?.role || (me?.user?.role ?? null);
+        const premium = !!(me?.is_premium || me?.user?.is_premium || me?.offline_enabled || me?.user?.offline_enabled);
+        setUserRole(role);
+        setIsPremium(premium);
+        // Offline kullanım için cache'e kaydet
+        try {
+          await AsyncStorage.setItem('@cached_is_premium', premium ? '1' : '0');
+          await AsyncStorage.setItem('@cached_user_role', role || '');
+        } catch { /* ignore */ }
       } catch {
-        setUserRole(null);
-        setIsPremium(false);
+        // Offline/hata durumunda cache'den oku
+        try {
+          const cachedPremium = await AsyncStorage.getItem('@cached_is_premium');
+          const cachedRole = await AsyncStorage.getItem('@cached_user_role');
+          setIsPremium(cachedPremium === '1');
+          setUserRole(cachedRole || null);
+        } catch {
+          setUserRole(null);
+          setIsPremium(false);
+        }
       } finally {
         setLoading(false);
       }
@@ -68,6 +87,95 @@ export default function TabLayout() {
     }, 1000);
     return () => clearInterval(interval);
   }, [isInitialSyncComplete]);
+
+  // ─── Global Offline Transport Lifecycle ─────────────────────────────────
+  // Transport, sohbet ekranı açık olmasa da arka planda çalışır.
+  const isConnected = useNetworkStatus();
+  const prevConnectedRef = useRef<boolean | null>(null);
+
+  // Transport başlatıcı yardımcısı
+  const startOfflineTransport = async () => {
+    if (offlineTransportManager.isActive) return;
+    try {
+      let uid = '', uname = '';
+      const cached = await SecureStore.getItemAsync('localUser');
+      if (cached) {
+        const u = JSON.parse(cached);
+        uid   = String(u?.id ?? u?.user_id ?? '');
+        uname = String(u?.name ?? u?.username ?? u?.full_name ?? '');
+      }
+      if (!uid) {
+        const me = await getMe().catch(() => null);
+        if (me) {
+          uid   = String(me?.id ?? me?.user_id ?? '');
+          uname = String(me?.name ?? me?.username ?? me?.full_name ?? '');
+        }
+      }
+      if (uid) await offlineTransportManager.start(uid, uname);
+    } catch (e) {
+      console.warn('[TabLayout] offline transport start hatası:', e);
+    }
+  };
+
+  // Uygulama mount'ta hemen ağ durumunu kontrol et; offline ise transport'u bekletme
+  useEffect(() => {
+    (async () => {
+      try {
+        const Network = await import('expo-network');
+        const state = await Network.getNetworkStateAsync();
+        const online = !!(state.isConnected && state.isInternetReachable);
+        if (!online && !offlineTransportManager.isActive) {
+          startOfflineTransport();
+        }
+      } catch { /* ignore — useNetworkStatus polling devralır */ }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Network değişiminde transport başlat/durdur
+  useEffect(() => {
+    if (prevConnectedRef.current === null) {
+      prevConnectedRef.current = isConnected;
+      // İlk render: offline ise transportʼı hemen başlat
+      if (!isConnected) startOfflineTransport();
+      return;
+    }
+    const wasOffline = !prevConnectedRef.current;
+    prevConnectedRef.current = isConnected;
+
+    if (!isConnected && !offlineTransportManager.isActive) {
+      // Online → Offline: transport başlat
+      startOfflineTransport();
+    } else if (isConnected && wasOffline) {
+      // Offline → Online: transport durdur + offline unreadʼı sıfırla (sunucu canonical state)
+      offlineTransportManager.stop().catch(() => {});
+      clearAllOfflineUnread().catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected]);
+
+  // Uygulama ön plana döndüğünde offline ise subnet scan'i hemen tetikle
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && offlineTransportManager.isActive) {
+        offlineTransportManager.triggerSubnetScan();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Gelen peer mesajlarını global olarak dinle — badge için unread say
+  useEffect(() => {
+    const unsub = offlineTransportManager.onMessage((msg) => {
+      // Kendi mesajlarımızı sayma (transport zaten filtreler ama ekstra güvence)
+      incrementOfflineUnread(msg.conversationId).catch(() => {});
+      emitChatEvent({
+        type: 'offline_message_received',
+        payload: { conversationId: msg.conversationId },
+      });
+    });
+    return unsub;
+  }, []);
 
   // Guest ise erişilemeyen sekmeler
   const guestDisabled = userRole === 'guest';

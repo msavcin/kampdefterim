@@ -1,6 +1,24 @@
 import { API_URL } from './config';
+import { offlineTransportManager } from './offlineTransport';
 
 type MessageHandler = (msg: any) => void;
+
+/**
+ * Çevrimdışı modda offline transport'u etkinleştirir.
+ * Kullanıcı bilgileri gerekli (userId, userName).
+ */
+export async function activateOfflineChat(userId: string, userName: string): Promise<void> {
+  await offlineTransportManager.start(userId, userName);
+}
+
+/**
+ * İnternet bağlantısı tekrar gelince çağrılır.
+ * Bekleyen offline mesajları sunucuya iletir ve transport'u durdurur.
+ */
+export async function deactivateOfflineChat(): Promise<void> {
+  await offlineTransportManager.syncPendingToServer();
+  await offlineTransportManager.stop();
+}
 
 export function createChatSocket(onMessage: MessageHandler, onOpen?: () => void, onClose?: () => void) {
   let ws: WebSocket | null = null;

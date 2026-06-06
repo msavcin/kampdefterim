@@ -4,6 +4,7 @@ import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, Flat
 import { Swipeable } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { apiFetch } from '@/lib/apiFetch';
 import { API_URL } from '@/lib/config';
 import { openConversationOrCommunity } from '@/lib/chatNavigation';
@@ -11,6 +12,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { listCommunities, getMe } from '@/lib/userCommunityApi';
 import { createChatSocket } from '@/lib/chatSocket';
 import { getToken } from '@/lib/auth';
+import { offlineTransportManager } from '@/lib/offlineTransport';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+import NearbyPeersBar from '@/components/NearbyPeersBar';
 import FriendAvatar from '@/components/FriendAvatar';
 import ThemedIcon from '@/components/ThemedIcon';
 import { useTheme } from '@/components/ThemeProvider';
@@ -19,8 +23,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const LAST_OPENED_KEY = '@chat_last_opened_v1';
 import { emitChatEvent, onChatEvent } from '@/lib/chatEvents';
 import { markRead } from '@/lib/readMap';
+import { getOfflineUnreadMap, clearOfflineUnread } from '@/lib/offlineUnread';
 
 const DELETED_KEY = '@chat_deleted_v1';
+const FRIENDS_CACHE_KEY = '@chat_friends_cache_v1';
+const CONVERSATIONS_CACHE_KEY = '@conversations_cache_v1';
 
 async function loadDeletedMap() {
   try {
@@ -290,6 +297,8 @@ export default function NewChatScreen() {
   const initialRecipientId = (params as any).recipientId;
   const initialCommunityId = (params as any).communityId;
 
+  const isConnected = useNetworkStatus();
+
   const [loading, setLoading] = useState(true);
   const [friends, setFriends] = useState<any[]>([]);
   const [communities, setCommunities] = useState<any[]>([]);
@@ -332,6 +341,7 @@ export default function NewChatScreen() {
     if (isUnreadFromSelf(c)) return acc;
     return acc + (Number(c?.unread_count) || 0);
   }, 0) : 0;
+  const [offlineUnreadMap, setOfflineUnreadMap] = useState<Record<string, number>>({});
   const [creating, setCreating] = useState(false);
   const [selectedFriend, setSelectedFriend] = useState<any | null>(null);
   const [selectedCommunity, setSelectedCommunity] = useState<any | null>(null);
@@ -454,17 +464,65 @@ export default function NewChatScreen() {
       } catch (er) {
         setConvIndex({ byId: new Map(), byUsername: new Map() });
       }
+      // Konuşmaları offline kullanım için önbellekle
+      try { await AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(arrWithRead)); } catch { /* ignore */ }
     } catch (e) {
       console.warn('[NewChat] refresh conversations error', e);
+      // Offline: önbellekten yükle
+      try {
+        const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setConversations(parsed);
+            const byId = new Map<string, any>();
+            parsed.forEach((c: any) => {
+              try {
+                extractParticipantIds(c).forEach((pid: any) => {
+                  if (pid != null) byId.set(String(pid), c);
+                });
+              } catch { /* ignore */ }
+            });
+            setConvIndex({ byId, byUsername: new Map() });
+            return;
+          }
+        }
+      } catch { /* ignore */ }
       setConversations([]);
       setConvIndex({ byId: new Map(), byUsername: new Map() });
+    }
+  }, []);
+
+  const loadFriends = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/friendships/list`);
+      const data = await res.json();
+      const mapped = Array.isArray(data) ? data.map((f:any) => {
+        const idFromTag = typeof f.tag === 'string' && f.tag.startsWith('#') ? Number(f.tag.replace('#','')) : undefined;
+        const idCandidate = f.user_id ?? f.id ?? idFromTag;
+        const resolvedId = typeof idCandidate !== 'undefined' && idCandidate !== null ? Number(idCandidate) : undefined;
+        return { id: resolvedId, username: f.username, name: f.name || '', avatar_url: f.avatar_url || '' };
+      }) : [];
+      setFriends(mapped);
+      try { await AsyncStorage.setItem(FRIENDS_CACHE_KEY, JSON.stringify(mapped)); } catch { /* ignore */ }
+    } catch {
+      // Offline/hata durumunda cache'den yükle
+      try {
+        const cached = await AsyncStorage.getItem(FRIENDS_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) setFriends(parsed);
+        }
+      } catch { /* ignore */ }
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       refreshConversations();
-    }, [refreshConversations])
+      loadFriends();
+      getOfflineUnreadMap().then(setOfflineUnreadMap).catch(() => {});
+    }, [refreshConversations, loadFriends])
   );
 
   useEffect(() => {
@@ -543,6 +601,10 @@ export default function NewChatScreen() {
         }
         if (['message','conversation_created','client_message_sent','conversation_updated','message_deleted'].includes(e?.type)) {
           refreshConversations();
+          // Offline peer mesajı ise kırmızı nokta haritasını da güncelle
+          if (e?.payload?.offline_peer) {
+            getOfflineUnreadMap().then(setOfflineUnreadMap).catch(() => {});
+          }
           return;
         }
         if (e?.type === 'unread_updated') {
@@ -600,16 +662,32 @@ export default function NewChatScreen() {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      let mapped: any[] = [];
       try {
         const res = await apiFetch(`${API_URL}/friendships/list`);
         const data = await res.json();
-        const mapped = Array.isArray(data) ? data.map((f:any) => {
+        mapped = Array.isArray(data) ? data.map((f:any) => {
           const idFromTag = typeof f.tag === 'string' && f.tag.startsWith('#') ? Number(f.tag.replace('#','')) : undefined;
           const idCandidate = f.user_id ?? f.id ?? idFromTag;
           const resolvedId = typeof idCandidate !== 'undefined' && idCandidate !== null ? Number(idCandidate) : undefined;
           return { id: resolvedId, username: f.username, name: f.name || '', avatar_url: f.avatar_url || '' };
         }) : [];
         if (mounted) setFriends(mapped);
+        try { await AsyncStorage.setItem(FRIENDS_CACHE_KEY, JSON.stringify(mapped)); } catch { /* ignore */ }
+      } catch {
+        // Offline/hata durumunda cache'den yükle
+        try {
+          const cached = await AsyncStorage.getItem(FRIENDS_CACHE_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && mounted) {
+              mapped = parsed;
+              setFriends(parsed);
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      try {
         const comms = await listCommunities();
         let visibleComms = Array.isArray(comms) ? comms : [];
         // filter to communities the current user is a member of (user.community_id)
@@ -772,6 +850,38 @@ export default function NewChatScreen() {
     return () => { mounted = false; };
   }, []);
 
+  // ─── Çevrimdışı WiFi transport ────────────────────────────────────────────
+  // Sohbet listesindeyken transport'u başlat; kullanıcılar chat ekranına
+  // girmeden birbirlerini keşfedebilir.
+  useEffect(() => {
+    if (isConnected) return; // Online: transport gerek yok
+    if (offlineTransportManager.isActive) return; // Zaten çalışıyor
+    (async () => {
+      let userId: string | null = null;
+      let userName = 'Kullanıcı';
+      try {
+        const cached = await SecureStore.getItemAsync('localUser');
+        if (cached) {
+          const u = JSON.parse(cached);
+          userId = String(u?.id ?? u?.user_id ?? '') || null;
+          userName = u?.name ?? u?.username ?? userName;
+        }
+      } catch { /* ignore */ }
+      if (!userId) {
+        try {
+          const me = await getMe().catch(() => null);
+          if (me) {
+            userId = String(me?.id ?? me?.user_id ?? '') || null;
+            userName = (me as any)?.name ?? (me as any)?.username ?? userName;
+          }
+        } catch { /* ignore */ }
+      }
+      if (!userId) return;
+      console.log('[NewChat] offline transport başlatılıyor (chat listesi)');
+      await offlineTransportManager.start(userId, userName);
+    })();
+  }, [isConnected]);
+
   async function handleSendFromComposer() {
     if (!composerText.trim()) { Alert.alert('Hata', 'Mesaj boş olamaz.'); return; }
     const payload: any = { text: composerText.trim() };
@@ -870,6 +980,32 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
       router.replace('/chat/new');
     } catch (e) {
       console.warn('[NewChat] send error', e);
+      // Çevrimdışı fallback: mesajı yerel SQLite kuyruğuna kaydet
+      try {
+        const msgText: string = payload?.text ?? composerText.trim();
+        const recipientId = selectedFriend?.id ?? (initialRecipientId ? Number(initialRecipientId) : null);
+        if (msgText && recipientId) {
+          const { enqueueMessage } = await import('@/lib/offlineChatQueue');
+          const minId = Math.min(Number(localUserId ?? 0), Number(recipientId));
+          const maxId = Math.max(Number(localUserId ?? 0), Number(recipientId));
+          await enqueueMessage({
+            conversationId: `pending_${minId}_${maxId}`,
+            senderId: String(localUserId ?? ''),
+            senderName: '',
+            text: msgText,
+            timestamp: Date.now(),
+          });
+          Alert.alert(
+            'Kaydedildi',
+            'İnternet bağlantısı yok. Mesaj kaydedildi, bağlantı gelince gönderilecek.',
+          );
+          setComposerText('');
+          setSelectedFriend(null);
+          return;
+        }
+      } catch (queueErr) {
+        console.warn('[NewChat] offline queue fallback failed', queueErr);
+      }
       Alert.alert('Hata', 'Mesaj gönderilirken hata oluştu.');
     } finally {
       setSending(false);
@@ -929,6 +1065,15 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
       // ignore
     }
     try { await AsyncStorage.setItem(LAST_OPENED_KEY, String(convId)); } catch (e) { }
+    // Offline unread sayacını temizle ve kırmızı noktayı kaldır
+    try {
+      await clearOfflineUnread(String(convId));
+      setOfflineUnreadMap(prev => {
+        const next = { ...prev };
+        delete next[String(convId)];
+        return next;
+      });
+    } catch (e) { /* ignore */ }
     try { await openConversationOrCommunity(router, convId, { replace: true }); } catch (e) { console.warn('[NewChat] openConversationOrCommunity failed', e); }
   }, [router]);
 
@@ -1149,7 +1294,10 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
   const renderFriendItem = useCallback(({ item }: { item: any }) => {
     // resolve conversation from latest state each render to keep unread in sync
     const conv = getFriendConversation(item, convIndex, conversations);
-    const showUnread = Boolean(conv && Number(conv?.unread_count) > 0 && !isUnreadFromSelf(conv));
+    const onlineUnread = Boolean(conv && Number(conv?.unread_count) > 0 && !isUnreadFromSelf(conv));
+    const convId = conv ? String(conv?.id ?? conv?.conversation_id ?? conv?.conversation?.id ?? '') : '';
+    const offlineUnread = convId ? (offlineUnreadMap[convId] || 0) > 0 : false;
+    const showUnread = onlineUnread || offlineUnread;
     return (
       <FriendRow
         item={item}
@@ -1163,7 +1311,7 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
         onDelete={handleDeleteConversation}
       />
     );
-  }, [colors, convIndex, conversations, handleContinueConversation, handleStartWithFriend, handleDeleteConversation, localUserId]);
+  }, [colors, convIndex, conversations, offlineUnreadMap, handleContinueConversation, handleStartWithFriend, handleDeleteConversation, localUserId]);
 
   const renderCommunityItem = useCallback(({ item }: { item: any }) => {
     const conv = Array.isArray(conversations) ? conversations.find((c:any) => {
@@ -1195,6 +1343,7 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
         <Text style={themed.screenHeaderSubtitle}>Bir kişiye veya topluluğa mesaj göndermek için seçin.</Text>
       </View>
       <View style={{flex:1, paddingHorizontal:16, paddingBottom:16, backgroundColor: colors.background}}>
+        {!isConnected && <NearbyPeersBar visible={true} />}
         {__DEV__ ? (
           <Text style={{color:'#888',marginBottom:12,fontSize:12}}>Konuşmalar yüklendi: {conversations.length}  — index: {convIndex?.byId?.size ?? 0}/{convIndex?.byUsername?.size ?? 0}</Text>
         ) : null}

@@ -3,6 +3,40 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform } from 'react
 import FriendAvatar from './FriendAvatar';
 import { useTheme } from './ThemeProvider';
 
+/** Mesaj zaman damgasını HH:mm veya "Dün HH:mm" veya "GG.AA HH:mm" formatında döner. */
+function formatMsgTime(message: any): string {
+  const raw =
+    message?.meta?.client_sent_at ??
+    message?.timestamp ??
+    message?.created_at ??
+    message?.createdAt ??
+    message?.sent_at;
+  if (!raw) return '';
+  try {
+    const ms = typeof raw === 'number' ? raw : Date.parse(String(raw));
+    if (!ms || isNaN(ms)) return '';
+    const d = new Date(ms);
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const isToday =
+      d.getDate() === now.getDate() &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear();
+    if (isToday) return timeStr;
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday =
+      d.getDate() === yesterday.getDate() &&
+      d.getMonth() === yesterday.getMonth() &&
+      d.getFullYear() === yesterday.getFullYear();
+    if (isYesterday) return `Dün ${timeStr}`;
+    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${timeStr}`;
+  } catch {
+    return '';
+  }
+}
+
 export default function MessageBubble({
   message,
   isMe,
@@ -28,7 +62,7 @@ export default function MessageBubble({
     ]);
   };
 
-  const rawText = message?.text ?? message?.body ?? '';
+  const rawText = message?.text ?? message?.body ?? message?.content ?? message?.message ?? '';
   let cleanText: any = rawText;
   if (typeof rawText === 'string') {
     try { cleanText = rawText.normalize?.('NFC') ?? rawText; } catch (e) { cleanText = rawText; }
@@ -52,7 +86,8 @@ export default function MessageBubble({
     || message?.avatar
     || (messageSender && (messageSender.avatar_url || messageSender.avatar || messageSender.avatarUrl || messageSender.photo));
 
-  const androidTextProps = Platform.OS === 'android' ? ({ includeFontPadding: false, textBreakStrategy: 'balanced' } as any) : {};
+  const androidTextProps = Platform.OS === 'android' ? ({ includeFontPadding: false, textBreakStrategy: 'simple' } as any) : {};
+  const timeStr = formatMsgTime(message);
 
   return (
     <View style={[styles.container, isMe ? styles.right : styles.left]}>
@@ -89,6 +124,14 @@ export default function MessageBubble({
               {cleanText}
             </Text>
           )}
+          {timeStr ? (
+            <Text
+              allowFontScaling={false}
+              style={[styles.timeText, { color: isMe ? 'rgba(255,255,255,0.65)' : colors.muted, textAlign: isMe ? 'right' : 'left' }]}
+            >
+              {timeStr}
+            </Text>
+          ) : null}
         </View>
       </TouchableOpacity>
     </View>
@@ -109,6 +152,7 @@ const styles = StyleSheet.create({
   textRight: { textAlign: 'right' },
   senderName: { fontSize: 12, marginBottom: 4, fontWeight: '600' },
   deletedText: { color: '#888', fontStyle: 'italic' },
+  timeText: { fontSize: 11, marginTop: 4, opacity: 0.85 },
   debugContainer: { marginTop: 8, padding: 8, backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: 8 },
   debugLabel: { fontSize: 12, fontWeight: '700', color: '#333', marginTop: 4 },
   debugText: { fontSize: 12, color: '#333', marginTop: 2 },

@@ -8,6 +8,7 @@ import AIEvaluationDashboardModal from './AIEvaluationDashboardModal';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useRouter } from 'expo-router';
 import { getMe } from '@/lib/userCommunityApi';
+import { getLastKnownLocationAsync } from '@/lib/largeStorage';
 
 let premiumCache: boolean | null = null;
 let premiumPromise: Promise<boolean> | null = null;
@@ -158,6 +159,15 @@ export default function AIEvalButton({ campingArea, campingAreaImage = null, pla
         campingArea: campObj,
         campType: campObj.type ?? undefined,
         startDate: new Date().toISOString().slice(0,10),
+        userLocation: await (async () => {
+          try {
+            const cached = await getLastKnownLocationAsync();
+            if (cached && typeof cached.latitude === 'number' && typeof cached.longitude === 'number') {
+              return { lat: cached.latitude, lng: cached.longitude };
+            }
+          } catch (e) {}
+          return null;
+        })(),
       };
       const res = await getAIEvaluation(req);
       if (res && res.evaluation) {

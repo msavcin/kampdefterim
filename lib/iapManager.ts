@@ -7,7 +7,7 @@ import { Platform, Alert } from 'react-native';
 import { getToken } from './auth';
 import { API_URL } from './config';
 import { emit as emitEvent } from '@/lib/eventBus';
-import { SUBSCRIPTION_PRODUCTS, SUBSCRIPTION_ENDPOINTS, FALLBACK_PRICES, ANDROID_BASE_PLAN_IDS } from '@/constants/subscriptionProducts';
+import { SUBSCRIPTION_PRODUCTS, SUBSCRIPTION_ENDPOINTS, FALLBACK_PRICES, FALLBACK_CAMPAIGNS, ANDROID_BASE_PLAN_IDS } from '@/constants/subscriptionProducts';
 
 // Conditional import - paket yüklenmemişse mock types kullan
 let RNIap: any;
@@ -61,12 +61,39 @@ const PRODUCT_IDS = Platform.select({
 
 export type SubscriptionPlan = 'monthly' | 'yearly';
 
+/**
+ * Sunucudan alınan kampanya bilgisi.
+ * price   : gösterilecek indirimli fiyat ("₺1,19")
+ * durationMonths: kaç ay sürecek (3)
+ * label   : hazır etiket ("İlk 3 ay") — yoksa durationMonths'tan üretilir
+ */
+export type CampaignInfo = {
+  price: string;
+  durationMonths: number;
+  label?: string;
+  /** Android Play Store promo teklif kimliği (offerId). Sunucudan gelirse ANDROID_PROMO_OFFER_IDS'in önüne geçer. */
+  promoOfferId?: string;
+} | null;
+
 let purchaseUpdateSubscription: any = null;
 let purchaseErrorSubscription: any = null;
 let cachedSubscriptions: Subscription[] = [];
 
 // API'den çekilen fiyat önbelleği
 let cachedApiPrices: Record<'ios' | 'android', Record<'monthly' | 'yearly', string>> | null = null;
+
+// API'den çekilen kampanya önbelleği
+let cachedApiCampaigns: Record<'ios' | 'android', Record<'monthly' | 'yearly', CampaignInfo>> | null = null;
+
+/**
+ * Plan için geçerli promo offerId'ı döndürür.
+ * Önce sunucu kampanya verisine (cachedApiCampaigns → FALLBACK_CAMPAIGNS) bakar;
+ * orada yoksa ANDROID_PROMO_OFFER_IDS sabitini kullanır.
+ */
+function getPromoOfferIdForPlan(plan: SubscriptionPlan): string | undefined {
+  const serverCampaign = cachedApiCampaigns?.android?.[plan] ?? FALLBACK_CAMPAIGNS.android[plan];
+  return serverCampaign?.promoOfferId;
+}
 
 // Sunucudan alınan Google Play public key (base64, boşluksuz)
 let cachedGooglePlayPublicKey: string | null = null;
@@ -134,12 +161,27 @@ export async function fetchPricesFromAPI(): Promise<typeof cachedApiPrices> {
     // Sarmalayıcı varsa: { success, prices: { ios, android } }
     const payload = data?.prices ?? data;
 
-    // Format A — nested object: { ios: { monthly, yearly }, android: { monthly, yearly } }
+    // Format A — nested object: { ios: { monthly, yearly }, android: { monthly, yearly }, campaigns?: {...} }
     if (payload?.ios?.monthly && payload?.android?.monthly) {
       cachedApiPrices = {
         ios: { monthly: payload.ios.monthly, yearly: payload.ios.yearly },
         android: { monthly: payload.android.monthly, yearly: payload.android.yearly },
       };
+      // Kampanya verisi — sunucu eklediyse parse et
+      // Beklenen format: campaigns: { android: { monthly: { price, durationMonths, label? } }, ios: { ... } }
+      if (payload.campaigns) {
+        cachedApiCampaigns = {
+          ios: {
+            monthly: payload.campaigns?.ios?.monthly ?? null,
+            yearly: payload.campaigns?.ios?.yearly ?? null,
+          },
+          android: {
+            monthly: payload.campaigns?.android?.monthly ?? null,
+            yearly: payload.campaigns?.android?.yearly ?? null,
+          },
+        };
+        console.log('[IAP] Sunucu kampanya verisi yüklendi:', JSON.stringify(cachedApiCampaigns));
+      }
       console.log('[IAP] API fiyatları yüklendi (object format):', cachedApiPrices);
       return cachedApiPrices;
     }
@@ -296,12 +338,21 @@ export async function getSubscriptions(): Promise<Subscription[]> {
         throw e2;
       }
     }
-    console.log('[IAP] Subscriptions raw:', JSON.stringify(
-      (subscriptions || []).map((s: any) => ({
-        productId: s.productId,
-        basePlans: s.subscriptionOfferDetails?.map((d: any) => ({ basePlanId: d.basePlanId, offerToken: d.offerToken?.slice(0, 20) + '...' })),
-      }))
-    ));
+    // Kapsamlı debug log: subscriptionOfferDetails var mı, içinde ne var?
+    (subscriptions || []).forEach((s: any) => {
+      const details = s.subscriptionOfferDetails;
+      const basePlans = s.basePlans; // eski format fallback
+      console.log('[IAP] Sub debug —', s.productId, JSON.stringify({
+        hasSubscriptionOfferDetails: !!details?.length,
+        offerDetailsCount: details?.length ?? 0,
+        offerIds: details?.map((d: any) => ({ basePlanId: d.basePlanId, offerId: d.offerId ?? null })) ?? 'YOK',
+        // Eski format
+        hasBasePlans: !!basePlans?.length,
+        basePlanIds: basePlans?.map((b: any) => b.basePlanId) ?? 'YOK',
+        // Fallback fiyat
+        localizedPrice: s.localizedPrice ?? 'YOK',
+      }));
+    });
     cachedSubscriptions = subscriptions || [];
     return subscriptions;
   } catch (error) {
@@ -310,18 +361,93 @@ export async function getSubscriptions(): Promise<Subscription[]> {
   }
 }
 
+/**
+ * Android subscriptionOfferDetails içindeki promo teklifinin fiyatını döndürür.
+ * Teklif yoksa null döner.
+ */
+function getAndroidPromoOfferPrice(plan: SubscriptionPlan, subs: Subscription[]): string | null {
+  const promoOfferId = getPromoOfferIdForPlan(plan);
+  if (!promoOfferId) return null;
+  const basePlanId = ANDROID_BASE_PLAN_IDS[plan];
+  const sub = subs.find(s => s.productId === SUBSCRIPTION_PRODUCTS.android[plan]);
+  const details = (sub as any)?.subscriptionOfferDetails;
+  if (!details?.length) {
+    console.log('[IAP] getAndroidPromoOfferPrice: subscriptionOfferDetails boş/yok. sub:', sub ? 'bulundu' : 'bulunamadı', 'plan:', plan);
+    return null;
+  }
+  console.log('[IAP] getAndroidPromoOfferPrice: tüm offerDetails —', JSON.stringify(
+    details.map((d: any) => ({ basePlanId: d.basePlanId, offerId: d.offerId ?? null }))
+  ));
+  // Önce basePlanId + offerId ile eşleş; bulamazsan sadece offerId ile dene
+  const promoDetail =
+    details.find((d: any) => d.basePlanId === basePlanId && d.offerId === promoOfferId) ??
+    details.find((d: any) => d.offerId === promoOfferId);
+  if (!promoDetail) {
+    console.log(`[IAP] getAndroidPromoOfferPrice: '${promoOfferId}' offerId'li teklif bulunamadı. basePlanId='${basePlanId}' plan='${plan}'`);
+    return null;
+  }
+  const phases: any[] = promoDetail.pricingPhases?.pricingPhaseList ?? [];
+  // Tek fazlı entry = sadece recurring fiyat, promo değil
+  if (phases.length < 2) {
+    console.log('[IAP] getAndroidPromoOfferPrice: tek fazlı entry, promo değil. plan:', plan);
+    return null;
+  }
+  // Promo (intro) fiyatı: pricingPhaseList[0] ilk (indirimli) fazı
+  const firstPhase = phases[0];
+  console.log('[IAP] getAndroidPromoOfferPrice: promo fiyatı bulundu =', firstPhase?.formattedPrice, 'billingCycleCount:', firstPhase?.billingCycleCount, 'plan:', plan);
+  return firstPhase?.formattedPrice ?? null;
+}
+
+/**
+ * Android subscriptionOfferDetails içindeki standart (teklifsiz) basePlan fiyatını döndürür.
+ * Teklifsiz giriş yoksa en son pricingPhase (recurring) kullanılır.
+ */
+function getAndroidBasePlanPrice(plan: SubscriptionPlan, subs: Subscription[]): string | null {
+  const basePlanId = ANDROID_BASE_PLAN_IDS[plan];
+  const sub = subs.find(s => s.productId === SUBSCRIPTION_PRODUCTS.android[plan]);
+  if (!sub) return null;
+  const details = (sub as any)?.subscriptionOfferDetails;
+  if (!details?.length) {
+    const p = formatPrice(sub);
+    return p || null;
+  }
+  // Önce offerId'si olmayan (saf base plan) girişi ara
+  let baseDetail = details.find((d: any) => d.basePlanId === basePlanId && !d.offerId);
+  // Yoksa basePlanId eşleşen herhangi bir girişin SON fazını kullan (recurring fiyat)
+  if (!baseDetail) {
+    baseDetail = details.find((d: any) => d.basePlanId === basePlanId) ?? null;
+  }
+  if (!baseDetail) return null;
+  const phases: any[] = baseDetail.pricingPhases?.pricingPhaseList ?? [];
+  // Son faz = sürekli (recurring) fiyat
+  const lastPhase = phases.length > 0 ? phases[phases.length - 1] : null;
+  return lastPhase?.formattedPrice ?? null;
+}
+
 function getAndroidOfferToken(productId: string, plan: SubscriptionPlan): string | null {
   const sub = cachedSubscriptions.find((item) => item.productId === productId);
   const details = (sub as any)?.subscriptionOfferDetails;
-  if (details?.length) {
-    // Play Console'daki base plan ID ile eslesen teklifi bul
-    const basePlanId = ANDROID_BASE_PLAN_IDS[plan];
-    const matched = details.find((d: any) => d.basePlanId === basePlanId) ?? details[0];
-    console.log('[IAP] offerToken secildi:', matched?.basePlanId, plan);
-    return matched?.offerToken ?? null;
+  if (!details?.length) {
+    return (sub as any)?.subscriptionOffers?.[0]?.offerToken ?? null;
   }
-  // Eski format fallback
-  return (sub as any)?.subscriptionOffers?.[0]?.offerToken ?? null;
+  const basePlanId = ANDROID_BASE_PLAN_IDS[plan];
+  const promoOfferId = getPromoOfferIdForPlan(plan);
+
+  // 1. Promo teklifi: hem basePlanId hem offerId eşleşmeli
+  if (promoOfferId) {
+    const promoDetail = details.find((d: any) => d.basePlanId === basePlanId && d.offerId === promoOfferId);
+    if (promoDetail?.offerToken) {
+      console.log('[IAP] Promo offerToken seçildi, offerId:', promoOfferId, 'plan:', plan);
+      return promoDetail.offerToken;
+    }
+  }
+
+  // 2. Standart base plan (teklifsiz)
+  const baseDetail = details.find((d: any) => d.basePlanId === basePlanId && !d.offerId)
+    ?? details.find((d: any) => d.basePlanId === basePlanId)
+    ?? details[0];
+  console.log('[IAP] Base offerToken seçildi, basePlanId:', baseDetail?.basePlanId, 'offerId:', baseDetail?.offerId ?? null, 'plan:', plan);
+  return baseDetail?.offerToken ?? null;
 }
 
 /**
@@ -591,23 +717,14 @@ export function getPriceForPlan(plan: 'monthly' | 'yearly', subs: Subscription[]
   const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
 
   if (platform === 'android') {
-    // Android: tek subscription product, basePlanId ile plan filtrele
-    const androidProductId = SUBSCRIPTION_PRODUCTS.android[plan];
-    const sub = subs.find(s => s.productId === androidProductId);
-    if (sub) {
-      const details = (sub as any)?.subscriptionOfferDetails;
-      if (details?.length) {
-        const basePlanId = ANDROID_BASE_PLAN_IDS[plan];
-        const matched = details.find((d: any) => d.basePlanId === basePlanId) ?? details[0];
-        const phase = matched?.pricingPhases?.pricingPhaseList?.[0];
-        if (phase?.formattedPrice) return phase.formattedPrice;
-      }
-      // Eski format fallback
-      const p = formatPrice(sub);
-      if (p) return p;
-    }
+    // Önce promo teklif fiyatını dene (offerId eşleşmesi)
+    const promoPrice = getAndroidPromoOfferPrice(plan, subs);
+    if (promoPrice) return promoPrice;
+    // Yoksa standart base plan fiyatı
+    const basePrice = getAndroidBasePlanPrice(plan, subs);
+    if (basePrice) return basePrice;
   } else {
-    // iOS: ayri product ID'ler
+    // iOS: ayrı product ID'ler
     const sub = subs.find(s => s.productId === SUBSCRIPTION_PRODUCTS.ios[plan]);
     if (sub) return formatPrice(sub);
   }
@@ -618,6 +735,217 @@ export function getPriceForPlan(plan: 'monthly' | 'yearly', subs: Subscription[]
   }
   // 3. Hardcoded fallback
   return FALLBACK_PRICES[platform][plan];
+}
+
+/**
+ * En iyi mevcut fiyatı döndürür: promo teklifi varsa promo, yoksa standart.
+ * API fiyatlarını dikkate almaz — doğrudan store verisi.
+ */
+export function getStorePriceForPlan(plan: SubscriptionPlan, subs: Subscription[] = cachedSubscriptions): string {
+  const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
+
+  if (platform === 'android') {
+    const promoPrice = getAndroidPromoOfferPrice(plan, subs);
+    if (promoPrice) return promoPrice;
+    const basePrice = getAndroidBasePlanPrice(plan, subs);
+    if (basePrice) return basePrice;
+  } else {
+    const sub = subs.find(s => s.productId === SUBSCRIPTION_PRODUCTS.ios[plan]);
+    if (sub) return formatPrice(sub);
+  }
+
+  return FALLBACK_PRICES[platform][plan];
+}
+
+/**
+ * Promosyonsuz standart plan fiyatını döndürür.
+ * Android'de her zaman teklifsiz (offerId=null) base plan fiyatı kullanılır.
+ * Kampanya gösteriminde üstü çizili "eski fiyat" olarak kullanın.
+ */
+export function getOriginalPriceForPlan(plan: SubscriptionPlan, subs: Subscription[] = cachedSubscriptions): string {
+  const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
+
+  if (platform === 'android') {
+    const basePrice = getAndroidBasePlanPrice(plan, subs);
+    if (basePrice) return basePrice;
+  } else {
+    const sub = subs.find(s => s.productId === SUBSCRIPTION_PRODUCTS.ios[plan]);
+    if (sub) return formatPrice(sub);
+  }
+
+  return FALLBACK_PRICES[platform][plan];
+}
+
+function parsePriceToNumber(priceStr: string | null | undefined): number | null {
+  if (!priceStr) return null;
+  const cleaned = String(priceStr).replace(/[^0-9.,-]/g, '').trim();
+  if (!cleaned) return null;
+  const dotIndex = cleaned.lastIndexOf('.');
+  const commaIndex = cleaned.lastIndexOf(',');
+  let normalized = cleaned;
+  if (commaIndex > dotIndex) {
+    normalized = cleaned.replace(/\./g, '').replace(',', '.');
+  } else {
+    normalized = cleaned.replace(/,/g, '');
+  }
+  const num = parseFloat(normalized);
+  return Number.isFinite(num) ? num : null;
+}
+
+/**
+ * iOS introductory (tanıtıcı) fiyatını döndürür.
+ * App Store Connect'te tanımlanan intro-price teklifi StoreKit üzerinden
+ * `introductoryPrice` alanında gelir; ayrıca bir promoOfferId gerekmez.
+ */
+function getIOSIntroductoryPrice(plan: SubscriptionPlan): string | null {
+  const sub = cachedSubscriptions.find(s => s.productId === SUBSCRIPTION_PRODUCTS.ios[plan]);
+  if (!sub) return null;
+  const intro: string | undefined = (sub as any).introductoryPrice;
+  if (!intro) return null;
+  // Regular fiyatla aynıysa promo değil
+  const regular = (sub as any).localizedPrice ?? FALLBACK_PRICES.ios[plan];
+  if (intro === regular) return null;
+  console.log('[IAP] iOS introductory fiyat bulundu:', plan, intro, '<-', regular);
+  return intro;
+}
+
+/**
+ * iOS introductory teklif süresini döndürür (örn. "İlk 3 ay").
+ */
+function getIOSIntroductoryDuration(plan: SubscriptionPlan): string | null {
+  const sub = cachedSubscriptions.find(s => s.productId === SUBSCRIPTION_PRODUCTS.ios[plan]);
+  if (!sub) return null;
+  const count = parseInt((sub as any).introductoryPriceNumberOfPeriodsIOS ?? '0', 10);
+  if (!count) return null;
+  const period: string = (sub as any).introductoryPriceSubscriptionPeriodIOS ?? '';
+  let unit = 'dönem';
+  if (period === 'MONTH') unit = 'ay';
+  else if (period === 'YEAR') unit = 'yıl';
+  else if (period === 'WEEK') unit = 'hafta';
+  return `İlk ${count} ${unit}`;
+}
+
+/**
+ * Aktif kampanya/indirim fiyatını döndürür (varsa), yoksa null döner.
+ *
+ * Öncelik sırası:
+ *  1. Sunucu kampanya verisi (cachedApiCampaigns) — en güvenilir
+ *  2. Android: Play Store promo teklifi (offerId eşleşmesi)
+ *     iOS:     App Store introductory price (StoreKit)
+ *  3. Backend API fiyatı (standard fiyattan düşükse)
+ */
+export function getCampaignPriceForPlan(plan: SubscriptionPlan): string | null {
+  const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
+
+  // 1. Sunucu kampanya verisi; sunucu henüz campaign alanı döndürmüyorsa FALLBACK_CAMPAIGNS yedek
+  const serverCampaign = cachedApiCampaigns?.[platform]?.[plan] ?? FALLBACK_CAMPAIGNS[platform][plan];
+  if (serverCampaign?.price) {
+    const originalPrice = getOriginalPriceForPlan(plan, cachedSubscriptions);
+    const campNum = parsePriceToNumber(serverCampaign.price);
+    const origNum = parsePriceToNumber(originalPrice);
+    if (campNum !== null && origNum !== null) {
+      if (campNum < origNum - 0.001) {
+        console.log('[IAP] Sunucu kampanya aktif:', plan, serverCampaign.price, '<-', originalPrice);
+        return serverCampaign.price;
+      }
+    } else if (serverCampaign.price !== originalPrice) {
+      console.log('[IAP] Sunucu kampanya aktif (string karşılaştırma):', plan, serverCampaign.price);
+      return serverCampaign.price;
+    }
+  }
+
+  // 2. Platform spesifik promo tespiti
+  if (platform === 'android') {
+    // Android: Play Store subscriptionOfferDetails
+    const promoPrice = getAndroidPromoOfferPrice(plan, cachedSubscriptions);
+    if (promoPrice) {
+      const originalPrice = getAndroidBasePlanPrice(plan, cachedSubscriptions)
+        ?? FALLBACK_PRICES.android[plan];
+      const promoNum = parsePriceToNumber(promoPrice);
+      const origNum = parsePriceToNumber(originalPrice);
+      // Promo fiyatı gerçekten farklıysa (ve sayısal olarak daha düşükse veya string farklıysa)
+      const isDifferent = (promoNum !== null && origNum !== null)
+        ? Math.abs(promoNum - origNum) > 0.001
+        : promoPrice !== originalPrice;
+      if (isDifferent) {
+        console.log('[IAP] Play Store promo aktif:', plan, promoPrice, '<-', originalPrice);
+        return promoPrice;
+      }
+    }
+  } else {
+    // iOS: App Store introductory price
+    const introPrice = getIOSIntroductoryPrice(plan);
+    if (introPrice) return introPrice;
+  }
+
+  // 3. API kampanya fiyatı (yalnızca store fiyatından DÜŞÜKSE kampanya sayılır)
+  const apiPrice = cachedApiPrices?.[platform]?.[plan];
+  if (!apiPrice) return null;
+
+  const originalPrice = getOriginalPriceForPlan(plan, cachedSubscriptions);
+  const apiNum = parsePriceToNumber(apiPrice);
+  const origNum = parsePriceToNumber(originalPrice);
+  if (apiNum !== null && origNum !== null) {
+    if (Math.abs(apiNum - origNum) < 0.001) return null;
+    if (apiNum > origNum) {
+      // API fiyatı store fiyatından yüksek — eski/hatalı API verisi, kampanya değil
+      console.warn(`[IAP] API fiyatı (${apiPrice}) store fiyatından (${originalPrice}) yüksek; kampanya olarak gösterilmiyor.`);
+      return null;
+    }
+    return apiPrice;
+  }
+  if (apiPrice === originalPrice) return null;
+  return apiPrice;
+}
+
+/**
+ * Promo teklif süresini döndürür (örn. "İlk 3 ay").
+ * Önce sunucu kampanya verisine bakar, sonra:
+ *   Android → Play Store subscriptionOfferDetails
+ *   iOS     → App Store introductoryPriceNumberOfPeriodsIOS
+ */
+export function getCampaignDurationForPlan(plan: SubscriptionPlan): string | null {
+  const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
+
+  // 1. Sunucu kampanya verisi; sunucu henüz campaign alanı döndürmüyorsa FALLBACK_CAMPAIGNS yedek
+  const serverCampaign = cachedApiCampaigns?.[platform]?.[plan] ?? FALLBACK_CAMPAIGNS[platform][plan];
+  if (serverCampaign) {
+    if (serverCampaign.label) return serverCampaign.label;
+    if (serverCampaign.durationMonths) {
+      const unit = serverCampaign.durationMonths === 12 ? 'yıl' : 'ay';
+      return `İlk ${serverCampaign.durationMonths} ${unit}`;
+    }
+  }
+
+  // 2. Platform spesifik süre tespiti
+  if (platform === 'ios') {
+    return getIOSIntroductoryDuration(plan);
+  }
+
+  // Android: Play Store subscriptionOfferDetails
+  if (platform !== 'android') return null;
+  const promoOfferId = getPromoOfferIdForPlan(plan);
+  if (!promoOfferId) return null;
+  const basePlanId = ANDROID_BASE_PLAN_IDS[plan];
+  const sub = cachedSubscriptions.find(s => s.productId === SUBSCRIPTION_PRODUCTS.android[plan]);
+  const details = (sub as any)?.subscriptionOfferDetails;
+  if (!details?.length) return null;
+  const promoDetail =
+    details.find((d: any) => d.basePlanId === basePlanId && d.offerId === promoOfferId) ??
+    details.find((d: any) => d.offerId === promoOfferId);
+  if (!promoDetail) return null;
+  const phases: any[] = promoDetail.pricingPhases?.pricingPhaseList ?? [];
+  if (phases.length < 2) return null; // Tek faz = recurring, promo değil
+  const introPhase = phases[0];
+  const count: number = introPhase?.billingCycleCount;
+  if (!count || count === 0) return null;
+  // billingPeriod: ISO 8601 — P1M = aylık, P1Y = yıllık, P1W = haftalık
+  const period: string = introPhase?.billingPeriod ?? '';
+  let unit = 'dönem';
+  if (period.endsWith('M')) unit = 'ay';
+  else if (period.endsWith('Y')) unit = 'yıl';
+  else if (period.endsWith('W')) unit = 'hafta';
+  return `İlk ${count} ${unit}`;
 }
 
 /**

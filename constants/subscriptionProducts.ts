@@ -34,6 +34,7 @@ export const ANDROID_BASE_PLAN_IDS: Record<'monthly' | 'yearly', string> = {
 };
 
 /**
+
  * Backend API Endpoints
  * API_URL lib/config.ts dosyasından import edilmelidir
  */
@@ -58,11 +59,43 @@ export const OFFLINE_RADIUS_KM = {
  */
 export const FALLBACK_PRICES: Record<'ios' | 'android', Record<'monthly' | 'yearly', string>> = {
   ios: {
-    monthly: '₺49,99',
-    yearly: '₺499,99',
+    monthly: '₺14,99',
+    yearly: '₺144,99',
   },
   android: {
-    monthly: '₺39,99',
-    yearly: '₺399,99',
+    monthly: '₺14,99',
+    yearly: '₺144,99',
+  },
+};
+
+/**
+ * Fallback kampanya bilgileri — sunucu campaign verisi gelene kadar kullanılır.
+ *
+ * Sunucu GET /node/subscriptions/prices yanıtında "campaigns" alanı döndürmeye
+ * başladığında bu sabit yalnızca yedek olarak kalır.
+ *
+ * Kampanya YOKSA ilgili planı null yapın; uygulama normal fiyatı gösterir.
+ *
+ * Alan açıklamaları:
+ *   price         — gösterilecek indirimli fiyat (₺9,99)
+ *   durationMonths — kaç ay sürecek (3)
+ *   label         — hazır etiket metni, örn. "İlk 3 ay"
+ */
+export const FALLBACK_CAMPAIGNS: Record<
+  'ios' | 'android',
+  Record<'monthly' | 'yearly', { price: string; durationMonths: number; label: string; promoOfferId?: string } | null>
+> = {
+  ios: {
+    monthly: null, // iOS kampanyası varsa buraya ekleyin
+    yearly: null,
+  },
+  android: {
+    monthly: {
+      price: '₺9,99',
+      durationMonths: 3,
+      label: 'İlk 3 ay',
+      promoOfferId: 'yeni-abone-monthly',
+    },
+    yearly: null,
   },
 };

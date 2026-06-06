@@ -200,10 +200,39 @@ export default function PremiumScreen() {
     }
   };
 
-  const getSubscriptionPrice = (plan: 'monthly' | 'yearly'): string => {
-    if (pricesLoading) return '...';
-    return IAPManager.getPriceForPlan(plan, subscriptions);
+  const getSubscriptionPrices = (plan: 'monthly' | 'yearly') => {
+    if (pricesLoading) return { displayPrice: '...', originalPrice: null as string | null, campaignDuration: null as string | null };
+
+    // Kampanya/promo fiyatı (Play Store offerId veya API tabanlı)
+    const campaignPrice = IAPManager.getCampaignPriceForPlan
+      ? IAPManager.getCampaignPriceForPlan(plan)
+      : null;
+
+    const campaignDuration = campaignPrice && IAPManager.getCampaignDurationForPlan
+      ? IAPManager.getCampaignDurationForPlan(plan)
+      : null;
+
+    if (campaignPrice) {
+      // Üstü çizili gösterilecek orijinal (indirimsiz) fiyat
+      const original = IAPManager.getOriginalPriceForPlan
+        ? IAPManager.getOriginalPriceForPlan(plan, subscriptions)
+        : IAPManager.getPriceForPlan(plan, subscriptions);
+      return {
+        displayPrice: campaignPrice,
+        originalPrice: original !== campaignPrice ? original : null,
+        campaignDuration,
+      };
+    }
+
+    // Kampanya yok — normal fiyatı göster
+    const bestPrice = IAPManager.getStorePriceForPlan
+      ? IAPManager.getStorePriceForPlan(plan, subscriptions)
+      : IAPManager.getPriceForPlan(plan, subscriptions);
+    return { displayPrice: bestPrice, originalPrice: null, campaignDuration: null };
   };
+
+  const yearlyPrices = getSubscriptionPrices('yearly');
+  const monthlyPrices = getSubscriptionPrices('monthly');
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -297,7 +326,14 @@ export default function PremiumScreen() {
                 <Text style={[styles.pricingDescription, { color: colors.muted }]}>12 ay premium erişim</Text>
               </View>
               <View style={styles.pricingAmount}>
-                <Text style={[styles.pricingPrice, { color: colors.primary }]}>{getSubscriptionPrice('yearly')}</Text>
+                {yearlyPrices.originalPrice ? (
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={[styles.pricingPrice, { color: colors.primary }]}>{yearlyPrices.displayPrice}</Text>
+                    <Text style={[styles.pricingOriginalPrice, { color: colors.muted }]}>{yearlyPrices.originalPrice}</Text>
+                  </View>
+                ) : (
+                  <Text style={[styles.pricingPrice, { color: colors.primary }]}>{yearlyPrices.displayPrice}</Text>
+                )}
                 <Text style={[styles.pricingPeriod, { color: colors.muted }]}>/yıl</Text>
               </View>
             </View>
@@ -316,12 +352,25 @@ export default function PremiumScreen() {
             onPress={() => setSelectedPlan('monthly')}
           >
             <View style={styles.pricingHeader}>
-              <View>
+              <View style={{ flex: 1, marginRight: 8 }}>
                 <Text style={[styles.pricingPlanName, { color: colors.text }]}>Aylık</Text>
-                <Text style={[styles.pricingDescription, { color: colors.muted }]}>1 ay premium erişim</Text>
+                {monthlyPrices.campaignDuration ? (
+                  <Text style={[styles.pricingDescription, { color: colors.primary, fontWeight: '600' }]}>
+                    {monthlyPrices.campaignDuration} · sonra {monthlyPrices.originalPrice}/ay
+                  </Text>
+                ) : (
+                  <Text style={[styles.pricingDescription, { color: colors.muted }]}>1 ay premium erişim</Text>
+                )}
               </View>
               <View style={styles.pricingAmount}>
-                <Text style={[styles.pricingPrice, { color: colors.primary }]}>{getSubscriptionPrice('monthly')}</Text>
+                {monthlyPrices.originalPrice ? (
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={[styles.pricingPrice, { color: colors.primary }]}>{monthlyPrices.displayPrice}</Text>
+                    <Text style={[styles.pricingOriginalPrice, { color: colors.muted }]}>{monthlyPrices.originalPrice}</Text>
+                  </View>
+                ) : (
+                  <Text style={[styles.pricingPrice, { color: colors.primary }]}>{monthlyPrices.displayPrice}</Text>
+                )}
                 <Text style={[styles.pricingPeriod, { color: colors.muted }]}>/ay</Text>
               </View>
             </View>
@@ -588,6 +637,11 @@ const styles = StyleSheet.create({
   pricingPrice: {
     fontSize: 32,
     fontWeight: 'bold',
+  },
+  pricingOriginalPrice: {
+    fontSize: 14,
+    textDecorationLine: 'line-through',
+    marginTop: 6,
   },
   pricingPeriod: {
     fontSize: 14,

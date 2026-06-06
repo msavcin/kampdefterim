@@ -264,6 +264,69 @@ async function checkExpiredSubscriptions() {
 // const cron = require('node-cron');
 // cron.schedule('0 2 * * *', checkExpiredSubscriptions); // Her gün 02:00
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /subscriptions/prices  — Fiyat + kampanya bilgisi endpoint'i
+//
+// Mobile app bu endpoint'i açılışta çağırarak:
+//   1. Güncel regular fiyatları,
+//   2. Aktif kampanya fiyatlarını ve sürelerini alır.
+//
+// Kampanya YOKSA ilgili planın "campaign" alanı null gönderilir.
+//
+// Örnek Yanıt:
+//   {
+//     "ios":     { "monthly": "₺49,99", "yearly": "₺499,99" },
+//     "android": { "monthly": "₺10,00", "yearly": "₺499,99" },
+//     "campaigns": {
+//       "android": {
+//         "monthly": { "price": "₺1,19", "durationMonths": 3, "label": "İlk 3 ay" },
+//         "yearly":  null
+//       },
+//       "ios": {
+//         "monthly": null,
+//         "yearly":  null
+//       }
+//     }
+//   }
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/subscriptions/prices', async (req, res) => {
+  try {
+    // ── Fiyatlar (gerçek/güncel store fiyatlarını buraya girin) ──────────────
+    const prices = {
+      ios:     { monthly: '₺14,99',  yearly: '₺144,99' },
+      android: { monthly: '₺14,99',  yearly: '₺144,99' },
+    };
+
+    // ── Kampanya konfigürasyonu ──────────────────────────────────────────────
+    // Kampanya yokken ilgili alanı null yapmanız yeterli — uygulama otomatik
+    // normal fiyat + Play Store promosu moduna geçer.
+    //
+    // Alanlar:
+    //   price         : İndirimli fiyat (kullanıcıya gösterilecek, formatlanmış)
+    //   durationMonths: Kaç ay sürecek (0 = süresiz, -1 = gösterme)
+    //   label         : Hazır etiket metni, örn. "İlk 3 ay" (isteğe bağlı)
+    const campaigns = {
+      android: {
+        monthly: {
+          price:          '₺9,99',
+          durationMonths: 3,
+          label:          'İlk 3 ay',
+        },
+        yearly: null,
+      },
+      ios: {
+        monthly: null,
+        yearly:  null,
+      },
+    };
+
+    return res.json({ ...prices, campaigns });
+  } catch (error) {
+    console.error('[Subscription] Prices error:', error);
+    return res.status(500).json({ error: 'Failed to fetch prices' });
+  }
+});
+
 module.exports = router;
 
 /**
@@ -271,7 +334,7 @@ module.exports = router;
  * 
  * // backend/index.js veya app.js
  * const subscriptionRoutes = require('./routes/subscriptions');
- * app.use('/api', subscriptionRoutes);
+ * app.use('/node', subscriptionRoutes);
  * 
  * // Environment variables (.env)
  * APPLE_SHARED_SECRET=your_apple_shared_secret_from_app_store_connect

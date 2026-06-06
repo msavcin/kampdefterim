@@ -8,6 +8,11 @@ import { loadReadMap } from '@/lib/readMap';
 import { createChatSocket } from '@/lib/chatSocket';
 import { getToken } from '@/lib/auth';
 import { getMe } from '@/lib/userCommunityApi';
+import {
+  getTotalOfflineUnread,
+  clearOfflineUnread,
+  clearAllOfflineUnread,
+} from '@/lib/offlineUnread';
 
 const DELETED_KEY = '@chat_deleted_v1';
 
@@ -84,10 +89,19 @@ export function useChatUnread() {
       const res = await apiFetch(`${API_URL}/chat/conversations`);
       if (!res || !res.ok) {
         console.log('[useChatUnread] fetchUnread failed status', res?.status);
-        setPersonalUnread(0);
+        // Çevrimdışı geri dönüş: offline peer mesajlarının sayısını göster
+        try {
+          const offlineTotal = await getTotalOfflineUnread();
+          personalUnreadRef.current = offlineTotal;
+          setPersonalUnread(offlineTotal);
+        } catch {
+          setPersonalUnread(0);
+        }
         setCommunityUnread(0);
         return;
       }
+      // Sunucu başarılı yanıt verdi — offline unread'i sıfırla (sunucu canonical state)
+      clearAllOfflineUnread().catch(() => {});
       const data = await res.json();
       const arr = Array.isArray(data) ? data : [];
       const deletedMap = await loadDeletedMap();
@@ -156,7 +170,14 @@ export function useChatUnread() {
       }
     } catch (e) {
       console.warn('[useChatUnread] fetch error', e);
-      setPersonalUnread(0);
+      // Ağ hatası: offline peer unread varsa göster
+      try {
+        const offlineTotal = await getTotalOfflineUnread();
+        personalUnreadRef.current = offlineTotal;
+        setPersonalUnread(offlineTotal);
+      } catch {
+        setPersonalUnread(0);
+      }
       setCommunityUnread(0);
     }
   }, []);
@@ -219,6 +240,8 @@ export function useChatUnread() {
           const convId = e?.payload?.convId ?? e?.payload?.conversationId ?? e?.payload?.convID;
           if (convId) {
             const key = String(convId);
+            // Offline unread'i de temizle
+            clearOfflineUnread(key).catch(() => {});
             const existing = convsRef.current.get(key);
             if (existing) {
               existing.unread_count = 0;
@@ -228,7 +251,7 @@ export function useChatUnread() {
               try { const t = String(c?.type ?? '').toLowerCase(); if (t === 'community') return true; } catch (e) {}
               return !!(c?.community_id || (c?.community && (c.community.id || c.community.community_id)) || c?.communityId);
             };
-            const totalNow = Array.from(convsRef.current.values()).reduce((acc:number, c:any) => {
+            const serverPersonalTotal = Array.from(convsRef.current.values()).reduce((acc:number, c:any) => {
               if (isCommunityConv(c)) return acc;
               return acc + (Number(c?.unread_count) || 0);
             }, 0);
@@ -236,13 +259,21 @@ export function useChatUnread() {
               if (!isCommunityConv(c)) return acc;
               return acc + (Number(c?.unread_count) || 0);
             }, 0);
-            if (__DEV__) {
-              try { console.log('[useChatUnread] applied local mark_read, totalNow=', totalNow); } catch {}
-            }
-            personalUnreadRef.current = totalNow;
-            setPersonalUnread(totalNow);
-            setCommunityUnread(communityNow);
-            // also schedule a full refresh to reconcile with server/readMap
+            // offline toplamı da ekle (cihaz offline ise sunucu map boş olabilir)
+            getTotalOfflineUnread().then((offlineTotal) => {
+              const totalNow = serverPersonalTotal + offlineTotal;
+              if (__DEV__) {
+                try { console.log('[useChatUnread] applied local mark_read, totalNow=', totalNow); } catch {}
+              }
+              personalUnreadRef.current = totalNow;
+              setPersonalUnread(totalNow);
+              setCommunityUnread(communityNow);
+            }).catch(() => {
+              personalUnreadRef.current = serverPersonalTotal;
+              setPersonalUnread(serverPersonalTotal);
+              setCommunityUnread(communityNow);
+            });
+            // full refresh ile sunucu/readMap ile uyuştur
             setTimeout(() => { try { fetchUnread(); } catch (err) { console.warn('[useChatUnread] fetch after mark_read failed', err); } }, 200);
             return;
           }
@@ -259,6 +290,15 @@ export function useChatUnread() {
 
       if (e?.type === 'unread_updated') {
         try { fetchUnread(); } catch (err) { console.warn('[useChatUnread] fetch on event unread_updated failed', err); }
+        return;
+      }
+
+      // Offline peer mesajı geldi — badge'i offline unread deposundan güncelle
+      if (e?.type === 'offline_message_received') {
+        getTotalOfflineUnread().then((total) => {
+          personalUnreadRef.current = total;
+          setPersonalUnread(total);
+        }).catch(() => {});
         return;
       }
 

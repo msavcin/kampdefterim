@@ -1,12 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, FlatList, TextInput, Text, KeyboardAvoidingView, Platform, ActivityIndicator, TouchableOpacity, Alert, Keyboard } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { apiFetch } from '@/lib/apiFetch';
 import { API_URL } from '@/lib/config';
 import { getToken } from '@/lib/auth';
+import * as SecureStore from 'expo-secure-store';
 import { createChatSocket } from '@/lib/chatSocket';
 import MessageBubble from '@/components/MessageBubble';
+import NearbyPeersBar from '@/components/NearbyPeersBar';
 import ThemedIcon from '@/components/ThemedIcon';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../components/ThemeProvider';
@@ -14,12 +16,20 @@ import { createThemedStyles } from '../../../constants/theme/sharedStyles';
 import { emitChatEvent } from '@/lib/chatEvents';
 import { markRead } from '@/lib/readMap';
 import { getMe } from '@/lib/userCommunityApi';
+import { offlineTransportManager } from '@/lib/offlineTransport';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 const DELETED_KEY = '@chat_deleted_v1';
 const LAST_OPENED_KEY = '@chat_last_opened_v1';
 
 const getMsgTime = (m:any) => {
-  const t = m?.created_at ?? m?.createdAt ?? m?.sent_at ?? m?.timestamp;
+  // Öncelik: meta.client_sent_at (offline sync'te kaydedilen gerçek gönderme zamanı)
+  // → timestamp (offline queue unix ms) → created_at / sent_at (sunucu zamanı)
+  const meta = m?.meta;
+  if (meta?.client_sent_at) {
+    try { const v = Date.parse(String(meta.client_sent_at)); if (v > 0) return v; } catch { /* fall through */ }
+  }
+  const t = m?.timestamp ?? m?.created_at ?? m?.createdAt ?? m?.sent_at;
   if (!t) return 0;
   try { return typeof t === 'number' ? t : Date.parse(String(t)) || 0; } catch (e) { return 0; }
 };
@@ -75,6 +85,10 @@ export default function CommunityChatScreen() {
   const convIdRef = useRef<string | null>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isOffline, setIsOffline] = useState(false);
+  const [hasWifiPeers, setHasWifiPeers] = useState(false);
+  const isConnected = useNetworkStatus();
+  const prevConnectedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e:any) => {
@@ -306,6 +320,196 @@ export default function CommunityChatScreen() {
     }
   }, [messages.length]);
 
+  // Mesajları offline cache'e kaydet
+  useEffect(() => {
+    if (!communityId || messages.length === 0) return;
+    AsyncStorage.setItem(`@chat_msgs_v1_community_${communityId}`, JSON.stringify(messages.slice(0, 100))).catch(() => {});
+  }, [messages, communityId]);
+
+  // ─── Offline SQLite kuyruğundan peer mesajlarını yükle ──────────────────────
+  const mergeOfflineQueueMessages = useCallback(async () => {
+    if (!communityId) return;
+    try {
+      const { getLocalMessages: getOfflineLocalMsgs } = await import('@/lib/offlineChatQueue');
+      const cacheKey = `community_${communityId}`;
+      // Hem community_ önekli hem de communityId ile kaydedilmiş mesajları çek
+      const [q1, q2] = await Promise.all([
+        getOfflineLocalMsgs(cacheKey),
+        getOfflineLocalMsgs(String(communityId)),
+      ]);
+      const queueMsgs = [...q1, ...q2];
+      if (!queueMsgs.length) return;
+      const normalized = queueMsgs.map((q: any) => ({
+        id: q.id,
+        text: q.text,
+        sender_id: q.senderId,
+        sender_name: q.senderName,
+        created_at: new Date(q.timestamp).toISOString(),
+        offline_peer: true,
+      }));
+      setMessages(prev => {
+        const existingIds = new Set(
+          prev.map((m: any) => { const mid = getMessageId(m); return mid != null ? String(mid) : null; }).filter(Boolean),
+        );
+        const newOnes = normalized.filter((m: any) => !existingIds.has(String(m.id)));
+        if (!newOnes.length) return prev;
+        return sortDesc([...prev, ...newOnes]);
+      });
+    } catch { /* ignore */ }
+  }, [communityId]);
+
+  useEffect(() => {
+    mergeOfflineQueueMessages();
+  }, [mergeOfflineQueueMessages]);
+
+  useEffect(() => {
+    if (!isConnected) {
+      mergeOfflineQueueMessages();
+    }
+  }, [isConnected, mergeOfflineQueueMessages]);
+
+  // ─── Çevrimdışı transport entegrasyonu ─────────────────────────────────
+  useEffect(() => {
+    if (!communityId) return;
+    let unsubMsg: (() => void) | null = null;
+    (async () => {
+      try {
+        // Transport sadece offline modda başlatılır
+        if (!isConnected && !offlineTransportManager.isActive) {
+          let uid = '';
+          let uname = '';
+          // Önce SecureStore cache'den oku — offline olunca getMe ağ çağrısı yapamaz
+          try {
+            const cached = await SecureStore.getItemAsync('localUser');
+            if (cached) {
+              const u = JSON.parse(cached);
+              uid   = String(u?.id ?? u?.user_id ?? '');
+              uname = String(u?.name ?? u?.username ?? u?.full_name ?? '');
+            }
+          } catch { /* ignore */ }
+          // Cache yoksa API'dan dene (online mod)
+          if (!uid) {
+            const me = await getMe().catch(() => null);
+            if (me) {
+              uid   = String(me?.id ?? me?.user_id ?? '');
+              uname = String(me?.name ?? me?.username ?? me?.full_name ?? '');
+            }
+          }
+          if (uid) await offlineTransportManager.start(uid, uname);
+        }
+        const cacheKey = `community_${communityId}`;
+        unsubMsg = offlineTransportManager.onMessage((msg) => {
+          if (String(msg.conversationId) !== String(cacheKey) && String(msg.conversationId) !== String(communityId)) return;
+          const peerMsg = {
+            id:          msg.id,
+            text:        msg.text,
+            sender_id:   msg.senderId,
+            sender_name: msg.senderName,
+            created_at:  new Date(msg.timestamp).toISOString(),
+          };
+          setMessages(prev => {
+            if (prev.some(m => String(getMessageId(m)) === String(msg.id))) return prev;
+            return [peerMsg, ...prev];
+          });
+        });
+      } catch (e) {
+        console.warn('[CommunityChat] offline transport init hatası:', e);
+      }
+    })();
+    return () => { unsubMsg?.(); };
+  }, [isConnected, communityId]);
+
+  // ─── Online/Offline geçiş yönetimi ────────────────────────────────
+  useEffect(() => {
+    setIsOffline(!isConnected);
+    if (prevConnectedRef.current === null) {
+      prevConnectedRef.current = isConnected;
+      return;
+    }
+    const wasOffline = !prevConnectedRef.current;
+    prevConnectedRef.current = isConnected;
+    if (!isConnected || !wasOffline) return;
+
+    // Offline → Online geçişi
+    (async () => {
+      try {
+        // 0. localUserId null ise (offline başlatılmış ekran) SecureStore/API'dan al
+        let effectiveUserId: string | null = localUserId != null ? String(localUserId) : null;
+        if (!effectiveUserId) {
+          try {
+            const cached = await SecureStore.getItemAsync('localUser');
+            if (cached) {
+              const u = JSON.parse(cached);
+              effectiveUserId = String(u?.id ?? u?.user_id ?? '') || null;
+              if (effectiveUserId) setLocalUserId(effectiveUserId);
+            }
+          } catch { /* ignore */ }
+        }
+        if (!effectiveUserId) {
+          const me = await getMe().catch(() => null);
+          if (me) {
+            effectiveUserId = String(me?.id ?? me?.user_id ?? '') || null;
+            if (effectiveUserId) setLocalUserId(effectiveUserId);
+          }
+        }
+
+        tokenRef.current = await getToken();
+        try { socketRef.current?.connect(tokenRef.current || ''); } catch {}
+
+        const { getPendingMessages, markMessageSynced } = await import('@/lib/offlineChatQueue');
+        const pending = await getPendingMessages();
+        for (const qMsg of pending) {
+          if (String(qMsg.conversationId) !== `community_${communityId}`) continue;
+          // Yalnızca kendi yazdığımız mesajları gönder — peer'dan gelen mesajları
+          // mevcut token ile POST etmek hepsini aynı kullanıcıya atfeder.
+          if (qMsg.senderId && effectiveUserId && String(qMsg.senderId) !== String(effectiveUserId)) {
+            await markMessageSynced(qMsg.id);
+            continue;
+          }
+          try {
+            const res = await apiFetch(`${API_URL}/chat/messages`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ community_id: Number(communityId), text: qMsg.text }),
+            });
+            if (res && res.ok) {
+              await markMessageSynced(qMsg.id);
+              try {
+                const serverMsg = await res.json();
+                if (serverMsg) {
+                  setMessages(prev => prev.map(m => String(getMessageId(m)) === String(qMsg.id) ? serverMsg : m));
+                }
+              } catch { /* ignore */ }
+            }
+          } catch { /* bu mesajı atla */ }
+        }
+        try { await offlineTransportManager.stop(); } catch {}
+
+        // Sunucudan güncel mesajları çek ve doğru sırayla göster
+        try {
+          const currentConvId = convIdRef.current;
+          if (currentConvId) {
+            const refreshRes = await apiFetch(`${API_URL}/chat/conversations/${currentConvId}/messages?limit=50`);
+            if (refreshRes && refreshRes.ok) {
+              const refreshData = await refreshRes.json();
+              const arr = Array.isArray(refreshData) ? refreshData.map(normalizeMessage) : [];
+              setMessages(sortDesc(arr));
+            }
+          } else {
+            const refreshRes = await apiFetch(`${API_URL}/chat/messages?community_id=${communityId}&limit=50`);
+            if (refreshRes && refreshRes.ok) {
+              const refreshData = await refreshRes.json();
+              const arr = Array.isArray(refreshData) ? refreshData.map(normalizeMessage) : [];
+              setMessages(sortDesc(arr));
+            }
+          }
+        } catch { /* yenileme başarısız olsa mevcut listeyi koru */ }
+      } catch (e) {
+        console.warn('[CommunityChat] online recovery hatası:', e);
+      }
+    })();
+  }, [isConnected, communityId]);
+
   const handleSend = async () => {
     if (!text.trim()) return;
     const tempId = 'tmp-' + Date.now();
@@ -372,9 +576,37 @@ export default function CommunityChatScreen() {
         try { emitChatEvent({ type: 'conversation_updated', payload: { conversation_id: saved?.conversation_id ?? null, message_id: saved?.id } }); } catch (e) {}
       } catch (e) { /* ignore */ }
     } catch (e) {
-      setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, failed: true } : m)));
-      console.warn('[CommunityChat] send error', e);
-      Alert.alert('Hata', 'Mesaj gönderilemedi.');
+      // Çevrimdışı fallback: mesajı kuyruğa kaydet
+      let savedOffline = false;
+      try {
+        let queueId: string;
+        if (offlineTransportManager.isActive) {
+          // Transport mesajı kuyruğa alır ve peer'lara iletir; ayrıca enqueueMessage çağırma
+          queueId = await offlineTransportManager.sendMessage(`community_${communityId}`, text);
+        } else {
+          const { enqueueMessage } = await import('@/lib/offlineChatQueue');
+          queueId = await enqueueMessage({
+            conversationId: `community_${communityId}`,
+            senderId: String(localUserId ?? ''),
+            senderName: '',
+            text,
+            timestamp: Date.now(),
+          });
+        }
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === tempId
+              ? { ...m, id: queueId, sending: false, offline_queued: true, created_at: new Date().toISOString() }
+              : m,
+          ),
+        );
+        savedOffline = true;
+      } catch { /* ignore */ }
+      if (!savedOffline) {
+        setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, failed: true } : m)));
+        console.warn('[CommunityChat] send error', e);
+        Alert.alert('Hata', 'Mesaj gönderilemedi.');
+      }
     }
   };
 
@@ -400,6 +632,31 @@ export default function CommunityChatScreen() {
             </View>
           </TouchableOpacity>
         </View>
+
+        {isOffline && (
+          <View style={{ backgroundColor: '#f59e0b', paddingVertical: 8, paddingHorizontal: 12 }}>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '500', textAlign: 'center', marginBottom: 6 }}>
+              Çevrimdışı — önceki yazışmalar gösteriliyor
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'center' }}>
+              {!hasWifiPeers && (
+                <TouchableOpacity
+                  onPress={() => router.push('/guide-wifi' as any)}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>📶 WiFi Rehberi</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
+        {isOffline && (
+          <NearbyPeersBar
+            visible={true}
+            onStatusChange={(wifi) => { setHasWifiPeers(wifi); }}
+          />
+        )}
 
         <FlatList
           ref={listRef}
