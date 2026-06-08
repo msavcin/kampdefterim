@@ -360,15 +360,11 @@ useEffect(() => {
   const pickImage = async () => {
     try {
       setImagePickerLoading(true);
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (permissionResult.granted === false) {
-        Alert.alert('İzin Gerekli', 'Fotoğraf seçmek için galeri erişim izni gereklidir.');
-        return;
-      }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsMultipleSelection: true,
         quality: 1,
+        preferSystemPhotoPicker: true,
       });
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const optimizedUris: string[] = [];

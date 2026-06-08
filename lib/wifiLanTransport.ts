@@ -14,6 +14,40 @@
 
 import { generateUUID } from './uuid';
 
+// ─── Native modül import'ları (opsiyonel - hata durumunda graceful fail) ────
+let TcpSocket: any = null;
+let Zeroconf: any = null;
+let NativeModules: any = null;
+let Platform: any = null;
+let Network: any = null;
+
+try {
+  TcpSocket = require('react-native-tcp-socket');
+} catch (e) {
+  console.warn('[WifiLanTransport] react-native-tcp-socket yüklenemedi:', (e as any)?.message);
+}
+
+try {
+  const ZeroconfModule = require('react-native-zeroconf');
+  Zeroconf = ZeroconfModule.default ?? ZeroconfModule;
+} catch (e) {
+  console.warn('[WifiLanTransport] react-native-zeroconf yüklenemedi:', (e as any)?.message);
+}
+
+try {
+  const RN = require('react-native');
+  NativeModules = RN.NativeModules;
+  Platform = RN.Platform;
+} catch (e) {
+  console.warn('[WifiLanTransport] react-native yüklenemedi:', (e as any)?.message);
+}
+
+try {
+  Network = require('expo-network');
+} catch (e) {
+  console.warn('[WifiLanTransport] expo-network yüklenemedi:', (e as any)?.message);
+}
+
 // ─── UTF-8 decode yardımcısı ──────────────────────────────────────────────────
 /**
  * TCP chunk'ını UTF-8 string'e dönüştürür.
@@ -301,10 +335,11 @@ export class WifiLanTransport {
   // ─── TCP sunucu ───────────────────────────────────────────────────────────
 
   private async _startTcpServer(): Promise<void> {
+    if (!TcpSocket) {
+      console.warn('[WifiLanTransport] TcpSocket modülü yüklenmemiş, TCP sunucu başlatılamıyor');
+      return;
+    }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const TcpSocket = require('react-native-tcp-socket');
-
       this._server = TcpSocket.createServer((socket: any) => {
         let buffer = '';
         let resolvedUserId: string | null = null;
@@ -492,8 +527,14 @@ export class WifiLanTransport {
       }
 
       // Native modül başarısız → expo-network ile dene
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Network = require('expo-network');
+      if (!Network) {
+        console.warn('[WifiLanTransport] expo-network modülü yüklenememiş');
+        console.log('[WifiLanTransport] IP tespit edilemedi, fallback subnet\'ler taranıyor');
+        for (const fallback of HOTSPOT_SEEDS) {
+          this._doSubnetScanOnBase(fallback, -1);
+        }
+        return;
+      }
       const localIp: string = await Network.getIpAddressAsync().catch(() => '');
       if (localIp && localIp !== '0.0.0.0') {
         const scannedBases = new Set<string>();
@@ -528,9 +569,11 @@ export class WifiLanTransport {
    * bu tabloya yazar. Subnet taraması gerekmeksizin anlık IP listesi elde edilir.
    */
   private async _getArpPeerIps(): Promise<string[]> {
+    if (!NativeModules) {
+      console.warn('[WifiLanTransport] React Native modülleri yüklenmemiş');
+      return [];
+    }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { NativeModules } = require('react-native');
       if (!NativeModules?.NetworkIf?.getArpTable) return [];
       const ips: string[] = await NativeModules.NetworkIf.getArpTable();
       return ips.filter((ip) => ip && ip !== '0.0.0.0');
@@ -547,9 +590,10 @@ export class WifiLanTransport {
    * her zaman DHCP gateway'idir. Doğrudan bağlanmak için subnet taraması gerekmez.
    */
   private async _getGatewayIp(): Promise<string | null> {
+    if (!NativeModules) {
+      return null;
+    }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { NativeModules } = require('react-native');
       if (!NativeModules?.NetworkIf?.getGatewayIp) return null;
       const gw: string | null = await NativeModules.NetworkIf.getGatewayIp();
       return gw && gw !== '0.0.0.0' ? gw : null;
@@ -563,9 +607,11 @@ export class WifiLanTransport {
    * aktif IPv4 adreslerini döndürür. ap0 arayüzü dahil tüm interface'leri kapsar.
    */
   private async _getLocalIpsFromNative(): Promise<string[]> {
+    if (!NativeModules) {
+      console.warn('[WifiLanTransport] React Native modülleri yüklenmemiş');
+      return [];
+    }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { NativeModules } = require('react-native');
       if (!NativeModules?.NetworkIf?.getLocalIps) {
         console.warn('[WifiLanTransport] NetworkIf native modülü bulunamadı');
         return [];
@@ -643,9 +689,11 @@ export class WifiLanTransport {
    * Bu kilit olmadan zeroconf/mDNS paketleri donanım düzeyinde filtrelenir.
    */
   private async _acquireMulticastLock(): Promise<void> {
+    if (!NativeModules || !Platform) {
+      console.warn('[WifiLanTransport] React Native modülleri yüklenmemiş');
+      return;
+    }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { NativeModules, Platform } = require('react-native');
       if (Platform.OS !== 'android') return;
       if (!NativeModules?.NetworkIf?.acquireMulticastLock) return;
       await NativeModules.NetworkIf.acquireMulticastLock();
@@ -657,9 +705,8 @@ export class WifiLanTransport {
 
   /** Daha önce edinilen MulticastLock'u serbest bırakır. */
   private _releaseMulticastLock(): void {
+    if (!NativeModules || !Platform) return;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { NativeModules, Platform } = require('react-native');
       if (Platform.OS !== 'android') return;
       if (!NativeModules?.NetworkIf?.releaseMulticastLock) return;
       NativeModules.NetworkIf.releaseMulticastLock().catch(() => { /* ignore */ });
@@ -669,10 +716,11 @@ export class WifiLanTransport {
   // ─── mDNS keşif ──────────────────────────────────────────────────────────
 
   private async _startDiscovery(): Promise<void> {
+    if (!Zeroconf) {
+      console.warn('[WifiLanTransport] Zeroconf modülü yüklenmemiş, mDNS keşif başlatılamıyor');
+      return;
+    }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const ZeroconfModule = require('react-native-zeroconf');
-      const Zeroconf = ZeroconfModule.default ?? ZeroconfModule;
       this._zeroconf = new Zeroconf();
 
       this._zeroconf.on('error', (err: any) =>
@@ -752,9 +800,13 @@ export class WifiLanTransport {
     // Tarama modunda gerçek userId handshake'ten gelecek
     let realRemoteId = userId;
 
+    if (!TcpSocket) {
+      console.warn('[WifiLanTransport] TcpSocket modülü yüklenmemiş, bağlantı kurulamıyor');
+      this._connecting.delete(connectKey);
+      return;
+    }
+
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const TcpSocket = require('react-native-tcp-socket');
       let buffer = '';
 
       const socket = TcpSocket.createConnection(

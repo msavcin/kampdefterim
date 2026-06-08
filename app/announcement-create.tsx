@@ -115,6 +115,7 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
       mediaTypes: 'images',
       allowsEditing: true,
       quality: 1,
+      preferSystemPhotoPicker: true,
     });
     if (!result.canceled && result.assets && result.assets.length > 0) {
       setUploadingPhoto(true);

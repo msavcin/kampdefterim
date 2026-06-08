@@ -521,6 +521,7 @@ export default function ProfileScreen(props: any) {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
+        preferSystemPhotoPicker: true,
       });
       if (result.canceled) return;
       setAvatarUploading(true);

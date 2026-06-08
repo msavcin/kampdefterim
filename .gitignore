@@ -41,4 +41,6 @@ yarn-error.*
 .expo/
 
 android/app/release.keystore
+android/app/eas-release.jks
+android/keystore.properties
 android/gradle.properties
