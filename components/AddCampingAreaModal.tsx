@@ -467,7 +467,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
         allowsMultipleSelection: true,
         quality: 1,
         preferSystemPhotoPicker: true,
-      });
+      } as unknown as ImagePicker.ImagePickerOptions);
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const newImages: { image_id: string; local_uri: string; image_url: null; status: 'pending' }[] = [];
         for (const asset of result.assets) {

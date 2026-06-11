@@ -112,11 +112,11 @@ export default function AnnouncementCreate({ visible, onClose, onSuccess }: Anno
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       quality: 1,
       preferSystemPhotoPicker: true,
-    });
+    } as unknown as ImagePicker.ImagePickerOptions);
     if (!result.canceled && result.assets && result.assets.length > 0) {
       setUploadingPhoto(true);
       try {

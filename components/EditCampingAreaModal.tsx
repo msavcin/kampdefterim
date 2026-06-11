@@ -365,7 +365,7 @@ useEffect(() => {
         allowsMultipleSelection: true,
         quality: 1,
         preferSystemPhotoPicker: true,
-      });
+      } as unknown as ImagePicker.ImagePickerOptions);
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const optimizedUris: string[] = [];
         for (const asset of result.assets) {

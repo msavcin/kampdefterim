@@ -67,7 +67,7 @@ export default function RootLayout() {
       try {
         const logged = await isLoggedIn();
         const isAuthRoute = segments[0] === '(auth)';
-        const isLogoutRoute = segments[1] === 'logout';
+        const isLogoutRoute = (segments as string[])[1] === 'logout';
         if (!logged && !isAuthRoute) {
           setShouldRedirect('login');
         } else if (logged && isAuthRoute && !isLogoutRoute) {
