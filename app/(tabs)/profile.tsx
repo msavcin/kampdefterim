@@ -55,6 +55,7 @@ import { eventBus } from '@/lib/eventBus';
 import { View, Text, Image, Button, StyleSheet, ActivityIndicator, ScrollView, Switch, Alert, TouchableOpacity, Modal, TextInput, BackHandler, Linking, Platform, ViewStyle, TextStyle, ImageStyle } from 'react-native';
 import { Friend } from '../../types/friend';
 import FriendAvatar from '../../components/FriendAvatar';
+import AIReviewSettingsPanel from '../../components/AIReviewSettingsPanel';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -521,7 +522,6 @@ export default function ProfileScreen(props: any) {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
-        preferSystemPhotoPicker: true,
       });
       if (result.canceled) return;
       setAvatarUploading(true);
@@ -1936,7 +1936,17 @@ export default function ProfileScreen(props: any) {
           )}
         </View>
 
-
+        {/* AI Review Settings - Sadece Superadmin */}
+        {user && user.role === 'superadmin' && (
+          <View style={[styles.menuContainer, { backgroundColor: colors.surface, marginTop: 16 }]}>
+            <Text style={[styles.sectionTitle, { color: colors.text, backgroundColor: colors.surfaceVariant }]}>
+              AI Değerlendirme Yönetimi
+            </Text>
+            <View style={{ padding: 16 }}>
+              <AIReviewSettingsPanel />
+            </View>
+          </View>
+        )}
 
         {/* App Info */}
         <View style={[styles.appInfoContainer, { backgroundColor: colors.surface }]}>

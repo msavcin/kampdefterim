@@ -23,7 +23,24 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
       if (__DEV__) console.warn('[apiFetch] Uyarı: API çağrısında boş token gönderilmeye çalışıldı. Kullanıcı login mi?');
     }
   }
-  let response = await fetch(input, init);
+  // Eğer `input` tam bir URL değilse, proje-wide `API_URL` ile prefixle
+  let fetchInput: RequestInfo = input;
+  try {
+    if (typeof input === 'string') {
+      const asStr = input as string;
+      if (!asStr.match(/^https?:\/\//i)) {
+        // Başında '/' ile gelen path'leri API_BASE ile birleştir
+        const path = asStr.startsWith('/') ? asStr : `/${asStr}`;
+        fetchInput = `${API_URL}${path}`;
+      }
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[apiFetch] URL prefixleme hatası', e);
+  }
+
+  if (__DEV__) console.log('[apiFetch] Fetching', fetchInput, init && { headers: init.headers, method: init.method });
+
+  let response = await fetch(fetchInput, init);
   if (response.status === 401) {
     // Token expired olabilir, refresh deneyelim
     const refreshToken = await getRefreshToken();

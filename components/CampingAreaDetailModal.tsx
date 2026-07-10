@@ -12,7 +12,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle, Share2 } from 'lucide-react-native';
+import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle, Share2, Sparkles } from 'lucide-react-native';
 import ThemedButton from './ThemedButton';
 import AIEvalButton from './AIEvalButton';
 import { getCachedImagePath } from '@/lib/imageCache';
@@ -65,6 +65,7 @@ export function prepareCampingAreaPayload(area: any) {
 // Local cache ile görsel gösteren yardımcı bileşen
 const GalleryImageWithCache = ({ img, source_id, onPress, refreshKey }: { img: string, source_id?: any, onPress?: () => void, refreshKey?: number }) => {
   const { colors, scheme } = useTheme();
+  const isDark = scheme === 'dark';
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -1226,6 +1227,59 @@ export default function CampingAreaDetailModal({
             <View style={[styles.section, { backgroundColor: colors.surface }]}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Açıklama</Text>
               <Text style={[styles.description, { color: colors.textSecondary }]}>{campingArea.description ?? ''}</Text>
+            </View>
+          )}
+
+          {/* AI Review Evaluation - Sadece owner_id boş olanlar için gösterilir */}
+          {!(campingArea as any).owner_id && (campingArea as any).ai_review_evaluation && typeof (campingArea as any).ai_review_evaluation === 'string' && (
+            <View style={[styles.section, { backgroundColor: colors.surface }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+                <View style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: colors.primary + '20',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Sparkles size={18} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                    Yorum Değerlendirmesi (AI)
+                  </Text>
+                  {(campingArea as any).ai_review_generated_at && (
+                    <Text style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>
+                      {new Date((campingArea as any).ai_review_generated_at).toLocaleDateString('tr-TR')} tarihinde oluşturuldu
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <View style={{
+                backgroundColor: scheme === 'dark' ? colors.surfaceVariant : colors.primaryLight + '15',
+                padding: 14,
+                borderRadius: 12,
+                borderLeftWidth: 3,
+                borderLeftColor: colors.primary
+              }}>
+                <Text style={[styles.description, { color: colors.textSecondary, lineHeight: 22 }]}>
+                  {(campingArea as any).ai_review_evaluation}
+                </Text>
+              </View>
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                marginTop: 8,
+                paddingTop: 8,
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+                gap: 4
+              }}>
+                <AlertTriangle size={12} color={colors.muted} />
+                <Text style={{ fontSize: 11, color: colors.muted, fontStyle: 'italic' }}>
+                  Bu değerlendirme Google Places yorumlarından AI tarafından oluşturulmuştur
+                </Text>
+              </View>
             </View>
           )}
 

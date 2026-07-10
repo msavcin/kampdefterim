@@ -26,6 +26,7 @@ import { Svg, Path } from 'react-native-svg';
 import { Modal } from 'react-native';
 import CampingAreaSearchBar from '../../components/CampingAreaSearchBar';
 import CampingAreaListView from '../../components/CampingAreaListView';
+import { Compass } from 'lucide-react-native';
 import CampingAreaFilters from '../../components/CampingAreaFilters';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 // Offline senkronizasyon ikonu react-native-svg ile
@@ -61,6 +62,7 @@ import { API_URL } from '@/lib/config';
 import { UserPlus } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import TentSetupScreen from '../../components/TentSetupScreen';
 import { on as onEvent, off as offEvent, emit as emitEvent } from '@/lib/eventBus';
 import { eventBus } from '@/lib/eventBus';
 import { Animated, Easing, AppState } from 'react-native';
@@ -1620,6 +1622,7 @@ export default function MapScreen() {
   const [selectedCampingArea, setSelectedCampingArea] = useState<CampingArea | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [fabMenuVisible, setFabMenuVisible] = useState(false);
   const [isLocationPickerMode, setIsLocationPickerMode] = useState(false);
   const [selectForPlanMode, setSelectForPlanMode] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{latitude: number, longitude: number} | null>(null);
@@ -2875,6 +2878,7 @@ export default function MapScreen() {
       lng: (area as any).longitude,
       images: coverImage ? [coverImage] : [],
       isFavorite,
+      rating: Number(area.rating) || 0,
       getAmenityIcon,
     };
   });
@@ -3226,9 +3230,12 @@ export default function MapScreen() {
             var marker${idx} = L.marker([${marker.lat}, ${marker.lng}], {
               icon: L.divIcon({
                 className: 'camping-marker',
-                html: '<div style="background: ${marker.markerColor}; color: white; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; border: 1px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${marker.markerIcon}</div>',
-                iconSize: [24, 24],
-                iconAnchor: [14, 14]
+                html: '<div style="position: relative; width: 38px; height: 38px; display:flex; align-items:center; justify-content:center;">' +
+                      '<div style="background: ${marker.markerColor}; color: white; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; border: 1px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${marker.markerIcon}</div>' +
+                      ${marker.rating && marker.rating > 0 ? `'<div style="position:absolute; top:-6px; right:-6px; background: rgba(0,0,0,0.75); color:white; font-size:10px; padding:2px 4px; border-radius:8px;">${Number(marker.rating).toFixed(1)}</div>'` : "''"} +
+                      '</div>',
+                iconSize: [38, 38],
+                iconAnchor: [19, 19]
               })
             }).addTo(map).bindPopup(\`
           <div class="custom-popup" style="display: flex; flex-direction: row; gap: 0; min-width: 320px; max-width: 380px; align-items: stretch;">
@@ -3703,6 +3710,8 @@ export default function MapScreen() {
   const handlePlanCamp = () => {
     router.push('/camp-plan');
   };
+
+  const [showTentSetup, setShowTentSetup] = useState(false);
 
   const openGoogleMapsNavigation = (latitude: number, longitude: number) => {
     const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
@@ -4353,15 +4362,20 @@ export default function MapScreen() {
           {!isLocationPickerMode && !showMapPopup && (
             <View style={styles.fabContainer} pointerEvents={isBusy ? 'none' : 'auto'}>
               {!selectForPlanMode && (
-                <TouchableOpacity
-                  style={[styles.fab, styles.fabSecondary, { backgroundColor: colors.primary }, isBusy ? { opacity: 0.45 } : {}]}
-                  onPress={() => {
-                    if (isMounted.current) setIsLocationPickerMode(true);
-                  }}
-                  disabled={isBusy}
-                >
-                  <Plus size={28} color="white" />
-                </TouchableOpacity>
+                <View style={{ alignItems: 'center' }}>
+                  <TouchableOpacity
+                    style={[styles.fab, styles.fabSecondary, { backgroundColor: colors.primary }, isBusy ? { opacity: 0.45 } : {}]}
+                    onPress={() => {
+                      if (!isMounted.current) return;
+                      setFabMenuVisible(true);
+                    }}
+                    disabled={isBusy}
+                    activeOpacity={0.85}
+                  >
+                    <Plus size={28} color="white" />
+                  </TouchableOpacity>
+                  <Text style={{ marginTop: 6, fontSize: 12, color: colors.text, fontWeight: '700' }}>Kamp Alanı Ekle</Text>
+                </View>
               )}
               <TouchableOpacity
                 style={[styles.fab, { backgroundColor: colors.primary }, isBusy ? { opacity: 0.45 } : {}]}
@@ -4372,6 +4386,35 @@ export default function MapScreen() {
               </TouchableOpacity>
             </View>
           )}
+            {/* FAB menu for add options */}
+            <Modal visible={fabMenuVisible} transparent animationType="fade" onRequestClose={() => setFabMenuVisible(false)}>
+              <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setFabMenuVisible(false)}>
+                <View style={{ position: 'absolute', right: 20, bottom: 240 }}>
+                  <View style={{ backgroundColor: colors.surface, borderRadius: 10, padding: 8, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6 }}>
+                    <TouchableOpacity
+                      style={[styles.menuItem]}
+                      onPress={() => {
+                        setFabMenuVisible(false);
+                        addCampingAreaAtCurrentLocation();
+                      }}
+                    >
+                      <LocateFixed size={18} color={colors.primary} />
+                      <Text style={{ marginLeft: 10, color: colors.text, fontWeight: '600' }}>Mevcut Konumu Ekle</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.menuItem, { marginTop: 8 }]}
+                      onPress={() => {
+                        setFabMenuVisible(false);
+                        startLocationPicker();
+                      }}
+                    >
+                      <Map size={18} color={colors.primary} />
+                      <Text style={{ marginLeft: 10, color: colors.text, fontWeight: '600' }}>Haritadan Ekle</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </Modal>
 
             {/* Camp Plan compact overlay: small back/next/close and step title under header */}
             {selectForPlanMode && (
@@ -4499,13 +4542,18 @@ export default function MapScreen() {
                   )}
                 </TouchableOpacity>
                 {!selectForPlanMode && (
-                  <TouchableOpacity 
-                    style={[styles.currentLocationButton, { backgroundColor: colors.surfaceVariant, borderColor: colors.primary }, isBusy ? { opacity: 0.6 } : {}]}
-                    onPress={addCampingAreaAtCurrentLocation}
+                  <TouchableOpacity
+                    style={[styles.currentLocationButton, { backgroundColor: '#fef3c7', borderColor: '#f59e0b' }, isBusy ? { opacity: 0.6 } : {}]}
+                    onPress={() => setShowTentSetup(true)}
                     disabled={isBusy}
                   >
-                    <Plus size={14} color={colors.primary} />
-                    <Text style={[styles.currentLocationButtonText, { color: colors.primary }]}>Mevcut Konuma Ekle</Text>
+                    <Compass size={14} color="#f59e0b" />
+                    <Text
+                      style={[styles.currentLocationButtonText, { color: '#f59e0b' }]}
+                      numberOfLines={2}
+                    >
+                      Çadır / Karavan Yönü{`\n`} Neresi Olmalı?
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -4652,6 +4700,17 @@ export default function MapScreen() {
         }}
         currentUserId={user?.id}
       />
+      {/* Tent Setup Modal (opened from info panel button) */}
+      <Modal visible={showTentSetup} animationType="slide" onRequestClose={() => setShowTentSetup(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', padding: 12 }}>
+            <TouchableOpacity onPress={() => setShowTentSetup(false)} style={{ padding: 8 }}>
+              <X size={24} color={colors.muted} />
+            </TouchableOpacity>
+          </View>
+          <TentSetupScreen />
+        </SafeAreaView>
+      </Modal>
       
       {/* Location Permission Modal - HelpModal kapalıyken render et (view tag çakışmasını önlemek için) */}
       {!helpVisible && (
@@ -4861,7 +4920,7 @@ const styles = StyleSheet.create({
   mapMoveButtonContainer: {
     position: 'absolute',
     bottom: 168,
-    right: 85,
+    right: 120,
     alignItems: 'flex-end',
     zIndex: 200,
   },
@@ -4975,6 +5034,7 @@ const styles = StyleSheet.create({
     bottom: 180,
     flexDirection: 'column',
     gap: 12,
+    alignItems: 'center',
   },
   fab: {
     width: 56,
@@ -5071,6 +5131,14 @@ const styles = StyleSheet.create({
   currentLocationButtonText: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    minWidth: 180,
   },
   locationPermissionContainer: {
     position: 'absolute',

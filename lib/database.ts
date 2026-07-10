@@ -46,6 +46,11 @@ export interface CampingArea {
   distance_km?: number;
   friend_user_ids?: string[];
   province?: any;
+  ai_review_evaluation?: string;
+  ai_review_generated_at?: string;
+  ai_review_enabled?: boolean;
+  google_place_id?: string;
+  last_google_sync_at?: string;
 }
 
 export interface Favorite {
@@ -1058,12 +1063,14 @@ export class DatabaseManager {
             name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
             capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
             social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
-            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?, province = ?
+            source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?, province = ?,
+            ai_review_evaluation = ?, ai_review_generated_at = ?, ai_review_enabled = ?, google_place_id = ?, last_google_sync_at = ?
            WHERE external_id = ?`;
         const insertSql = `INSERT INTO camping_areas (
             name, latitude, longitude, type, description, website, phone, opening_hours, capacity, fee, status, rating, review_count, price_range,
-            facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images, province, friend_user_ids, community_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images, province, friend_user_ids, community_id,
+            ai_review_evaluation, ai_review_generated_at, ai_review_enabled, google_place_id, last_google_sync_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
         const updateStmt = await this._withDbRetry(() => this.db!.prepareAsync(updateSql), 'fetchAndStore:updateStmt');
         const insertStmt = await this._withDbRetry(() => this.db!.prepareAsync(insertSql), 'fetchAndStore:insertStmt');
@@ -1186,6 +1193,11 @@ export class DatabaseManager {
                 friendUserIdsStr,
                 communityIdVal,
                 provinceStr,
+                item.ai_review_evaluation ?? null,
+                item.ai_review_generated_at ?? null,
+                item.ai_review_enabled !== undefined ? (item.ai_review_enabled ? 1 : 0) : null,
+                item.google_place_id ?? null,
+                item.last_google_sync_at ?? null,
                 item.external_id ?? ''
               ]
             );
@@ -1242,6 +1254,11 @@ export class DatabaseManager {
                     friendUserIdsStr,
                     communityIdVal,
                     provinceStr,
+                    item.ai_review_evaluation ?? null,
+                    item.ai_review_generated_at ?? null,
+                    item.ai_review_enabled !== undefined ? (item.ai_review_enabled ? 1 : 0) : null,
+                    item.google_place_id ?? null,
+                    item.last_google_sync_at ?? null,
                     item.external_id ?? ''
                   ]
                 );
@@ -1292,6 +1309,11 @@ export class DatabaseManager {
                       friendUserIdsStr,
                       communityIdVal,
                       provinceStr,
+                      item.ai_review_evaluation ?? null,
+                      item.ai_review_generated_at ?? null,
+                      item.ai_review_enabled !== undefined ? (item.ai_review_enabled ? 1 : 0) : null,
+                      item.google_place_id ?? null,
+                      item.last_google_sync_at ?? null,
                       item.external_id ?? ''
                     ]
                   );
@@ -1332,7 +1354,12 @@ export class DatabaseManager {
                 imagesStr,
                 provinceStr,
                 friendUserIdsStr ?? '[]',
-                communityIdVal
+                communityIdVal,
+                item.ai_review_evaluation ?? null,
+                item.ai_review_generated_at ?? null,
+                item.ai_review_enabled !== undefined ? (item.ai_review_enabled ? 1 : 0) : null,
+                item.google_place_id ?? null,
+                item.last_google_sync_at ?? null
               ]
             );
             if (item.source_id === 0 || item.source_id === '0') {
@@ -1759,6 +1786,22 @@ export class DatabaseManager {
     // Migration: province kolonu yoksa ekle
     if (!tableInfo2.some((col: any) => col.name === 'province')) {
       await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN province TEXT;");
+    }
+    // Migration: AI review kolonları yoksa ekle
+    if (!tableInfo2.some((col: any) => col.name === 'ai_review_evaluation')) {
+      await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN ai_review_evaluation TEXT;");
+    }
+    if (!tableInfo2.some((col: any) => col.name === 'ai_review_generated_at')) {
+      await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN ai_review_generated_at TEXT;");
+    }
+    if (!tableInfo2.some((col: any) => col.name === 'ai_review_enabled')) {
+      await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN ai_review_enabled INTEGER DEFAULT 1;");
+    }
+    if (!tableInfo2.some((col: any) => col.name === 'google_place_id')) {
+      await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN google_place_id TEXT;");
+    }
+    if (!tableInfo2.some((col: any) => col.name === 'last_google_sync_at')) {
+      await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN last_google_sync_at TEXT;");
     }
     await this.db.execAsync(`
       CREATE INDEX IF NOT EXISTS idx_camping_areas_location ON camping_areas(latitude, longitude);

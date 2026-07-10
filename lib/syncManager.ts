@@ -159,7 +159,144 @@ import { setLargeItemAsync, getLargeItemAsync } from './largeStorage';
 import { getDatabase } from './database';
 import { uploadCampgroundImage } from './campgroundImageApi';
 import { updateCampingAreaOnServer, createCampingAreaOnServer, sanitizeCampingAreaData } from './campingAreaApi';
+import { getRatingsSummary, postRatingForCampground, deleteMyRating, patchRating } from './ratingApi';
+import { evaluateCampingAreaReviews } from './aiReviewApi';
 
+// Yorum değerlendirmesi senkronizasyonu
+export async function syncRatings(): Promise<boolean> {
+  const db = getDatabase();
+  try {
+    // Pending rating değişikliklerini al
+    const changes = await db.getPendingChanges();
+    const ratingChanges = changes.filter((ch: any) => 
+      ['rating_create', 'rating_update', 'rating_delete'].includes(ch.type)
+    );
+
+    if (ratingChanges.length === 0) {
+      if (__DEV__) console.log('[syncRatings] Senkronize edilecek rating değişikliği yok');
+      return true;
+    }
+
+    // AI review tetiklenecek kamp alanlarını topla
+    const campgroundsToEvaluate = new Set<number>();
+
+    // Her bir rating değişikliğini işle
+    for (const change of ratingChanges) {
+      const ch = change as any;
+      try {
+        const data = typeof ch.data === 'string' ? JSON.parse(ch.data) : ch.data;
+        const campgroundId = data.campground_id || ch.campground_id;
+
+        if (!campgroundId) {
+          console.warn('[syncRatings] campground_id bulunamadı, atlanıyor:', ch);
+          await db.markPendingChangeSynced(ch.id);
+          continue;
+        }
+
+        if (ch.type === 'rating_create' || ch.type === 'rating_update') {
+          // Yorum ekle veya güncelle
+          const payload = {
+            rating: data.rating,
+            comment: data.comment,
+            anon_name: data.anon_name,
+            hide_user: data.hide_user
+          };
+
+          if (ch.type === 'rating_create') {
+            await postRatingForCampground(campgroundId, payload);
+          } else if (data.rating_id) {
+            await patchRating(campgroundId, data.rating_id, payload);
+          }
+
+          // AI review için işaretle
+          campgroundsToEvaluate.add(Number(campgroundId));
+        } else if (ch.type === 'rating_delete') {
+          // Yorumu sil
+          await deleteMyRating(campgroundId);
+          
+          // AI review için işaretle
+          campgroundsToEvaluate.add(Number(campgroundId));
+        }
+
+        // Başarılı işlem sonrası pending'i işaretle
+        await db.markPendingChangeSynced(ch.id);
+
+        // Güncellenmiş rating bilgilerini çek ve local database'i güncelle
+        try {
+          const summary = await getRatingsSummary(campgroundId);
+          if (summary) {
+            const area = await db.getCampingAreaById(Number(campgroundId));
+            if (area) {
+              await db.insertOrUpdateCampingArea({
+                ...area,
+                rating: summary.average_rating || summary.avg_rating || area.rating,
+                review_count: summary.total_count || summary.count || area.review_count
+              });
+            }
+          }
+        } catch (summaryErr) {
+          console.warn('[syncRatings] Rating summary alınamadı:', summaryErr);
+        }
+
+        if (__DEV__) console.log(`[syncRatings] ✅ Rating değişikliği senkronize edildi: ${ch.type}`);
+      } catch (err) {
+        console.error('[syncRatings] Rating değişikliği işlenirken hata:', err, ch);
+        await db.markPendingChangeError(ch.id);
+      }
+    }
+
+    // Yorumları değişen kamp alanları için AI review tetikle
+    if (campgroundsToEvaluate.size > 0) {
+      if (__DEV__) console.log(`[syncRatings] 🤖 AI review tetikleniyor: ${campgroundsToEvaluate.size} kamp alanı`);
+      
+      for (const campgroundId of campgroundsToEvaluate) {
+        try {
+          const aiResult = await evaluateCampingAreaReviews(campgroundId, false);
+          
+          if (aiResult.success && aiResult.evaluation) {
+            // AI review sonucunu local database'e kaydet
+            const area = await db.getCampingAreaById(campgroundId);
+            if (area) {
+              await db.insertOrUpdateCampingArea({
+                ...area,
+                ai_review_evaluation: aiResult.evaluation.ai_review_evaluation,
+                ai_review_generated_at: aiResult.evaluation.ai_review_generated_at,
+                // Eğer AI yeni bilgiler sağladıysa onları da güncelle
+                rating: aiResult.evaluation.updated_fields?.rating || area.rating,
+                review_count: aiResult.evaluation.updated_fields?.review_count || area.review_count,
+                facilities: aiResult.evaluation.updated_fields?.facilities || area.facilities,
+                price_range: aiResult.evaluation.updated_fields?.price_range || area.price_range,
+                website: aiResult.evaluation.updated_fields?.website || area.website,
+                phone: aiResult.evaluation.updated_fields?.phone || area.phone
+              });
+              
+              if (__DEV__) console.log(`[syncRatings] 🤖 AI review güncellendi: ${campgroundId}`);
+            }
+          } else if (aiResult.cooldown_remaining) {
+            if (__DEV__) console.log(`[syncRatings] ⏳ AI review cooldown: ${campgroundId} (${aiResult.cooldown_remaining}s kaldı)`);
+          }
+        } catch (aiErr) {
+          // AI review hatası senkronizasyonu engellemez
+          console.warn(`[syncRatings] AI review hatası (${campgroundId}):`, aiErr);
+        }
+      }
+    }
+
+    return true;
+  } catch (error) {
+    if (error instanceof Error) {
+      const errMsg = error.message || '';
+      if (errMsg.includes('Network') || errMsg.includes('fetch')) {
+        console.warn('[syncRatings] 🌐 Ağ bağlantısı hatası:', errMsg);
+      } else {
+        console.error('[syncRatings] ❌ Rating değişiklikleri senkronize edilemedi:', errMsg);
+      }
+    } else {
+      console.error('[syncRatings] ❌ Rating değişiklikleri senkronize edilemedi:', error);
+    }
+    return false;
+  }
+}
 
 // Checklist senkronizasyonu için örnek fonksiyon (geliştirilebilir)
 async function syncPendingChecklists() {
@@ -325,9 +462,11 @@ export async function syncAll({ userId, onProgress }: { userId?: number; onProgr
   await syncPendingChecklists();
   // 3. Diğer değişiklikler
   await syncPendingChanges(userId, onProgress);
-  // 4. Duyuru delta sync
+  // 4. Yorum değerlendirmeleri
+  await syncRatings();
+  // 5. Duyuru delta sync
   await syncAnnouncements();
-  // 5. Kamp alanı delta sync (userId ile birlikte arkadaş erişim temizliği)
+  // 6. Kamp alanı delta sync (userId ile birlikte arkadaş erişim temizliği)
   await syncCampingAreas(userId !== undefined ? String(userId) : undefined);
 }
 
