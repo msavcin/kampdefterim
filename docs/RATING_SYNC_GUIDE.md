@@ -116,14 +116,24 @@ Rating senkronizasyonu tamamlandıktan sonra:
 1. Yorumları değişen kamp alanları belirlenir (Set yapısı ile)
 2. Her kamp alanı için `evaluateCampingAreaReviews()` çağrılır
 3. AI review başarılı olursa:
-   - `ai_review_evaluation`: AI'nın ürettiği değerlendirme metni
-   - `ai_review_generated_at`: Değerlendirme zamanı
-   - `updated_fields`: AI'nın tespit ettiği güncel bilgiler (rating, facilities, price_range, vb.)
+  - `ai_review_evaluation`: AI'nın ürettiği değerlendirme metni. Bu metin kısa bir özet paragrafı ve ayrı başlıklar halinde "Artılar:" ile "Eksiler:" bölümünü içerir (her biri madde listesi şeklinde).
+  - `ai_review_generated_at`: Değerlendirme zamanı
+  - `updated_fields`: AI'nın tespit ettiği güncel bilgiler (rating, facilities, price_range, vb.)
 4. Sonuçlar local database'e kaydedilir
 5. AI review hataları senkronizasyonu engellemez (sadece uyarı loglanır)
 6. Cooldown durumunda (6 ay) AI review atlanır
 
+⚠️ **Google Places API Kısıtlaması**: Backend, Google Places API'den maksimum 5 örnek yorum alır (API kısıtlaması). Ancak `user_ratings_total` ile toplam yorum sayısı alınır ve AI değerlendirmesine dahil edilir. AI, bu 5 örnek yorumu analiz eder ve toplam yorum sayısını da dikkate alarak değerlendirme üretir.
+
+⚠️ **Delta Sync için Kritik**: Backend'de AI değerlendirmesi yapılırken mutlaka `updated_at = NOW()` alanı güncellenmelidir. Aksi takdirde client tarafındaki delta sync (`fetchAndStoreCampingAreasFromAPI` ile `updated_after` parametresi) yeni değerlendirmeyi alamaz ve detay sayfasında güncel bilgiler gösterilmez.
+
 **Not**: AI review evaluation 6 aylık cooldown periyoduna sahiptir. Bu süre dolmadan aynı kamp alanı için tekrar AI review yapılmaz (superadmin force parametresi hariç).
+
+Ek davranış: Yorum sayısı az olduğu için sunucu generic bir bilgilendirme döndürürse veya local review sayısı düşükse, uygulama önce `force=true` ile tekrar değerlendirme isteyecektir. Eğer bu da anlamlı bir değerlendirme döndürmezse, uygulama değerlendirme metnini kaydeder ve sonuna şu notu ekler:
+
+`Not: Bu kamp alanı için yalnızca X kullanıcı yorumu bulunduğu için değerlendirme sınırlı olabilir.`
+
+Bu sayede az yorum olsa bile kullanıcıya bir değerlendirme gösterilir ve aynı zamanda yorum sayısının az olduğu açıkça belirtilmiş olur.
 
 ## Pending Changes Tipleri
 
@@ -358,6 +368,19 @@ Rating işlemleri için kullanılan backend endpoints:
 - `POST /camping-areas/evaluate-reviews` - AI review evaluation tetikle (yorum değişikliklerinde otomatik)
 
 ## Sonuç
+
+### AI review: Artılar / Eksiler gösterimi
+
+```typescript
+import { getParsedCampingAreaAIReview } from '@/lib/aiReviewApi';
+
+const parsed = await getParsedCampingAreaAIReview(123);
+if (parsed) {
+  console.log(parsed.summary);
+  console.log('Artılar:', parsed.pros);
+  console.log('Eksiler:', parsed.cons);
+}
+```
 
 Bu senkronizasyon sistemi ile:
 

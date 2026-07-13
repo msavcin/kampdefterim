@@ -26,6 +26,52 @@ export interface CampingAreaReviewEvaluation {
   };
 }
 
+export interface ParsedAIReview {
+  summary: string;
+  pros: string[];
+  cons: string[];
+  raw: string;
+}
+
+/**
+ * Basit bir parser: `ai_review_evaluation` metnini ayırır.
+ * Beklenen format: kısa özet, sonra "Artılar:" ve "Eksiler:" başlıkları altında madde listeleri.
+ */
+export function parseAIReviewText(text: string | null | undefined): ParsedAIReview {
+  const raw = typeof text === 'string' ? text.trim() : '';
+
+  // Bölümleri yakalamaya çalış
+  const artilarMatch = raw.match(/(?:Artılar|Avantajlar)\s*:\s*([\s\S]*?)(?=(?:\n(?:Eksiler|Dezavantajlar)\s*:)|$)/i);
+  const eksilerMatch = raw.match(/(?:Eksiler|Dezavantajlar)\s*:\s*([\s\S]*?)(?=(?:\n(?:Not:|Not)|$))/i);
+
+  // Özet: ilk başlıktan önceki metin
+  let summary = raw;
+  const firstHeadingIndex = raw.search(/(?:Artılar|Avantajlar|Eksiler|Dezavantajlar)\s*:/i);
+  if (firstHeadingIndex !== -1) {
+    summary = raw.slice(0, firstHeadingIndex).trim();
+  }
+
+  const parseBullets = (block: string | undefined): string[] => {
+    if (!block) return [];
+    return block
+      .split(/\r?\n/) // satırlara böl
+      .map(l => l.trim())
+      .filter(l => l.length > 0)
+      .map(l => l.replace(/^[\-\*•\s\d\.]+/, '').trim())
+      .filter(l => l.length > 0);
+  };
+
+  const pros = parseBullets(artilarMatch ? artilarMatch[1] : undefined);
+  const cons = parseBullets(eksilerMatch ? eksilerMatch[1] : undefined);
+
+  return {
+    summary: summary || '',
+    pros,
+    cons,
+    raw
+  };
+}
+
 export interface EvaluateReviewsRequest {
   campground_id?: number; // Belirli bir alan için
   force?: boolean; // Cooldown'u bypass et (sadece superadmin)
@@ -67,16 +113,37 @@ export async function evaluateCampingAreaReviews(
       })
     });
 
-    const data = await response.json();
-
+    // Önce response durumunu kontrol et
     if (!response.ok) {
+      // Hata durumunda response body'yi oku (JSON veya text)
+      let errorMessage = 'Değerlendirme yapılamadı';
+      let cooldownRemaining: string | undefined;
+      
+      try {
+        const contentType = response.headers.get('content-type');
+        if (contentType?.includes('application/json')) {
+          const data = await response.json();
+          errorMessage = data.error || errorMessage;
+          cooldownRemaining = data.cooldown_remaining;
+        } else {
+          const text = await response.text();
+          errorMessage = text || `HTTP ${response.status}`;
+          if (__DEV__) console.warn('[AIReview] Non-JSON error response:', text);
+        }
+      } catch (parseError) {
+        if (__DEV__) console.warn('[AIReview] Error parsing response:', parseError);
+        errorMessage = `HTTP ${response.status}`;
+      }
+
       return {
         success: false,
-        error: data.error || 'Değerlendirme yapılamadı',
-        cooldown_remaining: data.cooldown_remaining
+        error: errorMessage,
+        cooldown_remaining: cooldownRemaining
       };
     }
 
+    // Başarılı durumda JSON parse et
+    const data = await response.json();
     return {
       success: true,
       evaluation: data.evaluation
@@ -107,9 +174,26 @@ export async function batchEvaluateCampingAreaReviews(
       body: JSON.stringify(options || {})
     });
 
-    const data = await response.json();
-
+    // Önce response durumunu kontrol et
     if (!response.ok) {
+      let errorMessage = 'Toplu değerlendirme başarısız';
+      
+      try {
+        const contentType = response.headers.get('content-type');
+        if (contentType?.includes('application/json')) {
+          const data = await response.json();
+          errorMessage = data.error || errorMessage;
+        } else {
+          const text = await response.text();
+          errorMessage = text || `HTTP ${response.status}`;
+          if (__DEV__) console.warn('[AIReview] Non-JSON batch error response:', text);
+        }
+      } catch (parseError) {
+        if (__DEV__) console.warn('[AIReview] Error parsing batch response:', parseError);
+        errorMessage = `HTTP ${response.status}`;
+      }
+
+      console.error('[AIReview] Batch evaluation failed:', errorMessage);
       return {
         success: false,
         processed: 0,
@@ -119,6 +203,8 @@ export async function batchEvaluateCampingAreaReviews(
       };
     }
 
+    // Başarılı durumda JSON parse et
+    const data = await response.json();
     return data;
   } catch (error) {
     console.error('[AIReview] batchEvaluateCampingAreaReviews hatası:', error);
@@ -145,7 +231,11 @@ export async function getCampingAreaAIReview(
 
     if (!response.ok) {
       if (response.status === 404) return null;
-      throw new Error(`HTTP ${response.status}`);
+      
+      // Hata durumunda detaylı log
+      const bodyText = await response.text().catch(() => null);
+      if (__DEV__) console.warn(`[AIReview] getCampingAreaAIReview HTTP ${response.status}:`, bodyText || response.statusText);
+      return null;
     }
 
     const data = await response.json();
@@ -154,6 +244,17 @@ export async function getCampingAreaAIReview(
     console.error('[AIReview] getCampingAreaAIReview hatası:', error);
     return null;
   }
+}
+
+/**
+ * Sunucudan AI review çekip `parseAIReviewText` ile ayrıştırılmış sonucu döndürür.
+ */
+export async function getParsedCampingAreaAIReview(
+  campgroundId: number
+): Promise<ParsedAIReview | null> {
+  const review = await getCampingAreaAIReview(campgroundId);
+  if (!review) return null;
+  return parseAIReviewText(review.ai_review_evaluation);
 }
 
 /**

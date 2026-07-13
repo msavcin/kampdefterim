@@ -205,6 +205,8 @@ Koordinat ve isimle place arar
 
 ### AI Review Endpoint'leri
 
+⚠️ **Google Places API Kısıtlaması**: Google Places API'nin `reviews` field'ı maksimum 5 yorum döndürür. `user_ratings_total` field'ı toplam yorum sayısını verir. AI değerlendirmesi bu 5 örnek yoruma dayanarak yapılır ancak toplam yorum sayısı da dikkate alınır.
+
 #### 7. POST /camping-areas/evaluate-reviews
 Tek bir kamp alanı için AI değerlendirmesi yapar
 
@@ -323,6 +325,7 @@ router.post('/camping-areas/evaluate-reviews', async (req, res) => {
   const aiEvaluation = await evaluateWithAI(placeDetails.reviews);
   
   // 7. Veritabanını güncelle
+  // ÖNEMLİ: updated_at alanını mutlaka güncelleyin ki delta sync çalışsın!
   await db.query(`
     UPDATE campgrounds 
     SET 
@@ -333,7 +336,8 @@ router.post('/camping-areas/evaluate-reviews', async (req, res) => {
       rating = $3,
       review_count = $4,
       website = COALESCE($5, website),
-      phone = COALESCE($6, phone)
+      phone = COALESCE($6, phone),
+      updated_at = NOW()
     WHERE id = $7
   `, [
     aiEvaluation,

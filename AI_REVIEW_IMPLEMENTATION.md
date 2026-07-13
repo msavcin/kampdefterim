@@ -19,6 +19,8 @@ Bu geliştirme, `owner_id` boş olan kamp alanları için Google Places yorumlar
 - Yorumlar, rating, review_count gibi bilgiler güncellenir
 - Olanaklar, fiyat aralığı, telefon ve website bilgileri senkronize edilir
 
+⚠️ **API Kısıtlaması**: Google Places API'nin `reviews` field'ı maksimum 5 yorum döndürür. `user_ratings_total` field'ı toplam yorum sayısını verir. AI değerlendirmesi bu 5 örnek yoruma dayanarak yapılır ancak toplam yorum sayısı da prompt'a dahil edilir.
+
 ### 3. Superadmin Yönetim Paneli
 - Profil sayfasında "AI Değerlendirme Yönetimi" sekmesi
 - İstatistikler (toplam değerlendirme, son 24 saat, bekleyen alanlar)
@@ -82,6 +84,8 @@ CREATE TABLE admin_settings (
 - `GET /camping-areas/eligible-for-review` - Değerlendirilebilir alanları listeler
 - `DELETE /camping-areas/:id/ai-review` - Değerlendirmeyi siler (superadmin)
 - `PUT /camping-areas/:id/ai-review-toggle` - AI review'u aktif/pasif yapar (superadmin)
+
+⚠️ **Kritik**: Tüm AI review işlemlerinde (evaluate, delete, toggle) `updated_at = NOW()` mutlaka güncellenmeli. Aksi takdirde mobil app'teki delta sync yeni değerlendirmeleri alamaz.
 
 ## 📱 Frontend Modülleri
 

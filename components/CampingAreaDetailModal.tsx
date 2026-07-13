@@ -19,6 +19,7 @@ import { getCachedImagePath } from '@/lib/imageCache';
 import { CampingArea, getDatabase } from '@/lib/database';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { deleteCampingAreaSmart } from '@/lib/syncManager';
+import { parseAIReviewText } from '@/lib/aiReviewApi';
 // Arkadaş tipini tanımla
 // API /friends?user_id=X endpoint'i { id, name, email, avatar_url } formatında döner
 // (types/friend.ts ile uyumlu). user_id de olabilir — her iki alanı destekliyoruz.
@@ -513,6 +514,10 @@ export default function CampingAreaDetailModal({
   const [userQuickRating, setUserQuickRating] = useState<number | null>(null);
   const [ratingFormLoading, setRatingFormLoading] = useState(false);
   const [ratingFormDefaults, setRatingFormDefaults] = useState<{ rating?: number; comment?: string; anon_name?: string } | null>(null);
+
+  // AI review metnini parse et (summary, pros, cons)
+  const rawAIText = (campingArea as any)?.ai_review_evaluation;
+  const parsedAIReview = parseAIReviewText(rawAIText);
 
   
 
@@ -1262,9 +1267,29 @@ export default function CampingAreaDetailModal({
                 borderLeftWidth: 3,
                 borderLeftColor: colors.primary
               }}>
-                <Text style={[styles.description, { color: colors.textSecondary, lineHeight: 22 }]}>
-                  {(campingArea as any).ai_review_evaluation}
-                </Text>
+                {parsedAIReview?.summary ? (
+                  <Text style={[styles.description, { color: colors.textSecondary, lineHeight: 22 }]}>
+                    {parsedAIReview.summary}
+                  </Text>
+                ) : null}
+
+                {parsedAIReview?.pros && parsedAIReview.pros.length > 0 && (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={{ fontWeight: '600', color: colors.text }}>Artılar</Text>
+                    {parsedAIReview.pros.map((p, i) => (
+                      <Text key={"pro_" + i} style={{ color: colors.textSecondary, marginTop: 4, lineHeight: 20 }}>{'\u2022'} {p}</Text>
+                    ))}
+                  </View>
+                )}
+
+                {parsedAIReview?.cons && parsedAIReview.cons.length > 0 && (
+                  <View style={{ marginTop: 8 }}>
+                    <Text style={{ fontWeight: '600', color: colors.text }}>Eksiler</Text>
+                    {parsedAIReview.cons.map((c, i) => (
+                      <Text key={"con_" + i} style={{ color: colors.textSecondary, marginTop: 4, lineHeight: 20 }}>{'\u2022'} {c}</Text>
+                    ))}
+                  </View>
+                )}
               </View>
               <View style={{
                 flexDirection: 'row',

@@ -359,6 +359,7 @@ router.post('/camping-areas/evaluate-reviews', async (req, res) => {
     }
 
     // Google Place detaylarını al
+    // NOT: Google Places API reviews field'ı maksimum 5 yorum döndürür
     const placeResponse = await googleMapsClient.placeDetails({
       params: {
         place_id: placeId,
@@ -366,6 +367,8 @@ router.post('/camping-areas/evaluate-reviews', async (req, res) => {
           'reviews', 'rating', 'user_ratings_total', 'website',
           'formatted_phone_number', 'price_level', 'types'
         ],
+        language: 'tr', // Türkçe yorumları önceliklendir
+        reviews_sort: 'most_relevant', // En alakalı yorumları getir
         key: process.env.GOOGLE_PLACES_API_KEY
       }
     });
@@ -373,35 +376,42 @@ router.post('/camping-areas/evaluate-reviews', async (req, res) => {
     const placeDetails = placeResponse.data.result;
 
     // Yorumları özetle
+    // NOT: Google Places API maksimum 5 yorum döndürür
+    const actualReviewCount = placeDetails.user_ratings_total || 0;
     let reviewSummary = 'Bu kamp alanı için Google Places üzerinde henüz yorum bulunmuyor.';
     
     if (placeDetails.reviews && placeDetails.reviews.length > 0) {
-      reviewSummary = placeDetails.reviews
-        .map((r, i) => `[Yorum ${i + 1}] ${r.author_name} (${r.rating}/5):\n${r.text}`)
+      const sampleSize = placeDetails.reviews.length;
+      reviewSummary = `Google Places'te toplam ${actualReviewCount} yorum bulunmaktadır. Aşağıda API'den alınan ${sampleSize} örnek yorum gösterilmektedir:\n\n`;
+      reviewSummary += placeDetails.reviews
+        .map((r, i) => `[Yorum ${i + 1}] ${r.author_name} (${r.rating}/5):\n${r.text}\n(Yayınlanma: ${r.relative_time_description || 'Bilinmiyor'})`)
         .join('\n\n');
     }
 
     // AI ile değerlendir (mevcut sistem kullanılır)
     // Bu kısım mevcut AI evaluation sistemine uyarlanmalı
+    const reviewCount = placeDetails.user_ratings_total || 0;
     const aiPrompt = `
-Aşağıdaki kamp alanı hakkında Google Places yorumlarını analiz ederek, potansiyel kampçılar için özet bir değerlendirme metni oluştur.
+  Aşağıdaki kamp alanı hakkında Google Places yorumlarını analiz ederek, potansiyel kampçılar için kısa ve yapılandırılmış bir değerlendirme oluşturun.
 
-Kamp Alanı: ${campground.name}
-Konum: ${campground.formatted_address || `${campground.latitude}, ${campground.longitude}`}
+  Kamp Alanı: ${campground.name}
+  Konum: ${campground.formatted_address || `${campground.latitude}, ${campground.longitude}`}
 
-Google Places Yorumları:
-${reviewSummary}
+  ÖNEMLI: Google Places API kısıtlaması nedeniyle aşağıda yalnızca ${placeDetails.reviews?.length || 0} örnek yorum gösterilmektedir.
+  Ancak toplam ${reviewCount} kullanıcı yorumu bulunmaktadır.
+  Değerlendirmenizi sadece bu örnek yorumlara dayandırın, ancak toplam yorum sayısını da dikkate alın.
 
-Lütfen şu konulara odaklan:
-- Genel izlenim ve atmosfer
-- Temizlik ve bakım durumu
-- Personel ve hizmet kalitesi
-- Olanaklar ve imkanlar
-- Avantajlar ve dezavantajlar
-- Hangi tip kampçılar için uygun olduğu
+  Google Places Yorumları:
+  ${reviewSummary}
 
-Değerlendirmeyi 2-3 paragrafta, samimi ve bilgilendirici bir dilde yaz.
-`;
+  Lütfen çıktıyı şu formatta üretin (metin olarak):
+  1) Kısa özet paragraf (1-2 cümle). Toplam yorum sayısını ve genel dağılımı belirtin.
+  2) "Artılar:" başlığı altında madde işaretli kısa cümleler (maks. 5 madde).
+  3) "Eksiler:" başlığı altında madde işaretli kısa cümleler (maks. 5 madde).
+  4) Son satıra şu notu ekleyin: "Not: Bu değerlendirme ${placeDetails.reviews?.length || 0} örnek yoruma dayanmaktadır (toplam ${reviewCount} yorum)."
+
+  Madde işaretleri kısa ve doğrudan olsun; kullanıcı odaklı, yardımcı bir dil kullanın.
+  `;
 
     // Mevcut AI service'i kullan (örnek)
     // const aiEvaluation = await evaluateWithAI(aiPrompt);
@@ -434,7 +444,8 @@ Değerlendirmeyi 2-3 paragrafta, samimi ve bilgilendirici bir dilde yaz.
         review_count = COALESCE($6, review_count),
         website = COALESCE($7, website),
         phone = COALESCE($8, phone),
-        price_range = COALESCE($9, price_range)
+        price_range = COALESCE($9, price_range),
+        updated_at = NOW()
       WHERE id = $10`,
       [
         updateData.ai_review_evaluation,
@@ -638,7 +649,8 @@ router.delete('/camping-areas/:id/ai-review', async (req, res) => {
     await req.db.query(
       `UPDATE campgrounds 
        SET ai_review_evaluation = NULL,
-           ai_review_generated_at = NULL
+           ai_review_generated_at = NULL,
+           updated_at = NOW()
        WHERE id = $1`,
       [id]
     );
@@ -664,7 +676,7 @@ router.put('/camping-areas/:id/ai-review-toggle', async (req, res) => {
     const { enabled } = req.body;
 
     await req.db.query(
-      `UPDATE campgrounds SET ai_review_enabled = $1 WHERE id = $2`,
+      `UPDATE campgrounds SET ai_review_enabled = $1, updated_at = NOW() WHERE id = $2`,
       [enabled, id]
     );
 
