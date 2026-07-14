@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ScrollView,
   Animated,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -87,6 +88,15 @@ export default function GuideWifiScreen() {
   const isFirst = currentStep === 0;
   const isLast = currentStep === STEPS.length - 1;
 
+  useEffect(() => {
+    const onBack = () => {
+      router.replace('/profile');
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [router]);
+
   const animateTransition = (callback: () => void) => {
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
@@ -118,7 +128,7 @@ export default function GuideWifiScreen() {
           <Wifi size={20} color={C.wifi} />
           <Text style={[styles.topBarTitle, { color: colors.text }]}>WiFi Bağlantı Rehberi</Text>
         </View>
-        <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity style={styles.closeBtn} onPress={() => router.replace('/profile')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <X size={22} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
@@ -187,7 +197,7 @@ export default function GuideWifiScreen() {
         </View>
 
         {!isLast && (
-          <TouchableOpacity style={styles.skipBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.skipBtn} onPress={() => router.replace('/profile')}>
             <Text style={[styles.skipBtnText, { color: colors.muted }]}>Rehberi Kapat</Text>
           </TouchableOpacity>
         )}

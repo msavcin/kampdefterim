@@ -83,6 +83,17 @@ import type { CampingArea } from '@/lib/database';
 import { useTheme } from '@/components/ThemeProvider';
 import { Alert, ToastAndroid, Platform } from 'react-native';
 import { getCachedTile, cacheTile, precacheTilesForRegion, precacheRegionWithRadius } from '@/lib/mapTileCache';
+import {
+  buildCampingMarkerHtml,
+  buildUserLocationHtml,
+  CAMPING_MARKER_ICON_SIZE,
+  CAMPING_MARKER_ICON_ANCHOR,
+} from '@/lib/mapMarkerHtml';
+import {
+  buildMapPopupTheme,
+  popupInlineStyles,
+} from '@/lib/mapPopupTheme';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -2819,6 +2830,8 @@ export default function MapScreen() {
     // Guest kontrolü
     const isGuest = user?.role === 'guest';
     const isDark = scheme === 'dark';
+    const popupAccent = colors.primary;
+    const popupAccentBg = colors.primaryLight;
 
   const markers = filteredCampingAreas.map(area => {
     // tags alanı string ise doğrudan kullan, obje ise type içinden al
@@ -2880,6 +2893,12 @@ export default function MapScreen() {
       isFavorite,
       rating: Number(area.rating) || 0,
       getAmenityIcon,
+      markerHtml: buildCampingMarkerHtml({
+        color: getMarkerColor(area, isUserSubmitted),
+        iconSvg: getMarkerIcon(tag, isUserSubmitted, area.visibility),
+        rating: Number(area.rating) || 0,
+        isDark: isDark,
+      }),
     };
   });
 
@@ -2912,12 +2931,12 @@ export default function MapScreen() {
           }
           .popup-title {
             font-weight: 600;
-            color: ${isDark ? '#34d399' : '#059669'};
+            color: ${popupAccent};
             margin-bottom: 8px;
           }
           .popup-type {
-            background: ${isDark ? '#064e3b' : '#dcfce7'};
-            color: ${isDark ? '#6ee7b7' : '#059669'};
+            background: ${popupAccentBg};
+            color: ${popupAccent};
             padding: 2px 8px;
             border-radius: 12px;
             font-size: 12px;
@@ -3212,11 +3231,11 @@ export default function MapScreen() {
           L.marker([${currentLocation.coords.latitude}, ${currentLocation.coords.longitude}], {
             icon: L.divIcon({
               className: 'user-location',
-              html: '<div style="background: #3b82f6; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
-              iconSize: [22, 22],
-              iconAnchor: [11, 11]
+              html: ${JSON.stringify(buildUserLocationHtml(colors.info || '#3B82F6'))},
+              iconSize: [28, 28],
+              iconAnchor: [14, 14]
             })
-          }).addTo(map).bindPopup('<div class="custom-popup"><div class="popup-title">Mevcut Konumunuz</div><button onclick="addCampingAreaHere()" style="margin-top: 8px; padding: 6px 12px; background: #059669; color: white; border: none; border-radius: 6px; font-size: 12px; cursor: pointer;">+ Buraya Kamp Alanı Ekle</button></div>');
+          }).addTo(map).bindPopup('<div class="custom-popup"><div class="popup-title">Mevcut Konumunuz</div><button onclick="addCampingAreaHere()" style="margin-top: 8px; padding: 6px 12px; background: ${popupAccent}; color: white; border: none; border-radius: 6px; font-size: 12px; cursor: pointer;">+ Buraya Kamp Alanı Ekle</button></div>');
 
           // Kamp alanları - sadece normal modda göster
           if (!isLocationPickerMode) {
@@ -3230,12 +3249,9 @@ export default function MapScreen() {
             var marker${idx} = L.marker([${marker.lat}, ${marker.lng}], {
               icon: L.divIcon({
                 className: 'camping-marker',
-                html: '<div style="position: relative; width: 38px; height: 38px; display:flex; align-items:center; justify-content:center;">' +
-                      '<div style="background: ${marker.markerColor}; color: white; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; border: 1px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${marker.markerIcon}</div>' +
-                      ${marker.rating && marker.rating > 0 ? `'<div style="position:absolute; top:-6px; right:-6px; background: rgba(0,0,0,0.75); color:white; font-size:10px; padding:2px 4px; border-radius:8px;">${Number(marker.rating).toFixed(1)}</div>'` : "''"} +
-                      '</div>',
-                iconSize: [38, 38],
-                iconAnchor: [19, 19]
+                html: ${JSON.stringify(marker.markerHtml)},
+                iconSize: [${CAMPING_MARKER_ICON_SIZE[0]}, ${CAMPING_MARKER_ICON_SIZE[1]}],
+                iconAnchor: [${CAMPING_MARKER_ICON_ANCHOR[0]}, ${CAMPING_MARKER_ICON_ANCHOR[1]}]
               })
             }).addTo(map).bindPopup(\`
           <div class="custom-popup" style="display: flex; flex-direction: row; gap: 0; min-width: 320px; max-width: 380px; align-items: stretch;">
@@ -3272,7 +3288,7 @@ export default function MapScreen() {
               </div>
               <!-- Alt aksiyonlar (mercek ve harita) -->
               <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 8px;">
-                  <div style="font-size: 0; color: #059669; flex: 1; display: flex; align-items: center; justify-content: flex-start; cursor:pointer;" onclick="openCampingAreaDetail(${marker.lat}, ${marker.lng})">
+                  <div style="font-size: 0; color: ${popupAccent}; flex: 1; display: flex; align-items: center; justify-content: flex-start; cursor:pointer;" onclick="openCampingAreaDetail(${marker.lat}, ${marker.lng})">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${isDark ? '#94a3b8' : '#5a5a5a'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-plus-icon lucide-circle-plus"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>  
                     <span style="font-size: 13px; color: ${isDark ? '#e2e8f0' : '#222'}; margin-left: 5px">Detaylı Bilgi</span>
                   </div>
@@ -3296,7 +3312,7 @@ export default function MapScreen() {
                 <!-- Kamp Planla Seçim Butonu -->
                 ${(selectForPlanMode || isLocationPickerMode) ? `
                 <div style="margin-top:6px; padding: 0 10px 6px 10px;">
-                  <button class="select-for-plan-btn" data-payload="${encodeURIComponent(JSON.stringify({ type: 'selectCampingAreaForPlan', id: marker.id ? marker.id : null, latitude: marker.lat, longitude: marker.lng, name: (marker.name || ''), areaType: (marker.typeLabel || '') }))}" style="width:100%; padding:8px 10px; background:#059669; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Bu kampı seç</button>
+                  <button class="select-for-plan-btn" data-payload="${encodeURIComponent(JSON.stringify({ type: 'selectCampingAreaForPlan', id: marker.id ? marker.id : null, latitude: marker.lat, longitude: marker.lng, name: (marker.name || ''), areaType: (marker.typeLabel || '') }))}" style="width:100%; padding:8px 10px; background:${popupAccent}; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Bu kampı seç</button>
                 </div>
               ` : ''}
               </div>

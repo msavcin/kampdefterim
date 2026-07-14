@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kamp Defterim — Kampfire Gold · Harita Konsepti</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #07090A;
+      --surface: #0E1210;
+      --surface-elev: #141A16;
+      --border: rgba(212, 175, 106, 0.14);
+      --gold: #D4AF6A;
+      --gold-bright: #E8C97A;
+      --gold-dim: #8A7348;
+      --gold-glow: rgba(212, 175, 106, 0.45);
+      --text: #F2EDE3;
+      --text-2: #A89F8E;
+      --muted: #6B655A;
+      --font: Roboto, -apple-system, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      background:
+        radial-gradient(ellipse 60% 40% at 80% 20%, #2a1f0a 0%, transparent 50%),
+        #050505;
+      color: var(--text);
+      min-height: 100vh;
+      padding: 40px 20px 80px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page { max-width: 1100px; margin: 0 auto; }
+    .tag {
+      font-size: 11px; font-weight: 500; letter-spacing: 0.16em;
+      text-transform: uppercase; color: var(--gold-dim); margin-bottom: 10px;
+    }
+    h1 {
+      font-size: clamp(26px, 4vw, 36px); font-weight: 300;
+      letter-spacing: -0.03em; margin-bottom: 10px;
+    }
+    h1 strong { font-weight: 500; color: var(--gold); }
+    .lead {
+      font-size: 14px; font-weight: 300; color: var(--text-2);
+      max-width: 640px; line-height: 1.55; margin-bottom: 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 340px) 1fr;
+      gap: 36px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; justify-items: center; }
+    }
+
+    .phone {
+      width: 100%; max-width: 340px;
+      aspect-ratio: 9 / 19.2;
+      border-radius: 40px;
+      overflow: hidden;
+      border: 2px solid #1a1a1a;
+      box-shadow:
+        0 0 0 1px #000,
+        0 40px 100px rgba(0,0,0,0.7),
+        0 0 80px rgba(212,175,106,0.08);
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .sb {
+      height: 44px;
+      padding: 12px 22px 0;
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      z-index: 5;
+      flex-shrink: 0;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 16px 10px;
+      z-index: 4;
+      flex-shrink: 0;
+    }
+    .header .menu, .header .bell {
+      width: 34px; height: 34px;
+      display: grid; place-items: center;
+      color: var(--gold-dim);
+      font-size: 16px;
+    }
+    .brand {
+      text-align: center;
+    }
+    .brand .name {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.22em;
+      color: var(--gold);
+    }
+    .brand .tagline {
+      font-size: 7px;
+      font-weight: 400;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin-top: 2px;
+      text-transform: uppercase;
+    }
+
+    /* Map */
+    .map {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% 40%, #1a2820 0%, transparent 50%),
+        linear-gradient(165deg, #0c1410 0%, #0a100c 40%, #080c0a 100%);
+    }
+    .map::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      opacity: 0.55;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 30% 60%, #1a3a28 0%, transparent 50%),
+        radial-gradient(ellipse 60% 40% at 70% 30%, #152820 0%, transparent 45%),
+        linear-gradient(25deg, transparent 40%, rgba(60,80,50,0.15) 41%, transparent 42%),
+        linear-gradient(115deg, transparent 48%, rgba(80,100,70,0.12) 49%, transparent 51%);
+    }
+    .map-actions {
+      position: absolute;
+      right: 12px;
+      top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 3;
+    }
+    .map-actions button {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: rgba(14,18,16,0.85);
+      color: var(--gold-dim);
+      font-size: 14px;
+      display: grid;
+      place-items: center;
+      backdrop-filter: blur(8px);
+    }
+
+    /* Glowing pins */
+    .pin {
+      position: absolute;
+      transform: translate(-50%, -100%);
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .pin .glow {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(232,201,122,0.35) 0%, transparent 70%);
+      display: grid;
+      place-items: center;
+      filter: drop-shadow(0 0 10px var(--gold-glow));
+    }
+    .pin .body {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #F0D78C, #C9A04A 55%, #8B6914);
+      border: 1.5px solid rgba(255,240,200,0.5);
+      display: grid;
+      place-items: center;
+      box-shadow:
+        0 0 16px rgba(212,175,106,0.55),
+        inset 0 1px 0 rgba(255,255,255,0.35);
+    }
+    .pin .body svg { width: 14px; height: 14px; }
+    .pin .label {
+      margin-top: 4px;
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--gold-bright);
+      text-align: center;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      max-width: 72px;
+      line-height: 1.2;
+      letter-spacing: 0.02em;
+    }
+    .pin.selected .glow {
+      width: 48px; height: 48px;
+      background: radial-gradient(circle, rgba(232,201,122,0.5) 0%, transparent 70%);
+    }
+    .pin.selected .body {
+      width: 32px; height: 32px;
+      box-shadow: 0 0 24px rgba(212,175,106,0.75);
+    }
+
+    /* Bottom sheet */
+    .sheet {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      background: linear-gradient(180deg, rgba(10,14,12,0.92) 0%, #0A0E0C 30%);
+      border-top: 1px solid var(--border);
+      border-radius: 22px 22px 0 0;
+      padding: 10px 18px 8px;
+      z-index: 4;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 -20px 60px rgba(0,0,0,0.5);
+    }
+    .sheet .handle {
+      width: 36px; height: 4px;
+      border-radius: 999px;
+      background: rgba(212,175,106,0.25);
+      margin: 0 auto 12px;
+    }
+    .sheet-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .sheet-top h2 {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--gold-bright);
+      letter-spacing: -0.01em;
+    }
+    .sheet-top .loc {
+      font-size: 11px;
+      font-weight: 300;
+      color: var(--text-2);
+      margin-top: 2px;
+    }
+    .weather {
+      text-align: right;
+      font-size: 13px;
+      color: var(--gold);
+      font-weight: 500;
+    }
+    .weather small {
+      display: block;
+      font-size: 10px;
+      font-weight: 300;
+      color: var(--text-2);
+      margin-top: 2px;
+    }
+
+    /* Sun path dial */
+    .dial-wrap {
+      position: relative;
+      height: 130px;
+      margin: 4px 0 8px;
+    }
+    .dial {
+      position: absolute;
+      left: 50%;
+      top: 8px;
+      transform: translateX(-50%);
+      width: 160px;
+      height: 160px;
+    }
+    .dial svg { width: 100%; height: 100%; overflow: visible; }
+    .sun-times {
+      position: absolute;
+      left: 0; right: 0; bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 8px;
+      font-size: 10px;
+      color: var(--text-2);
+    }
+    .sun-times strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--gold);
+      margin-top: 2px;
+    }
+    .elev {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      transform: translateX(-50%);
+      font-size: 9px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .elev strong {
+      display: block;
+      font-size: 12px;
+      color: var(--text-2);
+      font-weight: 400;
+    }
+
+    /* Tab bar */
+    .tabs {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding: 6px 4px 10px;
+      border-top: 1px solid rgba(212,175,106,0.08);
+      flex-shrink: 0;
+    }
+    .tab {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      font-size: 8px;
+      font-weight: 400;
+      color: var(--muted);
+      min-width: 52px;
+    }
+    .tab .ic { font-size: 18px; line-height: 1; opacity: 0.5; }
+    .tab.on { color: var(--gold); }
+    .tab.on .ic {
+      opacity: 1;
+      filter: drop-shadow(0 0 6px var(--gold-glow));
+    }
+    .tab.center .ic {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      color: var(--gold);
+      background: rgba(212,175,106,0.08);
+      opacity: 1;
+    }
+
+    /* Side panel */
+    .side h3 {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--gold);
+      margin-bottom: 10px;
+      letter-spacing: 0.04em;
+    }
+    .card {
+      background: #0e0e0e;
+      border: 1px solid #1f1c16;
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: var(--text-2);
+      line-height: 1.5;
+      font-weight: 300;
+    }
+    .card strong { color: var(--text); font-weight: 500; }
+    .card ul { margin: 8px 0 0 16px; }
+    .card li { margin-bottom: 4px; }
+    .sw {
+      display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;
+    }
+    .sw i {
+      width: 20px; height: 20px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.1);
+      display: block;
+    }
+    .map-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    .map-table th, .map-table td {
+      text-align: left;
+      padding: 6px 0;
+      border-bottom: 1px solid #1f1c16;
+      color: var(--text-2);
+      font-weight: 300;
+    }
+    .map-table th {
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 500;
+    }
+    .map-table td:first-child { color: var(--text); font-weight: 400; }
+    .yes { color: #6B8F71; }
+    .partial { color: var(--gold); }
+    .no { color: #a05050; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="tag">Konsept entegrasyon · Kampfire Gold</div>
+    <h1>Bu dil <strong>entegre edilebilir</strong> — uyarlayarak</h1>
+    <p class="lead">
+      Görsel “fener altın ışığı + derin orman haritası” dili. Kamp Defterim’e
+      <strong style="color:var(--text)">D4 · Kampfire Gold</strong> koyu palet + harita chrome
+      olarak taşınabilir. Marka adı, sekme isimleri ve güneş diyagramı uygulama gerçekliğine göre uyarlanır.
+    </p>
+
+    <div class="grid">
+      <div class="phone">
+        <div class="sb"><span>21:47</span><span>5G · 80</span></div>
+        <div class="header">
+          <div class="menu">☰</div>
+          <div class="brand">
+            <div class="name">KAMP DEFTERİM</div>
+            <div class="tagline">Kampını planla · anılarını sakla</div>
+          </div>
+          <div class="bell">🔔</div>
+        </div>
+
+        <div class="map">
+          <div class="map-actions">
+            <button>⌕</button>
+            <button>◎</button>
+            <button>➤</button>
+          </div>
+
+          <!-- Pins -->
+          <div class="pin selected" style="left:28%; top:22%">
+            <div class="glow"><div class="body">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 L4 20 H20 Z" stroke="#1a1208" stroke-width="1.8" fill="none"/><path d="M12 3 V20" stroke="#1a1208" stroke-width="1.5"/></svg>
+            </div></div>
+            <div class="label">Yedigöller Milli Parkı</div>
+          </div>
+          <div class="pin" style="left:52%; top:28%">
+            <div class="glow"><div class="body">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 L4 20 H20 Z" stroke="#1a1208" stroke-width="1.8"/><path d="M12 3 V20" stroke="#1a1208" stroke-width="1.5"/></svg>
+            </div></div>
+            <div class="label">Sülüklü Göl</div>
+          </div>
+          <div class="pin" style="left:72%; top:36%">
+            <div class="glow"><div class="body">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 L4 20 H20 Z" stroke="#1a1208" stroke-width="1.8"/><path d="M12 3 V20" stroke="#1a1208" stroke-width="1.5"/></svg>
+            </div></div>
+            <div class="label">Çiğdem Yaylası</div>
+          </div>
+          <div class="pin" style="left:32%; top:48%">
+            <div class="glow"><div class="body">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 L4 20 H20 Z" stroke="#1a1208" stroke-width="1.8"/><path d="M12 3 V20" stroke="#1a1208" stroke-width="1.5"/></svg>
+            </div></div>
+            <div class="label">Gölcük</div>
+          </div>
+          <div class="pin" style="left:68%; top:54%">
+            <div class="glow"><div class="body">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 L4 20 H20 Z" stroke="#1a1208" stroke-width="1.8"/><path d="M12 3 V20" stroke="#1a1208" stroke-width="1.5"/></svg>
+            </div></div>
+            <div class="label">Kazankaya Kanyonu</div>
+          </div>
+
+          <div class="sheet">
+            <div class="handle"></div>
+            <div class="sheet-top">
+              <div>
+                <h2>Yedigöller Milli Parkı</h2>
+                <div class="loc">Bolu, Türkiye</div>
+              </div>
+              <div class="weather">12° ☾<small>Açık</small></div>
+            </div>
+
+            <div class="dial-wrap">
+              <div class="dial">
+                <svg viewBox="0 0 200 200">
+                  <!-- rings -->
+                  <circle cx="100" cy="100" r="78" fill="none" stroke="rgba(212,175,106,0.12)" stroke-width="1"/>
+                  <circle cx="100" cy="100" r="58" fill="none" stroke="rgba(212,175,106,0.1)" stroke-width="1"/>
+                  <circle cx="100" cy="100" r="38" fill="none" stroke="rgba(212,175,106,0.08)" stroke-width="1"/>
+                  <!-- sun arc -->
+                  <path d="M 30 110 Q 100 30 170 110" fill="none" stroke="rgba(212,175,106,0.45)" stroke-width="1.5" stroke-dasharray="3 4"/>
+                  <!-- center mountain vignette -->
+                  <circle cx="100" cy="100" r="28" fill="#0a100c" stroke="rgba(212,175,106,0.2)" stroke-width="1"/>
+                  <path d="M78 112 L92 88 L100 98 L112 82 L122 112 Z" fill="none" stroke="rgba(212,175,106,0.5)" stroke-width="1"/>
+                  <!-- compass marks -->
+                  <text x="100" y="28" text-anchor="middle" fill="#D4AF6A" font-size="10" font-family="Roboto">K</text>
+                  <text x="178" y="104" text-anchor="middle" fill="#8A7348" font-size="9" font-family="Roboto">D</text>
+                  <text x="100" y="182" text-anchor="middle" fill="#8A7348" font-size="9" font-family="Roboto">G</text>
+                  <text x="22" y="104" text-anchor="middle" fill="#8A7348" font-size="9" font-family="Roboto">B</text>
+                  <!-- sun dots -->
+                  <circle cx="38" cy="105" r="5" fill="#E8C97A" filter="url(#g)"/>
+                  <circle cx="162" cy="105" r="5" fill="#E8C97A"/>
+                  <defs>
+                    <filter id="g"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                  </defs>
+                </svg>
+              </div>
+              <div class="sun-times">
+                <div>Gün Doğumu<strong>05:48</strong></div>
+                <div style="text-align:right">Gün Batımı<strong>20:17</strong></div>
+              </div>
+              <div class="elev">Güneş Yüksekliği<strong>32°</strong></div>
+            </div>
+
+            <div class="tabs">
+              <div class="tab on"><span class="ic">⌂</span>Ana Sayfa</div>
+              <div class="tab"><span class="ic">⌕</span>Keşfet</div>
+              <div class="tab center"><span class="ic">＋</span>Planla</div>
+              <div class="tab"><span class="ic">♡</span>Favoriler</div>
+              <div class="tab"><span class="ic">👤</span>Profil</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="side">
+        <h3>Entegre edilebilir mi?</h3>
+        <div class="card">
+          <strong>Evet — görsel dil olarak.</strong> Bu bir konsept render; birebir piksel kopya değil,
+          <strong>Kampfire Gold</strong> dilini mevcut Expo + Leaflet WebView mimarinize uyarlarız.
+        </div>
+
+        <div class="card">
+          <strong>Parça parça uygulanabilirlik</strong>
+          <table class="map-table">
+            <thead>
+              <tr><th>Öğe</th><th>Durum</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Koyu orman basemap + gold glow</td><td class="yes">Tam</td></tr>
+              <tr><td>Altın parlayan pin kabuğu</td><td class="yes">Tam (mevcut SVG ikonlar içeride)</td></tr>
+              <tr><td>Üst brand header</td><td class="yes">Tam</td></tr>
+              <tr><td>Alt sheet (başlık + hava)</td><td class="yes">Tam</td></tr>
+              <tr><td>Güneş yolu diyagramı</td><td class="partial">Yeni özellik + API (sunrise/sunset)</td></tr>
+              <tr><td>Sekme isimleri (Ana Sayfa…)</td><td class="partial">Mevcut tab’lara map</td></tr>
+              <tr><td>KAMPFIRE markası</td><td class="no">Kamp Defterim kalır</td></tr>
+              <tr><td>Fotoğraftaki “gerçek harita 3D”</td><td class="partial">Leaflet stil + dark tiles</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <strong>D4 · Kampfire Gold palet</strong>
+          <div class="sw">
+            <i style="background:#07090A"></i>
+            <i style="background:#0E1210"></i>
+            <i style="background:#D4AF6A"></i>
+            <i style="background:#E8C97A"></i>
+            <i style="background:#F2EDE3"></i>
+            <i style="background:#6B655A"></i>
+          </div>
+          <ul>
+            <li>background <code>#07090A</code></li>
+            <li>surface <code>#0E1210</code></li>
+            <li>primary / gold <code>#D4AF6A</code></li>
+            <li>text <code>#F2EDE3</code></li>
+            <li>Pin glow: soft gold drop-shadow</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <strong>Mevcut sekmelerinize map</strong>
+          <ul>
+            <li>Ana Sayfa → Harita (index)</li>
+            <li>Keşfet → liste / arama veya duyurular</li>
+            <li>Planla (+) → kamp planla / alan ekle</li>
+            <li>Kaydedilenler → Favoriler</li>
+            <li>Profil → Profil</li>
+            <li>Checklist & Sohbet → menü veya 2. sıra</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <strong>Önerilen entegrasyon sırası</strong>
+          <ul>
+            <li>1. D4 palet → colors.ts + ThemeProvider</li>
+            <li>2. Harita pin → gold glow shell + getSVGIcon</li>
+            <li>3. generateMapHTML dark forest tiles + gold popup</li>
+            <li>4. Bottom sheet detay (başlık, hava)</li>
+            <li>5. (Opsiyonel) güneş yolu widget’ı</li>
+            <li>6. Tab bar gold active state</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ScrollView,
   Animated,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -131,6 +132,15 @@ export default function GuideScreen() {
   const isFirst = currentStep === 0;
   const isLast = currentStep === STEPS.length - 1;
 
+  useEffect(() => {
+    const onBack = () => {
+      router.replace('/profile');
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [router]);
+
   const animateTransition = (callback: () => void) => {
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
@@ -146,7 +156,7 @@ export default function GuideScreen() {
 
   const goNext = () => {
     if (isLast) {
-      router.back();
+      router.replace('/profile');
       return;
     }
     animateTransition(() => setCurrentStep((s) => s + 1));
@@ -162,7 +172,7 @@ export default function GuideScreen() {
       {/* ─── Üst Bar ─── */}
       <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <Text style={[styles.topBarTitle, { color: colors.text }]}>Uygulama Rehberi</Text>
-        <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity style={styles.closeBtn} onPress={() => router.replace('/profile')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <X size={22} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
@@ -237,7 +247,7 @@ export default function GuideScreen() {
 
         {/* Tüm Adımları Atla */}
         {!isLast && (
-          <TouchableOpacity style={styles.skipBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.skipBtn} onPress={() => router.replace('/profile')}>
             <Text style={[styles.skipBtnText, { color: colors.muted }]}>Rehberi Kapat</Text>
           </TouchableOpacity>
         )}

@@ -4,6 +4,7 @@ import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import useTokenAutoLogout from '@/hooks/useTokenAutoLogout';
 import { View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ThemeProvider from '../components/ThemeProvider';
 import { isLoggedIn } from '../lib/auth';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
@@ -95,9 +96,13 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
-        <Slot />
-      </ThemeProvider>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+            <Slot />
+          </SafeAreaView>
+        </ThemeProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
