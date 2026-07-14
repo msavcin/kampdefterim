@@ -1,16 +1,15 @@
 /**
  * Leaflet popup + map chrome colors from active ThemeColors.
- * Use inside generateMapHTML() so popup tracks L1–L3 / D1–D3 + light/dark.
- *
- *   const { colors, scheme } = useTheme();
- *   const popup = buildMapPopupTheme(colors, scheme === 'dark');
- *   // then inject popup.* into HTML/CSS template
+ * Use inside generateMapHTML() so popup tracks palette + visual variant.
  */
 
 import type { ThemeColors } from '../constants/theme/colors';
+import type { ThemeVariantId } from '../constants/theme/variants';
 
 export type MapPopupTheme = {
+  variant: ThemeVariantId;
   isDark: boolean;
+  isKampfire: boolean;
   /** Page / map chrome */
   pageBg: string;
   surface: string;
@@ -70,45 +69,85 @@ export function getPrimaryOnColor(colors: ThemeColors): string {
 export function buildMapPopupTheme(
   colors: ThemeColors,
   isDark: boolean,
+  variant: ThemeVariantId = 'classic',
 ): MapPopupTheme {
-  const primaryOn = getPrimaryOnColor(colors);
+  const isKampfire = variant === 'kampfireGold' && isDark;
+  const classicPrimaryOn = getPrimaryOnColor(colors);
+
+  const primary = isKampfire ? '#D4AF6A' : colors.primary;
+  const primaryLight = isKampfire ? 'rgba(212,175,106,0.12)' : colors.primaryLight;
+  const primaryOn = isKampfire ? '#1A1208' : classicPrimaryOn;
+  const accent = isKampfire ? '#E8C97A' : colors.accent;
+  const surface = isKampfire ? '#0E1210' : colors.surface;
+  const surfaceVariant = isKampfire ? '#141A16' : colors.surfaceVariant;
+  const border = isKampfire ? 'rgba(212,175,106,0.14)' : colors.border;
+  const text = isKampfire ? '#F2EDE3' : colors.text;
+  const textSecondary = isKampfire ? '#A89F8E' : colors.textSecondary;
+  const muted = isKampfire ? '#6B655A' : colors.muted;
+  const pageBg = isKampfire ? '#050505' : isDark ? colors.background : '#FFFFFF';
 
   const t: Omit<MapPopupTheme, 'css'> = {
+    variant,
     isDark,
-    pageBg: isDark ? colors.background : '#FFFFFF',
-    surface: colors.surface,
-    surfaceVariant: colors.surfaceVariant,
-    border: colors.border,
-    text: colors.text,
-    textSecondary: colors.textSecondary,
-    muted: colors.muted,
-    primary: colors.primary,
-    primaryLight: colors.primaryLight,
+    isKampfire,
+    pageBg,
+    surface,
+    surfaceVariant,
+    border,
+    text,
+    textSecondary,
+    muted,
+    primary,
+    primaryLight,
     primaryOn,
-    accent: colors.accent,
+    accent,
     danger: colors.danger,
     info: colors.info,
-    favoriteBg: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(254,242,242,0.95)',
+    favoriteBg: isKampfire
+      ? 'rgba(10,14,12,0.82)'
+      : isDark
+        ? 'rgba(0,0,0,0.45)'
+        : 'rgba(254,242,242,0.95)',
     favoriteBgActive: colors.danger,
-    favoriteBorder: colors.danger,
-    zoomBg: colors.surface,
-    zoomFg: colors.text,
-    zoomBorder: colors.border,
-    attrBg: isDark ? `${colors.surface}cc` : 'rgba(255,255,255,0.85)',
-    attrFg: colors.muted,
-    attrLink: colors.info,
-    amenityBg: colors.surfaceVariant,
-    imagePlaceholderBg: colors.surfaceVariant,
-    imagePlaceholderFg: isDark ? colors.text : '#444444',
-    userSubmitted: isDark ? colors.accent : colors.accent,
-    menuBg: colors.surface,
-    menuBorder: colors.border,
-    menuShadow: isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.12)',
+    favoriteBorder: isKampfire ? 'rgba(212,175,106,0.18)' : colors.danger,
+    zoomBg: isKampfire ? 'rgba(14,18,16,0.92)' : surface,
+    zoomFg: isKampfire ? primary : text,
+    zoomBorder: border,
+    attrBg: isKampfire
+      ? 'rgba(10,14,12,0.78)'
+      : isDark
+        ? `${surface}cc`
+        : 'rgba(255,255,255,0.85)',
+    attrFg: isKampfire ? muted : muted,
+    attrLink: isKampfire ? primary : colors.info,
+    amenityBg: isKampfire ? 'rgba(212,175,106,0.08)' : surfaceVariant,
+    imagePlaceholderBg: isKampfire ? '#141A16' : surfaceVariant,
+    imagePlaceholderFg: isKampfire ? '#A89F8E' : isDark ? text : '#444444',
+    userSubmitted: isKampfire ? accent : colors.accent,
+    menuBg: isKampfire ? '#0E1210' : surface,
+    menuBorder: border,
+    menuShadow: isKampfire ? 'rgba(0,0,0,0.45)' : isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.12)',
   };
 
   const css = `
-          body { margin: 0; padding: 0; background: ${t.pageBg}; }
-          #map { height: 100vh; width: 100vw; }
+          body {
+            margin: 0;
+            padding: 0;
+            background: ${t.pageBg};
+          }
+          #map {
+            height: 100vh;
+            width: 100vw;
+            background:
+              ${t.isKampfire
+                ? `radial-gradient(ellipse 65% 45% at 78% 18%, rgba(212,175,106,0.12) 0%, transparent 50%),
+                   radial-gradient(ellipse 80% 50% at 30% 60%, rgba(26,58,40,0.55) 0%, transparent 55%),
+                   linear-gradient(165deg, #0c1410 0%, #0a100c 44%, #080c0a 100%)`
+                : t.pageBg};
+          }
+          .leaflet-container {
+            background: ${t.isKampfire ? '#0A0E0C' : t.pageBg};
+          }
           .custom-popup {
             font-family: Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
           }
@@ -122,6 +161,7 @@ export function buildMapPopupTheme(
             color: ${t.primary};
             padding: 2px 8px;
             border-radius: 12px;
+            border: 1px solid ${t.isKampfire ? 'rgba(212,175,106,0.18)' : t.border};
             font-size: 12px;
             display: inline-block;
           }
@@ -131,16 +171,22 @@ export function buildMapPopupTheme(
           .leaflet-popup-content-wrapper {
             background: ${t.surface};
             color: ${t.text};
-            border-radius: 12px;
-            box-shadow: 0 8px 28px rgba(0,0,0,${isDark ? '0.45' : '0.12'});
+            border-radius: ${t.isKampfire ? '16px' : '12px'};
+            border: 1px solid ${t.border};
+            box-shadow: 0 12px 36px ${t.isKampfire ? 'rgba(0,0,0,0.5)' : isDark ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.12)'};
+          }
+          .leaflet-popup-content {
+            margin: ${t.isKampfire ? '10px 12px' : '13px 12px'};
           }
           .leaflet-popup-tip {
             background: ${t.surface};
+            border: 1px solid ${t.border};
           }
           .leaflet-control-zoom a {
             background: ${t.zoomBg} !important;
             color: ${t.zoomFg} !important;
             border-color: ${t.zoomBorder} !important;
+            box-shadow: ${t.isKampfire ? '0 0 0 1px rgba(0,0,0,0.18), 0 0 14px rgba(212,175,106,0.12)' : 'none'};
           }
           .leaflet-control-attribution {
             background: ${t.attrBg} !important;
@@ -195,6 +241,16 @@ export function buildMapPopupTheme(
             margin-right: 2px;
             font-size: 16px;
           }
+          .camping-marker.kampfire-selected {
+            z-index: 999 !important;
+          }
+          .camping-marker.kampfire-selected .kampfire-marker-glow {
+            transform: scale(1.22);
+            filter: drop-shadow(0 0 16px rgba(212,175,106,0.72));
+          }
+          .camping-marker.kampfire-selected .kampfire-marker-core {
+            box-shadow: 0 0 24px rgba(212,175,106,0.78), inset 0 1px 0 rgba(255,255,255,0.35);
+          }
   `.trim();
 
   return { ...t, css };
@@ -208,6 +264,7 @@ export function popupInlineStyles(t: MapPopupTheme) {
   return {
     imageBoxBg: t.imagePlaceholderBg,
     imagePlaceholderFg: t.imagePlaceholderFg,
+    popupCard: `display:flex;flex-direction:row;gap:0;min-width:320px;max-width:380px;align-items:stretch;background:${t.surface};border:1px solid ${t.border};border-radius:16px;overflow:hidden;`,
     favoriteBtn: (isFavorite: boolean) =>
       `font-size:0;color:${t.danger};width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:${
         isFavorite ? t.favoriteBgActive : t.favoriteBg
@@ -216,7 +273,7 @@ export function popupInlineStyles(t: MapPopupTheme) {
     distance: `font-size:12px;color:${t.muted};`,
     amenityChip: `display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:${t.amenityBg};margin-right:2px;font-size:16px;`,
     detailRow: `font-size:0;color:${t.primary};flex:1;display:flex;align-items:center;justify-content:flex-start;cursor:pointer;`,
-    detailStroke: t.muted,
+    detailStroke: t.isKampfire ? '#8A7348' : t.muted,
     detailLabel: `font-size:13px;color:${t.text};margin-left:5px;`,
     mapMenu: `display:none;position:absolute;top:55px;left:-85px;background:${t.menuBg};border:1px solid ${t.menuBorder};border-radius:8px;box-shadow:0 2px 8px ${t.menuShadow};padding:6px 0;min-width:120px;z-index:999;`,
     menuItemText: `font-size:13px;color:${t.text};`,

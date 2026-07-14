@@ -23,6 +23,13 @@ import {
   isLightPaletteId,
   isDarkPaletteId,
 } from '../constants/theme/colors';
+import {
+  type ThemeVariant,
+  type ThemeVariantId,
+  themeVariants,
+  defaultThemeVariantId,
+  isThemeVariantId,
+} from '../constants/theme/variants';
 
 // ─── Geriye dönük uyumluluk ───
 export const themes = {
@@ -113,6 +120,7 @@ export type ColorMode = 'light' | 'dark' | 'system';
 const STORAGE_KEY_MODE = '@theme_color_mode';
 const STORAGE_KEY_LIGHT = '@theme_light_palette_id';
 const STORAGE_KEY_DARK = '@theme_dark_palette_id';
+const STORAGE_KEY_VARIANT = '@theme_variant_id';
 /** Eski tek-palet key (migration) */
 const STORAGE_KEY_PALETTE_LEGACY = '@theme_palette_id';
 
@@ -129,9 +137,14 @@ type ThemeContextType = {
   /** Açık tema rengi L1|L2|L3 */
   lightPaletteId: LightPaletteId;
   setLightPaletteId: (id: LightPaletteId) => void;
-  /** Koyu tema rengi D1|D2|D3 */
+  /** Koyu tema rengi D1|D2|D3|D4 */
   darkPaletteId: DarkPaletteId;
   setDarkPaletteId: (id: DarkPaletteId) => void;
+  /** Yapısal görünüm varyantı: mevcut tema / Kampfire Gold */
+  themeVariantId: ThemeVariantId;
+  themeVariant: ThemeVariant;
+  setThemeVariantId: (id: ThemeVariantId) => void;
+  isKampfireTheme: boolean;
 };
 
 const ThemeContext = createContext<ThemeContextType>({
@@ -146,6 +159,10 @@ const ThemeContext = createContext<ThemeContextType>({
   setLightPaletteId: () => {},
   darkPaletteId: defaultDarkPaletteId,
   setDarkPaletteId: () => {},
+  themeVariantId: defaultThemeVariantId,
+  themeVariant: themeVariants[defaultThemeVariantId],
+  setThemeVariantId: () => {},
+  isKampfireTheme: false,
 });
 
 function migrateLegacyPaletteId(legacy: string): {
@@ -161,6 +178,7 @@ function migrateLegacyPaletteId(legacy: string): {
     L1_D1: { light: 'L1', dark: 'D1' },
     L2_D2: { light: 'L2', dark: 'D2' },
     L3_D3: { light: 'L3', dark: 'D3' },
+    L3_D4: { light: 'L3', dark: 'D4' },
   };
   return map[legacy] || {};
 }
@@ -197,17 +215,20 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     useState<LightPaletteId>(defaultLightPaletteId);
   const [darkPaletteId, setDarkPaletteIdState] =
     useState<DarkPaletteId>(defaultDarkPaletteId);
+  const [themeVariantId, setThemeVariantIdState] =
+    useState<ThemeVariantId>(defaultThemeVariantId);
   const [colorMode, setColorModeState] = useState<ColorMode>('system');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const [savedMode, savedLight, savedDark, savedLegacy] =
+        const [savedMode, savedLight, savedDark, savedVariant, savedLegacy] =
           await Promise.all([
             AsyncStorage.getItem(STORAGE_KEY_MODE),
             AsyncStorage.getItem(STORAGE_KEY_LIGHT),
             AsyncStorage.getItem(STORAGE_KEY_DARK),
+            AsyncStorage.getItem(STORAGE_KEY_VARIANT),
             AsyncStorage.getItem(STORAGE_KEY_PALETTE_LEGACY),
           ]);
 
@@ -230,6 +251,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
         }
         if (dark && isDarkPaletteId(dark)) {
           setDarkPaletteIdState(dark);
+        }
+        if (savedVariant && isThemeVariantId(savedVariant)) {
+          setThemeVariantIdState(savedVariant);
         }
       } catch {
         // varsayılanlar
@@ -256,6 +280,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     AsyncStorage.setItem(STORAGE_KEY_MODE, mode).catch(() => {});
   }, []);
 
+  const setThemeVariantId = useCallback((id: ThemeVariantId) => {
+    if (!isThemeVariantId(id)) return;
+    setThemeVariantIdState(id);
+    AsyncStorage.setItem(STORAGE_KEY_VARIANT, id).catch(() => {});
+  }, []);
+
   /** Eski API: birleşik id veya legacy id */
   const setPaletteId = useCallback(
     (id: string) => {
@@ -278,6 +308,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     scheme === 'dark'
       ? darkPalettes[darkPaletteId].colors
       : lightPalettes[lightPaletteId].colors;
+
+  const themeVariant = themeVariants[themeVariantId] || themeVariants[defaultThemeVariantId];
+  const isKampfireTheme =
+    themeVariantId === 'kampfireGold' && scheme === 'dark';
 
   // Geriye dönük palette objesi
   const palette: ThemePalette = useMemo(
@@ -304,6 +338,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
       setLightPaletteId,
       darkPaletteId,
       setDarkPaletteId,
+      themeVariantId,
+      themeVariant,
+      setThemeVariantId,
+      isKampfireTheme,
     }),
     [
       colors,
@@ -316,6 +354,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
       setLightPaletteId,
       darkPaletteId,
       setDarkPaletteId,
+      themeVariantId,
+      themeVariant,
+      setThemeVariantId,
+      isKampfireTheme,
     ],
   );
 

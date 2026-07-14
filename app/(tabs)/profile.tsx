@@ -58,7 +58,7 @@ import * as IAPManager from '@/lib/iapManager';
 import Constants from 'expo-constants';
 
 export default function ProfileHubScreen() {
-  const { colors, scheme, colorMode } = useTheme();
+  const { colors, colorMode, themeVariant } = useTheme();
   const themed = createThemedStyles(colors);
   const navigation = useNavigation();
   const router = useRouter();
@@ -669,7 +669,8 @@ export default function ProfileHubScreen() {
           <ProfileHubRow
             icon={<Palette size={18} color={colors.primary} />}
             title="Görünüm"
-            subtitle={`Tema · palet (${colorMode === 'system' ? 'sistem' : colorMode})`}
+            subtitle={`${themeVariant.name} · ${colorMode === 'system' ? 'sistem' : colorMode}`}
+            badge={themeVariant.badge}
             onPress={() => router.push('/profile-appearance' as any)}
           />
           {!isGuest && (

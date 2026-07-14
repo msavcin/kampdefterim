@@ -16,7 +16,7 @@ function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 import { campingTypes, getCampingTypeLabel, getCampingAreaBgColor } from '../../lib/categories';
 import { filterCampingAreasByUser } from '../../lib/accessControl';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 
 import LocationPermissionModal from '../../components/LocationPermissionModal';
 import HelpModal from '../../components/HelpModal';
@@ -24,6 +24,7 @@ import GuestInfoModal from '../../components/GuestInfoModal';
 
 import { Svg, Path } from 'react-native-svg';
 import { Modal } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import CampingAreaSearchBar from '../../components/CampingAreaSearchBar';
 import CampingAreaListView from '../../components/CampingAreaListView';
 import { Compass } from 'lucide-react-native';
@@ -52,6 +53,7 @@ import { checkSubscriptionStatus, refreshSubscriptionStatus } from '@/lib/iapMan
 import * as Location from 'expo-location';
 import { listAnnouncements } from '@/lib/announcementApi';
 import { initSmartCache } from '@/lib/smartOfflineCache';
+import { fetchOpenMeteoForecast } from '@/lib/openMeteo';
 import { getValilikIdFromProvinceName, getProvinceFromDistrict } from '@/lib/provinceMap';
 // If getValilikIdFromProvinceName is the default export, use:
 // import getValilikIdFromProvinceName from '@/lib/provinceMap';
@@ -66,10 +68,10 @@ import TentSetupScreen from '../../components/TentSetupScreen';
 import { on as onEvent, off as offEvent, emit as emitEvent } from '@/lib/eventBus';
 import { eventBus } from '@/lib/eventBus';
 import { Animated, Easing, AppState } from 'react-native';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, BackHandler } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, BackHandler, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { MapPin, Filter, Navigation, Plus, Calendar, RefreshCw, Loader2, Binoculars, LocateFixed, List, Map, X, ArrowLeft, ArrowRight, CheckCircle } from 'lucide-react-native';
+import { MapPin, Filter, Navigation, Plus, Calendar, RefreshCw, Loader2, Binoculars, LocateFixed, List, Map, X, ArrowLeft, ArrowRight, CheckCircle, Menu, Bell, ChevronUp, ChevronDown } from 'lucide-react-native';
 import { Feather } from '@expo/vector-icons';
 import { Linking } from 'react-native';
 import { useCampingAreas } from '@/hooks/useCampingAreas';
@@ -96,9 +98,12 @@ import {
 
 
 const { width, height } = Dimensions.get('window');
+const KAMPFIRE_READ_ANNOUNCEMENT_IDS_KEY = 'kampfireReadAnnouncementIds';
+const KAMPFIRE_READ_ANNOUNCEMENT_BOOTSTRAP_KEY =
+  'kampfireAnnouncementBadgeBootstrapped';
 
 export default function MapScreen() {
-    const { colors, scheme } = useTheme();
+    const { colors, scheme, themeVariantId, isKampfireTheme } = useTheme();
     // Son sorgulanan konumu saklamak için ref
     const lastQueriedLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
     // AppState'te alınan en son konum bilgisi (lokasyon butonu için hızlı erişim)
@@ -984,6 +989,7 @@ export default function MapScreen() {
   const handleShowCurrentLocation = async () => {
     try {
       if (!isMounted.current) return;
+      setKampfireFocusedArea(null);
       
       // Konum izni kontrolü
       const { status } = await Location.getForegroundPermissionsAsync();
@@ -1631,9 +1637,24 @@ export default function MapScreen() {
   const canAddOrDelete = isSuperAdmin || isCommunityLeader;
 
   const [selectedCampingArea, setSelectedCampingArea] = useState<CampingArea | null>(null);
+  const [kampfireFocusedArea, setKampfireFocusedArea] =
+    useState<CampingArea | null>(null);
+  const [kampfireHeroLocation, setKampfireHeroLocation] = useState('');
+  const [kampfireHeroWeather, setKampfireHeroWeather] = useState<{
+    temp: number | null;
+    text: string;
+  } | null>(null);
+  const [kampfireSheetVisible, setKampfireSheetVisible] = useState(true);
+  const [kampfireSheetExpanded, setKampfireSheetExpanded] = useState(false);
+  const [announcementUnreadCount, setAnnouncementUnreadCount] = useState(0);
+  const heroLocationCacheRef = useRef<Record<string, string>>({});
+  const heroWeatherCacheRef = useRef<
+    Record<string, { temp: number | null; text: string }>
+  >({});
   const [showFilters, setShowFilters] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [fabMenuVisible, setFabMenuVisible] = useState(false);
+  const [showKampfireMenu, setShowKampfireMenu] = useState(false);
   const [isLocationPickerMode, setIsLocationPickerMode] = useState(false);
   const [selectForPlanMode, setSelectForPlanMode] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{latitude: number, longitude: number} | null>(null);
@@ -2815,6 +2836,36 @@ export default function MapScreen() {
     return getCampingTypeLabel(type);
   };
 
+  const getAmenityEmoji = (amenity?: string | null) => {
+    switch (amenity) {
+      case 'tuvalet': return '🚻';
+      case 'duş': return '🚿';
+      case 'içme_suyu': return '💧';
+      case 'elektrik': return '⚡';
+      case 'wifi': return '📶';
+      case 'market': return '🏪';
+      case 'restoran': return '🍽️';
+      case 'otopark': return '🅿️';
+      case 'piknik_masası': return '🪑';
+      case 'barbekü':
+      case 'ateş_yeri':
+        return '🔥';
+      default:
+        return '📍';
+    }
+  };
+
+  const getAreaCoverImage = (area: any): string => {
+    if (!Array.isArray(area?.images) || area.images.length === 0) return '';
+    const httpImage = area.images.find(
+      (img: string) => typeof img === 'string' && img.startsWith('http'),
+    );
+    if (httpImage) return httpImage;
+    const fileImage = area.images.find(
+      (img: string) => typeof img === 'string' && img.startsWith('file://'),
+    );
+    return fileImage || area.images[0] || '';
+  };
 
   const generateMapHTML = () => {
     // Location null ise varsayılan konum kullan (Türkiye - Ankara)
@@ -2830,8 +2881,28 @@ export default function MapScreen() {
     // Guest kontrolü
     const isGuest = user?.role === 'guest';
     const isDark = scheme === 'dark';
-    const popupAccent = colors.primary;
-    const popupAccentBg = colors.primaryLight;
+    const mapTheme = buildMapPopupTheme(colors, isDark, themeVariantId);
+    const popupTheme = popupInlineStyles(mapTheme);
+    const placeholderTileFill = mapTheme.isKampfire
+      ? '#111713'
+      : isDark
+        ? '#1e293b'
+        : '#e5e7eb';
+    const placeholderTileStroke = mapTheme.isKampfire
+      ? '#233127'
+      : isDark
+        ? '#334155'
+        : '#d1d5db';
+    const placeholderTileText = mapTheme.isKampfire
+      ? '#8A7348'
+      : isDark
+        ? '#64748b'
+        : '#9ca3af';
+    const placeholderTileFallback = mapTheme.isKampfire
+      ? '#0B100D'
+      : isDark
+        ? '#0f172a'
+        : '#f3f4f6';
 
   const markers = filteredCampingAreas.map(area => {
     // tags alanı string ise doğrudan kullan, obje ise type içinden al
@@ -2847,37 +2918,8 @@ export default function MapScreen() {
     // Favori kontrolü: ID üzerinden
     const areaId = (area as any).id;
     const isFavorite = favorites.has(areaId);
-    // Olanaklar için emoji ikon fonksiyonu
-    const getAmenityIcon = (amenity) => {
-      switch (amenity) {
-        case 'tuvalet': return '🚻';
-        case 'duş': return '🚿';
-        case 'içme_suyu': return '💧';
-        case 'elektrik': return '⚡';
-        case 'wifi': return '📶';
-        case 'market': return '🏪';
-        case 'restoran': return '🍽️';
-        case 'otopark': return '🅿️';
-        case 'piknik_masası': return '🪑';
-        case 'barbekü': return '🔥';
-        case 'ateş_yeri': return '🔥';
-        default: return '📍';
-      }
-    };
-    // Kapak görseli: S3 linki varsa onu, yoksa file:// ile başlayan local URI'yi kullan
-    let coverImage = '';
-    if (Array.isArray(area.images) && area.images.length > 0) {
-      // Önce S3 linki bul
-      coverImage = area.images.find((img: string) => typeof img === 'string' && img.startsWith('http'));
-      // S3 linki yoksa file:// ile başlayanı bul
-      if (!coverImage) {
-        coverImage = area.images.find((img: string) => typeof img === 'string' && img.startsWith('file://'));
-      }
-      // Hiçbiri yoksa ilkini kullan
-      if (!coverImage) {
-        coverImage = area.images[0];
-      }
-    }
+    const getAmenityIcon = getAmenityEmoji;
+    const coverImage = getAreaCoverImage(area);
     return {
       id: areaId,
       name: area.name ?? '', // Add name property for marker
@@ -2898,6 +2940,7 @@ export default function MapScreen() {
         iconSvg: getMarkerIcon(tag, isUserSubmitted, area.visibility),
         rating: Number(area.rating) || 0,
         isDark: isDark,
+        variant: themeVariantId,
       }),
     };
   });
@@ -2914,8 +2957,7 @@ export default function MapScreen() {
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
         <style>
-          body { margin: 0; padding: 0; background: ${isDark ? '#1a1a2e' : '#fff'}; }
-          #map { height: 100vh; width: 100vw; }
+          ${mapTheme.css}
           ${isDark && darkMapStyle === 'soft' ? `
           .leaflet-tile-pane {
             filter: invert(1) hue-rotate(220deg) brightness(2.5) contrast(0.95) sepia(0.8);
@@ -2926,45 +2968,6 @@ export default function MapScreen() {
             filter: brightness(1.4) contrast(1.1);
           }
           ` : ''}
-          .custom-popup {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-          }
-          .popup-title {
-            font-weight: 600;
-            color: ${popupAccent};
-            margin-bottom: 8px;
-          }
-          .popup-type {
-            background: ${popupAccentBg};
-            color: ${popupAccent};
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            display: inline-block;
-          }
-          .location-picker-cursor {
-            cursor: crosshair !important;
-          }
-          .leaflet-popup-content-wrapper {
-            background: ${isDark ? '#1e293b' : '#fff'};
-            color: ${isDark ? '#e2e8f0' : '#222'};
-            border-radius: 12px;
-          }
-          .leaflet-popup-tip {
-            background: ${isDark ? '#1e293b' : '#fff'};
-          }
-          .leaflet-control-zoom a {
-            background: ${isDark ? '#334155' : '#fff'} !important;
-            color: ${isDark ? '#e2e8f0' : '#333'} !important;
-            border-color: ${isDark ? '#475569' : '#ccc'} !important;
-          }
-          .leaflet-control-attribution {
-            background: ${isDark ? 'rgba(30,41,59,0.8)' : 'rgba(255,255,255,0.8)'} !important;
-            color: ${isDark ? '#94a3b8' : '#333'} !important;
-          }
-          .leaflet-control-attribution a {
-            color: ${isDark ? '#60a5fa' : '#0078A8'} !important;
-          }
         </style>
       </head>
       <body>
@@ -3018,10 +3021,10 @@ export default function MapScreen() {
                       canvas.width = 256;
                       canvas.height = 256;
                       var ctx = canvas.getContext('2d');
-                      ctx.fillStyle = ${isDark} ? '#1e293b' : '#e5e7eb';
+                      ctx.fillStyle = '${placeholderTileFill}';
                       ctx.fillRect(0, 0, 256, 256);
                       // Çapraz çizgiler çiz
-                      ctx.strokeStyle = ${isDark} ? '#334155' : '#d1d5db';
+                      ctx.strokeStyle = '${placeholderTileStroke}';
                       ctx.lineWidth = 1;
                       ctx.beginPath();
                       ctx.moveTo(0, 0);
@@ -3030,7 +3033,7 @@ export default function MapScreen() {
                       ctx.lineTo(0, 256);
                       ctx.stroke();
                       // Metin ekle
-                      ctx.fillStyle = ${isDark} ? '#64748b' : '#9ca3af';
+                      ctx.fillStyle = '${placeholderTileText}';
                       ctx.font = '12px Arial';
                       ctx.textAlign = 'center';
                       ctx.fillText('Offline', 128, 120);
@@ -3050,9 +3053,9 @@ export default function MapScreen() {
                       canvas.width = 256;
                       canvas.height = 256;
                       var ctx = canvas.getContext('2d');
-                      ctx.fillStyle = ${isDark} ? '#0f172a' : '#f3f4f6';
+                      ctx.fillStyle = '${placeholderTileFallback}';
                       ctx.fillRect(0, 0, 256, 256);
-                      ctx.strokeStyle = ${isDark} ? '#1e293b' : '#e5e7eb';
+                      ctx.strokeStyle = '${placeholderTileStroke}';
                       ctx.lineWidth = 1;
                       ctx.strokeRect(0, 0, 256, 256);
                       tile.src = canvas.toDataURL();
@@ -3065,7 +3068,7 @@ export default function MapScreen() {
                   canvas.width = 256;
                   canvas.height = 256;
                   var ctx = canvas.getContext('2d');
-                  ctx.fillStyle = ${isDark} ? '#0f172a' : '#f3f4f6';
+                  ctx.fillStyle = '${placeholderTileFallback}';
                   ctx.fillRect(0, 0, 256, 256);
                   tile.src = canvas.toDataURL();
                   if (done) done(null, tile);
@@ -3235,7 +3238,7 @@ export default function MapScreen() {
               iconSize: [28, 28],
               iconAnchor: [14, 14]
             })
-          }).addTo(map).bindPopup('<div class="custom-popup"><div class="popup-title">Mevcut Konumunuz</div><button onclick="addCampingAreaHere()" style="margin-top: 8px; padding: 6px 12px; background: ${popupAccent}; color: white; border: none; border-radius: 6px; font-size: 12px; cursor: pointer;">+ Buraya Kamp Alanı Ekle</button></div>');
+          }).addTo(map).bindPopup('<div class="custom-popup"><div class="popup-title">Mevcut Konumunuz</div><button onclick="addCampingAreaHere()" style="${popupTheme.addHereBtn}">+ Buraya Kamp Alanı Ekle</button></div>');
 
           // Kamp alanları - sadece normal modda göster
           if (!isLocationPickerMode) {
@@ -3253,15 +3256,38 @@ export default function MapScreen() {
                 iconSize: [${CAMPING_MARKER_ICON_SIZE[0]}, ${CAMPING_MARKER_ICON_SIZE[1]}],
                 iconAnchor: [${CAMPING_MARKER_ICON_ANCHOR[0]}, ${CAMPING_MARKER_ICON_ANCHOR[1]}]
               })
-            }).addTo(map).bindPopup(\`
-          <div class="custom-popup" style="display: flex; flex-direction: row; gap: 0; min-width: 320px; max-width: 380px; align-items: stretch;">
-            <div style="position: relative; flex: 0 0 45%; width: 45%; min-width: 90px; max-width: 160px; aspect-ratio: 1/1; border-radius: 0; background: ${isDark ? '#1e293b' : '#f3f4f6'}; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0; padding: 0; left: 0; top: 0; border: none;">
-              ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center;"><svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 137.5 137.5'><g><path fill='none' d='M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z'/><path fill='${isDark ? "#ffffff" : "#444444ff"}' d='M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z'/></g></svg></div>` : `<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
-                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 137.5 137.5"><g><path fill="none" d="M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z"/><path fill="${isDark ? '#ffffff' : '#444444ff'}" d="M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z"/></g></svg>
+            }).addTo(map);
+            if (${mapTheme.isKampfire ? 'true' : 'false'}) {
+              marker${idx}.on('click', function() {
+                try {
+                  var markerEl = marker${idx}.getElement();
+                  if (window.__kampfireActiveMarker && window.__kampfireActiveMarker !== markerEl) {
+                    window.__kampfireActiveMarker.classList.remove('kampfire-selected');
+                  }
+                  if (markerEl) {
+                    markerEl.classList.add('kampfire-selected');
+                    window.__kampfireActiveMarker = markerEl;
+                  }
+                } catch (e) {}
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'markerPressed',
+                    id: ${marker.id ? marker.id : 'null'},
+                    latitude: ${marker.lat},
+                    longitude: ${marker.lng}
+                  }));
+                }
+              });
+            } else {
+              marker${idx}.bindPopup(\`
+          <div class="custom-popup" style="${popupTheme.popupCard}">
+            <div style="position: relative; flex: 0 0 45%; width: 45%; min-width: 90px; max-width: 160px; aspect-ratio: 1/1; border-radius: 0; background: ${popupTheme.imageBoxBg}; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0; padding: 0; left: 0; top: 0; border: none;">
+              ${(marker.images && marker.images[0]) ? `<img src='${marker.images[0]}' alt='' style="width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center;"><svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 137.5 137.5'><g><path fill='none' d='M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z'/><path fill='${popupTheme.imagePlaceholderFg}' d='M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z'/></g></svg></div>` : `<div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 137.5 137.5"><g><path fill="none" d="M0,125.17V0h137.5v137.5H0v-3.22l.26-.54h136.64l.33.54c-.21-.06-.5-.13-.54-.31-.27-1.29-.13-6.86,0-8.41l.54-.39c-.06.21-.14.52-.31.54-1.03.12-5.81.18-6.68,0l-.38-.54-.59.06c-18.63-30.16-37.18-60.35-55.64-90.57,5.23-9.02,10.59-17.99,16.09-26.9-.78-.59-6.46-4.27-6.82-4.09l-13.4,21.79c-.28.43-.79.36-1.18.13L54.31,3.58c-2.25,1.24-4.49,2.57-6.57,4.09l15.68,26.38.19.52c-18.36,30.21-36.83,60.37-55.44,90.49-1.2,1.03-6,.8-7.74.62l-.44-.49Z"/><path fill="${popupTheme.imagePlaceholderFg}" d="M129.86,125.17l-55.76-90.58,16.19-26.74c.04-.38-.26-.54-.51-.74-.65-.51-6.66-4.24-7.06-4.15l-13.84,22.49L54.68,3.06c-.28-.24-.48,0-.72.09-.59.23-6.72,4-6.94,4.35l16.11,27.09L7.64,124.9c-.87.72-6.18.02-7.64.27v9.11h137.24v-9.11h-7.37ZM86.04,125.17l-17.16-36.18-17.69,36.18h-9.92l27.6-56.82,27.08,56.82h-9.92Z"/></g></svg>
               </div>`}
               <!-- Favori butonu sol üstte, fotoğraf üzerinde -->
               <div style="position: absolute; top: 6px; left: 6px; z-index: 3;">
-                <div style="font-size: 0; color: #ef4444; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: ${marker.isFavorite ? '#ef4444' : 'rgba(254,242,242,0.95)'}; border: 1px solid #ef4444; transition: background 0.2s; cursor:pointer;" onclick="window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({type: 'toggleFavorite', latitude: ${marker.lat}, longitude: ${marker.lng} }))" title="Favorilere ekle/kaldır">
+                <div style="${popupTheme.favoriteBtn(marker.isFavorite)}" onclick="window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({type: 'toggleFavorite', latitude: ${marker.lat}, longitude: ${marker.lng} }))" title="Favorilere ekle/kaldır">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="${marker.isFavorite ? '#ffffff' : 'none'}" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12.1 18.55l-.1.1l-.11-.1C7.14 14.24 4 11.39 4 8.5C4 6.5 5.5 5 7.5 5c1.54 0 3.04 1.04 3.57 2.36h1.87C13.46 6.04 14.96 5 16.5 5C18.5 5 20 6.5 20 8.5c0 2.89-3.14 5.74-7.9 10.05z" stroke="#ef4444" stroke-width="1.5" fill="${marker.isFavorite ? '#ffffff' : 'none'}"/>
                   </svg>
@@ -3275,35 +3301,35 @@ export default function MapScreen() {
                   ${marker.name.replace(/'/g, "\\'")}
                 </div>
                 <span class="popup-type" style="margin-bottom: 2px;">${marker.typeLabel}</span>
-                ${marker.isUserSubmitted ? '<div style="font-size: 12px; color: ' + (isDark ? '#a78bfa' : '#8b5cf6') + ';">⭐ Kullanıcı Ekledi</div>' : ''}
-                ${marker.distance && marker.distance !== '' ? '<div style="font-size: 12px; color: ' + (isDark ? '#94a3b8' : '#6b7280') + ';">📍 ' + marker.distance + '</div>' : ''}
+                ${marker.isUserSubmitted ? '<div style="' + popupTheme.userSubmitted + '">⭐ Kullanıcı Ekledi</div>' : ''}
+                ${marker.distance && marker.distance !== '' ? '<div style="' + popupTheme.distance + '">📍 ' + marker.distance + '</div>' : ''}
               </div>
               <!-- Olanaklar (amenities) ikonları alt satırda -->
               <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 4px 0 0 0; min-height: 24px;">
                 ${(marker.amenities && Array.isArray(marker.amenities) && marker.amenities.length > 0) ? marker.amenities.map(am => `
-                  <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: ${isDark ? '#334155' : '#f3f4f6'}; margin-right: 2px; font-size: 16px;" title="${am}">
+                  <span style="${popupTheme.amenityChip}" title="${am}">
                     ${marker.getAmenityIcon(am)}
                   </span>
                 `).join('') : ''}
               </div>
               <!-- Alt aksiyonlar (mercek ve harita) -->
               <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 8px;">
-                  <div style="font-size: 0; color: ${popupAccent}; flex: 1; display: flex; align-items: center; justify-content: flex-start; cursor:pointer;" onclick="openCampingAreaDetail(${marker.lat}, ${marker.lng})">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${isDark ? '#94a3b8' : '#5a5a5a'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-plus-icon lucide-circle-plus"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>  
-                    <span style="font-size: 13px; color: ${isDark ? '#e2e8f0' : '#222'}; margin-left: 5px">Detaylı Bilgi</span>
+                  <div style="${popupTheme.detailRow}" onclick="openCampingAreaDetail(${marker.lat}, ${marker.lng})">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${popupTheme.detailStroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-plus-icon lucide-circle-plus"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+                    <span style="${popupTheme.detailLabel}">Detaylı Bilgi</span>
                   </div>
                   <div style="position: relative; display: flex; align-items: center;">
                     <div style="width: 24px; height: 24px; background: none; border-radius: 8%; display: flex; align-items: center; justify-content: center; position: relative; cursor:pointer;" onclick="toggleMapMenu(this, ${marker.lat}, ${marker.lng})">
                       ${getSVGIcon('navigation', { width: 18, height: 18 })}
                     </div>
-                    <div class="map-menu" style="display: none; position: absolute; top: 55px; left: -85px; background: ${isDark ? '#1e293b' : '#fff'}; border: 1px solid ${isDark ? '#334155' : '#e5e7eb'}; border-radius: 8px; box-shadow: 0 2px 8px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.12)'}; padding: 6px 0; min-width: 120px; z-index: 999;">
+                    <div class="map-menu" style="${popupTheme.mapMenu}">
                     <div style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; cursor: pointer;" onclick="openGoogleMaps(${marker.lat}, ${marker.lng}); hideMapMenu(this);">
                       <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/><path d="M1 1h22v22H1z" fill="none"/></svg>
-                      <span style="font-size: 13px; color: ${isDark ? '#e2e8f0' : '#222'};">Google Haritalar</span>
+                      <span style="${popupTheme.menuItemText}">Google Haritalar</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; cursor: pointer;" onclick="openYandexMaps(${marker.lat}, ${marker.lng}); hideMapMenu(this);">
                       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="44" fill="none" viewBox="0 0 26 26"><path fill="#F8604A" d="M26 13c0-7.18-5.82-13-13-13S0 5.82 0 13s5.82 13 13 13 13-5.82 13-13Z"></path><path fill="#fff" d="M13.353 14.343c.76 1.664 1.013 2.243 1.013 4.241v2.65h-2.714v-4.467L6.534 5.634h2.83l3.989 8.71Zm3.346-8.709-3.32 7.542h2.759l3.328-7.542h-2.767Z"></path></svg>
-                      <span style="font-size: 13px; color: ${isDark ? '#e2e8f0' : '#222'};">Yandex Haritalar</span>
+                      <span style="${popupTheme.menuItemText}">Yandex Haritalar</span>
                     </div>
                   </div>
                   
@@ -3312,7 +3338,7 @@ export default function MapScreen() {
                 <!-- Kamp Planla Seçim Butonu -->
                 ${(selectForPlanMode || isLocationPickerMode) ? `
                 <div style="margin-top:6px; padding: 0 10px 6px 10px;">
-                  <button class="select-for-plan-btn" data-payload="${encodeURIComponent(JSON.stringify({ type: 'selectCampingAreaForPlan', id: marker.id ? marker.id : null, latitude: marker.lat, longitude: marker.lng, name: (marker.name || ''), areaType: (marker.typeLabel || '') }))}" style="width:100%; padding:8px 10px; background:${popupAccent}; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Bu kampı seç</button>
+                  <button class="select-for-plan-btn" data-payload="${encodeURIComponent(JSON.stringify({ type: 'selectCampingAreaForPlan', id: marker.id ? marker.id : null, latitude: marker.lat, longitude: marker.lng, name: (marker.name || ''), areaType: (marker.typeLabel || '') }))}" style="${popupTheme.selectForPlanBtn}">Bu kampı seç</button>
                 </div>
               ` : ''}
               </div>
@@ -3322,11 +3348,17 @@ export default function MapScreen() {
             // Marker referansını diziye ekle
             // Popup açılıp kapandığında React Native'e bildir
             marker${idx}.on('popupopen', function() {
-              if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({type: 'popupopen'}));
+              if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'popupopen',
+                id: ${marker.id ? marker.id : 'null'},
+                latitude: ${marker.lat},
+                longitude: ${marker.lng}
+              }));
             });
             marker${idx}.on('popupclose', function() {
               if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({type: 'popupclose'}));
             });
+            }
             markerRefs.push({ marker: marker${idx}, lat: ${marker.lat}, lng: ${marker.lng} });
           `).join('')}
           }
@@ -3339,7 +3371,27 @@ export default function MapScreen() {
             if (found) {
               map.setView([lat, lng], 16);
               setTimeout(function() {
-                found.marker.openPopup();
+                if (${mapTheme.isKampfire ? 'true' : 'false'}) {
+                  try {
+                    var markerEl = found.marker.getElement();
+                    if (window.__kampfireActiveMarker && window.__kampfireActiveMarker !== markerEl) {
+                      window.__kampfireActiveMarker.classList.remove('kampfire-selected');
+                    }
+                    if (markerEl) {
+                      markerEl.classList.add('kampfire-selected');
+                      window.__kampfireActiveMarker = markerEl;
+                    }
+                  } catch (e) {}
+                  if (window.ReactNativeWebView) {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'markerPressed',
+                      latitude: lat,
+                      longitude: lng
+                    }));
+                  }
+                } else {
+                  found.marker.openPopup();
+                }
               }, 500);
             }
           };
@@ -3441,7 +3493,19 @@ export default function MapScreen() {
   // HTML çıktısını memoize et - gereksiz re-render'ları önle
   const mapHTML = useMemo(() => {
     return generateMapHTML();
-  }, [location, filteredCampingAreas, mapMoveQuery, isLocationPickerMode, selectForPlanMode, isConnected, favorites, scheme, darkMapStyle]);
+  }, [
+    location,
+    filteredCampingAreas,
+    mapMoveQuery,
+    isLocationPickerMode,
+    selectForPlanMode,
+    isConnected,
+    favorites,
+    scheme,
+    darkMapStyle,
+    colors,
+    themeVariantId,
+  ]);
 
   const handleWebViewMessage = (event: any) => {
     try {
@@ -3525,20 +3589,24 @@ export default function MapScreen() {
           longitude: data.longitude
         });
         if (isMounted.current) setShowAddModal(true);
+      } else if (data.type === 'markerPressed') {
+        const area = resolveAreaFromPayload(data);
+        if (area && isMounted.current) {
+          setKampfireFocusedArea(area as CampingArea);
+          setSelectedCampingArea(area as CampingArea);
+          setKampfireSheetVisible(true);
+          setShowMapPopup(false);
+        }
       } else if (data.type === 'campingAreaClicked') {
-        const area = filteredCampingAreas.find((a: any) =>
-          Math.abs(a.latitude - data.latitude) < 0.0001 &&
-          Math.abs(a.longitude - data.longitude) < 0.0001
-        );
+        const area = resolveAreaFromPayload(data);
         if (area && isMounted.current) {
           setSelectedCampingArea(area as CampingArea);
+          setKampfireFocusedArea(area as CampingArea);
+          setKampfireSheetVisible(true);
           setShowDetailModal(true);
         }
       } else if (data.type === 'toggleFavorite') {
-        const area = filteredCampingAreas.find((a: any) =>
-          Math.abs(a.latitude - data.latitude) < 0.0001 &&
-          Math.abs(a.longitude - data.longitude) < 0.0001
-        );
+        const area = resolveAreaFromPayload(data);
         if (area) {
           handleToggleFavorite(area as CampingArea);
         }
@@ -3555,8 +3623,14 @@ export default function MapScreen() {
         }
       } else if (data.type === 'popupopen') {
         setShowMapPopup(true);
+        const area = resolveAreaFromPayload(data);
+        if (area) {
+          setKampfireFocusedArea(area);
+          setKampfireSheetVisible(true);
+        }
       } else if (data.type === 'popupclose') {
         setShowMapPopup(false);
+        setKampfireFocusedArea(null);
       } else if (data.type === 'requestCachedTile') {
         // Offline modda cache'den tile iste
         // 'soft' modda light tile kullanılıyor (CSS filter ile dark yapılıyor)
@@ -3890,10 +3964,347 @@ export default function MapScreen() {
   // Harita merkezine göre kamp alanlarını gösteren butonun fonksiyonu
   const handleShowMapMoveResults = () => {
     if (mapCenter) {
+      setKampfireFocusedArea(null);
       setMapMoveQuery(mapCenter);
       setShowMapMoveButton(false);
     }
   };
+
+  const isKampfireMapView = isKampfireTheme && viewMode === 'map';
+  const offlineLocked = !user?.offline_enabled && !isConnected;
+  const nearbyCount = Array.isArray(filteredCampingAreas)
+    ? filteredCampingAreas.length
+    : 0;
+  const kampfireSheetArea =
+    kampfireFocusedArea ?? (showDetailModal ? selectedCampingArea : null) ?? null;
+  const isFilterActive =
+    turkeyWideKeys.length > 0 ||
+    selectedTags.length < campingTypes.length ||
+    selectedFilters.length < FILTERS.filter((f) => f.visible).length ||
+    (typeof selectedProvinces !== 'undefined' && selectedProvinces.length > 0);
+  const kampfireSheetAreaType = kampfireSheetArea
+    ? typeof (kampfireSheetArea as any)?.tags === 'string'
+      ? ((kampfireSheetArea as any).tags as string)
+      : (kampfireSheetArea as any)?.tags?.type ||
+        (kampfireSheetArea as any)?.type ||
+        ''
+    : '';
+  const mapSheetTitle = kampfireSheetArea?.name
+    ? kampfireSheetArea.name
+    : mapMoveQuery
+      ? 'Harita merkezine göre sonuçlar'
+      : 'Yakındaki Kamp Alanları';
+  const mapSheetSubtitle = kampfireSheetArea
+    ? [
+        getCampingTypeLabel(kampfireSheetAreaType),
+        kampfireHeroLocation,
+      ]
+        .filter(Boolean)
+        .join(' · ') || 'Kamp alanı detayı'
+    : location
+      ? 'Haritadaki işaretlere dokunarak detayları görün'
+      : 'Konum bilgisi alınıyor...';
+  const mapModeMeta = kampfireSheetArea
+    ? kampfireHeroLocation || 'Seçili kamp alanı'
+    : mapMoveQuery
+      ? 'Harita merkezi'
+      : hasLocationPermission === false
+        ? 'Konum kapalı'
+        : 'Konum aktif';
+  const heroWeatherLabel = kampfireHeroWeather
+    ? `${
+        kampfireHeroWeather.temp != null ? `${kampfireHeroWeather.temp}°C · ` : ''
+      }${kampfireHeroWeather.text}`
+    : isConnected
+      ? 'Hava durumu yükleniyor'
+      : 'Offline hava verisi yok';
+  const kampfireSheetEyebrowText = kampfireSheetArea
+    ? getCampingTypeLabel(kampfireSheetAreaType) || 'KAMPFIRE GOLD'
+    : 'KAMPFIRE GOLD';
+
+  const handleToggleViewMode = () => {
+    if (offlineLocked) {
+      Alert.alert(
+        'Offline Özellik Gerekli',
+        'Liste görünümü için Premium aboneliğe ihtiyacınız var.',
+        [
+          { text: 'İptal', style: 'cancel' },
+          {
+            text: 'Premium Ol',
+            onPress: () => router.push('/premium' as any),
+            style: 'default',
+          },
+        ],
+      );
+      return;
+    }
+    if (isMounted.current) {
+      if (viewMode === 'list' && notificationCampingAreas) {
+        setNotificationCampingAreas(null);
+      }
+      if (viewMode === 'map') {
+        setKampfireFocusedArea(null);
+      }
+      changeViewMode(viewMode === 'map' ? 'list' : 'map');
+    }
+  };
+
+  const handleOpenSearch = async () => {
+    if (offlineLocked) {
+      Alert.alert(
+        'Offline Özellik Gerekli',
+        'Arama özelliği için Premium aboneliğe ihtiyacınız var.',
+        [
+          { text: 'İptal', style: 'cancel' },
+          {
+            text: 'Premium Ol',
+            onPress: () => router.push('/premium' as any),
+            style: 'default',
+          },
+        ],
+      );
+      return;
+    }
+    if (!isMounted.current) return;
+    try {
+      const allAreas = await getDatabase().getAllCampingAreas();
+      if (isMounted.current) {
+        setSearchAllAreas(Array.isArray(allAreas) ? allAreas : []);
+        setViewMode('search');
+      }
+    } catch {
+      if (isMounted.current) {
+        setSearchAllAreas([]);
+      }
+    }
+  };
+
+  const handleToggleFilters = () => {
+    if (offlineLocked) {
+      Alert.alert(
+        'Offline Özellik Gerekli',
+        'Filtre özelliği için Premium aboneliğe ihtiyacınız var.',
+        [
+          { text: 'İptal', style: 'cancel' },
+          {
+            text: 'Premium Ol',
+            onPress: () => router.push('/premium' as any),
+            style: 'default',
+          },
+        ],
+      );
+      return;
+    }
+    if (isMounted.current) setShowFilters(!showFilters);
+  };
+
+  const getRelevantAnnouncementIds = useCallback(async (): Promise<number[]> => {
+    try {
+      const db = getDatabase();
+      const allAnnouncements = await db.listAnnouncementsLocal({ onlyActive: true });
+      const matchedValilikId = await SecureStore.getItemAsync('matchedValilikId');
+      if (!Array.isArray(allAnnouncements)) return [];
+      return allAnnouncements
+        .filter((a: any) => {
+          if (a.community_id !== 0) {
+            return !!(
+              user?.community_id &&
+              String(a.community_id) === String(user.community_id)
+            );
+          }
+          if (a.community_id === 0 && matchedValilikId) {
+            return String(a.valilik_id) === String(matchedValilikId);
+          }
+          return false;
+        })
+        .map((a: any) => Number(a.id))
+        .filter((id) => !Number.isNaN(id));
+    } catch {
+      return [];
+    }
+  }, [user?.community_id]);
+
+  const refreshKampfireAnnouncementBadge = useCallback(async () => {
+    if (!isKampfireTheme) {
+      setAnnouncementUnreadCount(0);
+      return;
+    }
+    try {
+      const visibleIds = await getRelevantAnnouncementIds();
+      const bootstrapped = await AsyncStorage.getItem(
+        KAMPFIRE_READ_ANNOUNCEMENT_BOOTSTRAP_KEY,
+      );
+      if (bootstrapped !== '1') {
+        await setLargeItemAsync(
+          KAMPFIRE_READ_ANNOUNCEMENT_IDS_KEY,
+          JSON.stringify(visibleIds),
+        );
+        await AsyncStorage.setItem(
+          KAMPFIRE_READ_ANNOUNCEMENT_BOOTSTRAP_KEY,
+          '1',
+        );
+        setAnnouncementUnreadCount(0);
+        return;
+      }
+      const readRaw = await getLargeItemAsync(KAMPFIRE_READ_ANNOUNCEMENT_IDS_KEY);
+      const readIds = readRaw ? JSON.parse(readRaw) : [];
+      const unreadCount = visibleIds.filter((id) => !readIds.includes(id)).length;
+      setAnnouncementUnreadCount(unreadCount);
+    } catch {
+      setAnnouncementUnreadCount(0);
+    }
+  }, [getRelevantAnnouncementIds, isKampfireTheme]);
+
+  const markKampfireAnnouncementsRead = useCallback(async () => {
+    const visibleIds = await getRelevantAnnouncementIds();
+    await setLargeItemAsync(
+      KAMPFIRE_READ_ANNOUNCEMENT_IDS_KEY,
+      JSON.stringify(visibleIds),
+    );
+    await AsyncStorage.setItem(
+      KAMPFIRE_READ_ANNOUNCEMENT_BOOTSTRAP_KEY,
+      '1',
+    );
+    setAnnouncementUnreadCount(0);
+  }, [getRelevantAnnouncementIds]);
+
+  const openKampfireAnnouncements = useCallback(async () => {
+    try {
+      await markKampfireAnnouncementsRead();
+    } catch {
+      // ignore
+    }
+    router.push('/announcements' as any);
+  }, [markKampfireAnnouncementsRead, router]);
+
+  const resolveAreaFromPayload = (payload: any): CampingArea | null => {
+    const byId =
+      payload?.id != null
+        ? filteredCampingAreas.find(
+            (a: any) => String((a as any).id) === String(payload.id),
+          )
+        : null;
+    if (byId) return byId as CampingArea;
+    const byCoords = filteredCampingAreas.find(
+      (a: any) =>
+        Math.abs(a.latitude - payload.latitude) < 0.0001 &&
+        Math.abs(a.longitude - payload.longitude) < 0.0001,
+    );
+    return byCoords ? (byCoords as CampingArea) : null;
+  };
+
+  useEffect(() => {
+    if (!isKampfireTheme || viewMode !== 'map') return;
+
+    const targetLat =
+      kampfireSheetArea?.latitude ??
+      mapMoveQuery?.latitude ??
+      location?.coords?.latitude ??
+      mapCenter?.latitude;
+    const targetLng =
+      kampfireSheetArea?.longitude ??
+      mapMoveQuery?.longitude ??
+      location?.coords?.longitude ??
+      mapCenter?.longitude;
+
+    if (typeof targetLat !== 'number' || typeof targetLng !== 'number') return;
+
+    const cacheKey = `${targetLat.toFixed(3)}_${targetLng.toFixed(3)}`;
+    let cancelled = false;
+
+    setKampfireHeroLocation(kampfireSheetArea?.name || '');
+    setKampfireHeroWeather(null);
+
+    (async () => {
+      try {
+        const cachedLocation = heroLocationCacheRef.current[cacheKey];
+        if (cachedLocation) {
+          if (!cancelled) setKampfireHeroLocation(cachedLocation);
+        } else if (isConnected) {
+          const locationName = await getLocationNameFromOSM(targetLat, targetLng);
+          if (!cancelled && locationName) {
+            heroLocationCacheRef.current[cacheKey] = locationName;
+            setKampfireHeroLocation(locationName);
+          }
+        }
+      } catch {
+        if (!cancelled && kampfireSheetArea?.name) {
+          setKampfireHeroLocation(kampfireSheetArea.name);
+        }
+      }
+
+      try {
+        const cachedWeather = heroWeatherCacheRef.current[cacheKey];
+        if (cachedWeather) {
+          if (!cancelled) setKampfireHeroWeather(cachedWeather);
+        } else if (isConnected) {
+          const weatherData = await fetchOpenMeteoForecast(targetLat, targetLng, 1);
+          const today = weatherData?.days?.[0];
+          const nextWeather = {
+            temp:
+              typeof today?.avgTemp === 'number'
+                ? today.avgTemp
+                : typeof today?.maxTemp === 'number'
+                  ? today.maxTemp
+                  : null,
+            text: today?.text || 'Hava durumu',
+          };
+          heroWeatherCacheRef.current[cacheKey] = nextWeather;
+          if (!cancelled) setKampfireHeroWeather(nextWeather);
+        }
+      } catch {
+        if (!cancelled) setKampfireHeroWeather(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isKampfireTheme,
+    viewMode,
+    kampfireSheetArea?.id,
+    kampfireSheetArea?.latitude,
+    kampfireSheetArea?.longitude,
+    mapMoveQuery?.latitude,
+    mapMoveQuery?.longitude,
+    mapCenter?.latitude,
+    mapCenter?.longitude,
+    location?.coords?.latitude,
+    location?.coords?.longitude,
+    isConnected,
+  ]);
+
+  useEffect(() => {
+    refreshKampfireAnnouncementBadge();
+  }, [refreshKampfireAnnouncementBadge]);
+
+  useEffect(() => {
+    const refresh = () => {
+      refreshKampfireAnnouncementBadge();
+    };
+    const openTentSetup = () => {
+      if (!isMounted.current) return;
+      changeViewMode('map');
+      setShowTentSetup(true);
+    };
+    onEvent('announcements:updated', refresh);
+    onEvent('announcements:new', refresh);
+    onEvent('valilikIdChanged', refresh);
+    onEvent('kampfire:openTentSetup', openTentSetup);
+    return () => {
+      offEvent('announcements:updated', refresh);
+      offEvent('announcements:new', refresh);
+      offEvent('valilikIdChanged', refresh);
+      offEvent('kampfire:openTentSetup', openTentSetup);
+    };
+  }, [refreshKampfireAnnouncementBadge]);
+
+  useEffect(() => {
+    if (isKampfireTheme) {
+      setKampfireSheetVisible(true);
+    }
+  }, [isKampfireTheme]);
 
   if (error) {
     return (
@@ -3916,6 +4327,7 @@ export default function MapScreen() {
       }} />
       
       {/* Header */}
+      {!isKampfireMapView && (
       <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Kamp Alanları</Text>
         <View style={styles.headerActions}>
@@ -4070,6 +4482,7 @@ export default function MapScreen() {
           </TouchableOpacity>
         </View>
       </View>
+      )}
 
       {/* Filters */}
       {showFilters && (
@@ -4216,6 +4629,7 @@ export default function MapScreen() {
               setSearchSelectedArea(area);
               setShowDetailModal(true);
               setSelectedCampingArea(area);
+              setKampfireFocusedArea(area as any);
             }}
             onShowOnMap={area => {
               const lat = (area as any).latitude;
@@ -4223,6 +4637,7 @@ export default function MapScreen() {
               if (lat && lng) {
                 const timeoutId1 = setTimeout(() => {
                   if (!isMounted.current) return;
+                  setKampfireFocusedArea(area as any);
                   setMapCenter({ latitude: lat, longitude: lng });
                   setMapMoveQuery({ latitude: lat, longitude: lng });
                   changeViewMode('map');
@@ -4303,9 +4718,148 @@ export default function MapScreen() {
             {(!user?.offline_enabled && !isConnected) && (
               <BlurOverlay visible onPremiumPress={() => router.push('/premium' as any)} />
             )}
+
+            {isKampfireMapView && !isLocationPickerMode && !selectForPlanMode && (
+              <View style={styles.kampfireTopOverlay} pointerEvents="box-none">
+                <LinearGradient
+                  colors={['rgba(17, 20, 17, 0.92)', 'rgba(10, 14, 12, 0.82)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[
+                    styles.kampfireOverlayRow,
+                    { borderColor: 'rgba(212,175,106,0.14)' },
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={[
+                      styles.kampfireOverlayIconButton,
+                      {
+                        backgroundColor: 'rgba(14,18,16,0.92)',
+                        borderColor: 'rgba(212,175,106,0.14)',
+                      },
+                    ]}
+                    onPress={() => setShowKampfireMenu(true)}
+                    disabled={isBusy}
+                  >
+                    <Menu size={18} color="#D4AF6A" />
+                  </TouchableOpacity>
+
+                  <View style={styles.kampfireBrandBlock}>
+                    <Text style={styles.kampfireBrandTitle}>KAMP DEFTERİM</Text>
+                    <Text style={styles.kampfireBrandSubtitle}>Kampını planla · anılarını sakla</Text>
+                    <Text style={styles.kampfireBrandMeta} numberOfLines={1}>
+                      {kampfireHeroLocation ? `${kampfireHeroLocation} · ` : ''}
+                      {heroWeatherLabel}
+                    </Text>
+                  </View>
+
+                  <View style={styles.kampfireOverlayActionGroup}>
+                    <TouchableOpacity
+                      style={[
+                        styles.kampfireOverlayIconButton,
+                        {
+                          backgroundColor: 'rgba(14,18,16,0.92)',
+                          borderColor: 'rgba(212,175,106,0.14)',
+                        },
+                      ]}
+                      onPress={openKampfireAnnouncements}
+                      disabled={isBusy}
+                    >
+                      <Bell size={18} color="#D4AF6A" />
+                      {announcementUnreadCount > 0 && (
+                        <View style={styles.kampfireBellBadge}>
+                          <Text style={styles.kampfireBellBadgeText}>
+                            {announcementUnreadCount > 9
+                              ? '9+'
+                              : String(announcementUnreadCount)}
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </LinearGradient>
+
+                <View style={styles.kampfireMapActionStack}>
+                  {!selectForPlanMode && (
+                    <TouchableOpacity
+                      style={[
+                        styles.kampfireMapActionButton,
+                        {
+                          backgroundColor: 'rgba(14,18,16,0.92)',
+                          borderColor: 'rgba(212,175,106,0.14)',
+                        },
+                        isBusy && { opacity: 0.45 },
+                      ]}
+                      onPress={() => {
+                        if (!isMounted.current) return;
+                        setFabMenuVisible(true);
+                      }}
+                      disabled={isBusy}
+                    >
+                      <Plus size={20} color="#D4AF6A" />
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.kampfireMapActionButton,
+                      {
+                        backgroundColor: 'rgba(14,18,16,0.92)',
+                        borderColor: 'rgba(212,175,106,0.14)',
+                      },
+                      isBusy && { opacity: 0.45 },
+                    ]}
+                    onPress={handleShowCurrentLocation}
+                    disabled={isBusy}
+                  >
+                    <LocateFixed size={20} color="#D4AF6A" />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.kampfireMapActionButton,
+                      {
+                        backgroundColor: showMapMoveButton
+                          ? 'rgba(212,175,106,0.18)'
+                          : 'rgba(14,18,16,0.92)',
+                        borderColor: 'rgba(212,175,106,0.14)',
+                      },
+                      (offlineLocked || !showMapMoveButton) && { opacity: 0.45 },
+                    ]}
+                    onPress={() => {
+                      if (offlineLocked) {
+                        Alert.alert(
+                          'Offline Özellik Gerekli',
+                          'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
+                          [
+                            { text: 'İptal', style: 'cancel' },
+                            {
+                              text: 'Premium Ol',
+                              onPress: () => router.push('/premium' as any),
+                              style: 'default',
+                            },
+                          ],
+                        );
+                        return;
+                      }
+                      handleShowMapMoveResults();
+                    }}
+                    disabled={offlineLocked || !showMapMoveButton}
+                  >
+                    <Binoculars size={20} color="#D4AF6A" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
             {/* Harita kaydırıldığında çıkan buton */}
-            {showMapMoveButton && mapCenter && !isLocationPickerMode && !showMapPopup && (
-              <View style={styles.mapMoveButtonContainer} pointerEvents="box-none">
+            {!isKampfireMapView && showMapMoveButton && mapCenter && !isLocationPickerMode && !showMapPopup && (
+              <View
+                style={[
+                  styles.mapMoveButtonContainer,
+                  isKampfireMapView && styles.kampfireMapMoveButtonContainer,
+                ]}
+                pointerEvents="box-none"
+              >
                 <TouchableOpacity 
                   style={[
                     styles.fab, 
@@ -4375,8 +4929,11 @@ export default function MapScreen() {
           )}
 
           {/* Floating Action Buttons */}
-          {!isLocationPickerMode && !showMapPopup && (
-            <View style={styles.fabContainer} pointerEvents={isBusy ? 'none' : 'auto'}>
+          {!isKampfireMapView && !isLocationPickerMode && !showMapPopup && (
+            <View
+              style={[styles.fabContainer, isKampfireMapView && styles.kampfireFabContainer]}
+              pointerEvents={isBusy ? 'none' : 'auto'}
+            >
               {!selectForPlanMode && (
                 <View style={{ alignItems: 'center' }}>
                   <TouchableOpacity
@@ -4402,11 +4959,107 @@ export default function MapScreen() {
               </TouchableOpacity>
             </View>
           )}
+            {/* Kampfire quick menu */}
+            <Modal
+              visible={showKampfireMenu}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setShowKampfireMenu(false)}
+            >
+              <TouchableOpacity
+                style={styles.kampfireMenuBackdrop}
+                activeOpacity={1}
+                onPress={() => setShowKampfireMenu(false)}
+              >
+                <View style={styles.kampfireMenuAnchor}>
+                  <LinearGradient
+                    colors={['rgba(18, 22, 18, 0.98)', 'rgba(10, 14, 12, 0.98)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.kampfireMenuCard}
+                  >
+                    <TouchableOpacity
+                      style={styles.kampfireMenuItem}
+                      onPress={() => {
+                        setShowKampfireMenu(false);
+                        handleToggleViewMode();
+                      }}
+                    >
+                      <List size={16} color="#D4AF6A" />
+                      <Text style={styles.kampfireMenuItemText}>
+                        {viewMode === 'map' ? 'Liste görünümü' : 'Harita görünümü'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.kampfireMenuItem}
+                      onPress={async () => {
+                        setShowKampfireMenu(false);
+                        await handleOpenSearch();
+                      }}
+                    >
+                      <Feather name="search" size={16} color="#D4AF6A" />
+                      <Text style={styles.kampfireMenuItemText}>Ara</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.kampfireMenuItem}
+                      onPress={() => {
+                        setShowKampfireMenu(false);
+                        handleToggleFilters();
+                      }}
+                    >
+                      <Filter size={16} color="#D4AF6A" />
+                      <Text style={styles.kampfireMenuItemText}>Filtreler</Text>
+                      {isFilterActive && <View style={styles.kampfireMenuDot} />}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.kampfireMenuItem}
+                      onPress={() => {
+                        setShowKampfireMenu(false);
+                        if (
+                          !isBusy &&
+                          !isFullSyncInProgressRef.current &&
+                          !syncProgress.isLoading
+                        ) {
+                          handleManualSync();
+                        }
+                      }}
+                    >
+                      <RefreshCw size={16} color="#D4AF6A" />
+                      <Text style={styles.kampfireMenuItemText}>Senkronize et</Text>
+                    </TouchableOpacity>
+                  </LinearGradient>
+                </View>
+              </TouchableOpacity>
+            </Modal>
             {/* FAB menu for add options */}
             <Modal visible={fabMenuVisible} transparent animationType="fade" onRequestClose={() => setFabMenuVisible(false)}>
               <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setFabMenuVisible(false)}>
-                <View style={{ position: 'absolute', right: 20, bottom: 240 }}>
-                  <View style={{ backgroundColor: colors.surface, borderRadius: 10, padding: 8, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6 }}>
+                <View
+                  style={
+                    isKampfireMapView
+                      ? { position: 'absolute', right: 16, top: 132 }
+                      : { position: 'absolute', right: 20, bottom: 240 }
+                  }
+                >
+                  <View
+                    style={{
+                      backgroundColor: isKampfireMapView ? '#0E1210' : colors.surface,
+                      borderRadius: 10,
+                      padding: 8,
+                      elevation: 10,
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 6,
+                      borderWidth: isKampfireMapView ? 1 : 0,
+                      borderColor: isKampfireMapView
+                        ? 'rgba(212,175,106,0.14)'
+                        : 'transparent',
+                    }}
+                  >
                     <TouchableOpacity
                       style={[styles.menuItem]}
                       onPress={() => {
@@ -4511,7 +5164,13 @@ export default function MapScreen() {
             showMapPopup,
             shouldRender: hasLocationPermission === false && !isLocationPickerMode && !showMapPopup
           }), hasLocationPermission === false && !isLocationPickerMode && !showMapPopup) && (
-            <View style={styles.locationPermissionContainer} pointerEvents="box-none">
+            <View
+              style={[
+                styles.locationPermissionContainer,
+                isKampfireMapView && styles.kampfireLocationPermissionContainer,
+              ]}
+              pointerEvents="box-none"
+            >
               <TouchableOpacity
                 style={[styles.locationPermissionButton, { backgroundColor: colors.primary }]}
                 onPress={() => {
@@ -4528,58 +5187,360 @@ export default function MapScreen() {
             </View>
           )}
 
-          {/* Info Panel */}
+          {/* Info Panel / Kampfire Bottom Sheet */}
           {!isLocationPickerMode && (
-            <View style={[styles.infoPanel, { backgroundColor: colors.surface }]} pointerEvents={isBusy ? 'none' : 'auto'}>
-              <View style={styles.infoPanelHeader}>
-                <MapPin size={16} color={colors.primary} />
-                <Text style={[styles.infoPanelTitle, { color: colors.text }]}>
-                  {Array.isArray(filteredCampingAreas) ? filteredCampingAreas.length : 0} kamp alanı yakınınızda
-                </Text>
-              </View>
-              <View style={styles.infoPanelContent}>
-                <Text style={[styles.infoPanelSubtitle, { color: colors.muted }]}>
-                  {location ? 'Haritadaki işaretlere dokunarak detayları görün' : 'Konum bilgisi alınıyor...'}
-            </Text>
-            {location && (
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity 
-                  style={[styles.planCampButton, { backgroundColor: '#f3e8ff', borderColor: '#7c3aed' }, isBusy ? { opacity: 0.6 } : {}]}
-                  onPress={handlePlanCamp}
-                  disabled={isBusy}
+            isKampfireMapView ? (
+              kampfireSheetVisible ? (
+                <LinearGradient
+                  colors={['rgba(18, 22, 18, 0.96)', 'rgba(10, 14, 12, 0.98)']}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={[
+                    styles.kampfireBottomSheet,
+                    kampfireSheetExpanded && styles.kampfireBottomSheetExpanded,
+                    { borderColor: 'rgba(212,175,106,0.14)' },
+                  ]}
+                  pointerEvents={isBusy ? 'none' : 'auto'}
                 >
-                  {hasDraftPlan && <View style={[styles.draftDot, { backgroundColor: colors.danger }]} />}
-                  <Calendar size={14} color="#7c3aed" />
-                  <Text style={[styles.planCampButtonText, { color: '#7c3aed' }]}>Kamp Planla</Text>
-                  {planCount > 0 && (
-                    <View style={[styles.planBadge, { backgroundColor: colors.danger }]}>
-                      <Text style={[styles.planBadgeText, { color: '#fff' }]}>{planCount > 99 ? '99+' : String(planCount)}</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setKampfireSheetExpanded((prev) => !prev)}
+                    style={styles.kampfireBottomSheetHandleTap}
+                  >
+                    <View
+                      style={[
+                        styles.kampfireBottomSheetHandle,
+                        { backgroundColor: 'rgba(212,175,106,0.24)' },
+                      ]}
+                    />
+                  </TouchableOpacity>
+                  <View style={styles.kampfireSheetHeaderRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.kampfireSheetEyebrow}>{kampfireSheetEyebrowText}</Text>
+                      <Text style={styles.kampfireSheetTitle}>{mapSheetTitle}</Text>
+                      <Text style={styles.kampfireSheetSubtitle}>{mapSheetSubtitle}</Text>
+                    </View>
+                    <View style={styles.kampfireSheetHeaderActions}>
+                      <View
+                        style={[
+                          styles.kampfireCountBadge,
+                          {
+                            backgroundColor: 'rgba(212,175,106,0.12)',
+                            borderColor: 'rgba(212,175,106,0.16)',
+                          },
+                        ]}
+                      >
+                        <Text style={styles.kampfireCountBadgeValue}>{nearbyCount}</Text>
+                        <Text style={styles.kampfireCountBadgeLabel}>alan</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.kampfireSheetIconButton}
+                        onPress={() => setKampfireSheetExpanded((prev) => !prev)}
+                      >
+                        {kampfireSheetExpanded ? (
+                          <ChevronDown size={16} color="#D4AF6A" />
+                        ) : (
+                          <ChevronUp size={16} color="#D4AF6A" />
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.kampfireSheetIconButton}
+                        onPress={() => setKampfireSheetVisible(false)}
+                      >
+                        <X size={16} color="#D4AF6A" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.kampfireMetaRow}>
+                    <View
+                      style={[
+                        styles.kampfireMetaChip,
+                        {
+                          backgroundColor: 'rgba(212,175,106,0.08)',
+                          borderColor: 'rgba(212,175,106,0.12)',
+                        },
+                      ]}
+                    >
+                      <MapPin size={12} color="#D4AF6A" />
+                      <Text style={styles.kampfireMetaText}>{mapModeMeta}</Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.kampfireMetaChip,
+                        {
+                          backgroundColor: 'rgba(212,175,106,0.08)',
+                          borderColor: 'rgba(212,175,106,0.12)',
+                        },
+                      ]}
+                    >
+                      <Calendar size={12} color="#D4AF6A" />
+                      <Text style={styles.kampfireMetaText}>Planlar {planCount}</Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.kampfireMetaChip,
+                        {
+                          backgroundColor: 'rgba(212,175,106,0.08)',
+                          borderColor: 'rgba(212,175,106,0.12)',
+                        },
+                      ]}
+                    >
+                      <Text style={styles.kampfireMetaText}>{heroWeatherLabel}</Text>
+                    </View>
+                    {isGuest && (
+                      <View
+                        style={[
+                          styles.kampfireMetaChip,
+                          {
+                            backgroundColor: 'rgba(212,175,106,0.08)',
+                            borderColor: 'rgba(212,175,106,0.12)',
+                          },
+                        ]}
+                      >
+                        <Text style={styles.kampfireMetaText}>
+                          Kalan {remainingAreas}/{GUEST_LIMIT}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {kampfireSheetArea && (
+                    <View
+                      style={[
+                        styles.kampfireSelectedCard,
+                        {
+                          backgroundColor: 'rgba(20,26,22,0.92)',
+                          borderColor: 'rgba(212,175,106,0.12)',
+                        },
+                      ]}
+                    >
+                      <View style={styles.kampfireSelectedCardTop}>
+                        <View
+                          style={[
+                            styles.kampfireSelectedImageWrap,
+                            { backgroundColor: 'rgba(212,175,106,0.08)' },
+                          ]}
+                        >
+                          {getAreaCoverImage(kampfireSheetArea) ? (
+                            <Image
+                              source={{ uri: getAreaCoverImage(kampfireSheetArea) }}
+                              style={styles.kampfireSelectedImage}
+                            />
+                          ) : (
+                            <Text style={styles.kampfireSelectedImageFallback}>🏕️</Text>
+                          )}
+                        </View>
+
+                        <View style={styles.kampfireSelectedContent}>
+                          <View style={styles.kampfireSelectedStatRow}>
+                            <View
+                              style={[
+                                styles.kampfireSelectedStat,
+                                {
+                                  backgroundColor: 'rgba(212,175,106,0.08)',
+                                  borderColor: 'rgba(212,175,106,0.12)',
+                                },
+                              ]}
+                            >
+                              <Text style={styles.kampfireSelectedStatLabel}>Puan</Text>
+                              <Text style={styles.kampfireSelectedStatValue}>
+                                {Number((kampfireSheetArea as any)?.rating || 0) > 0
+                                  ? Number((kampfireSheetArea as any)?.rating || 0).toFixed(1)
+                                  : '—'}
+                              </Text>
+                            </View>
+                            <View
+                              style={[
+                                styles.kampfireSelectedStat,
+                                {
+                                  backgroundColor: 'rgba(212,175,106,0.08)',
+                                  borderColor: 'rgba(212,175,106,0.12)',
+                                },
+                              ]}
+                            >
+                              <Text style={styles.kampfireSelectedStatLabel}>Mesafe</Text>
+                              <Text style={styles.kampfireSelectedStatValue}>
+                                {typeof (kampfireSheetArea as any)?.distance_km === 'number'
+                                  ? `${(kampfireSheetArea as any).distance_km.toFixed(1)} km`
+                                  : '—'}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {kampfireSheetExpanded &&
+                          Array.isArray((kampfireSheetArea as any)?.amenities) &&
+                          (kampfireSheetArea as any).amenities.length > 0 ? (
+                            <View style={styles.kampfireAmenityRow}>
+                              {(kampfireSheetArea as any).amenities.slice(0, 5).map((amenity: string) => (
+                                <View
+                                  key={amenity}
+                                  style={[
+                                    styles.kampfireAmenityChip,
+                                    {
+                                      backgroundColor: 'rgba(212,175,106,0.08)',
+                                      borderColor: 'rgba(212,175,106,0.12)',
+                                    },
+                                  ]}
+                                >
+                                  <Text style={styles.kampfireAmenityChipText}>
+                                    {getAmenityEmoji(amenity)}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          ) : null}
+                        </View>
+                      </View>
+
+                      {kampfireSheetExpanded && (
+                        <View style={styles.kampfireSelectedActionRow}>
+                          <TouchableOpacity
+                            style={[
+                              styles.kampfireSelectedAction,
+                              {
+                                backgroundColor: 'rgba(212,175,106,0.12)',
+                                borderColor: 'rgba(212,175,106,0.16)',
+                              },
+                            ]}
+                            onPress={() => {
+                              setSelectedCampingArea(kampfireSheetArea);
+                              setShowDetailModal(true);
+                            }}
+                          >
+                            <Text style={styles.kampfireSelectedActionText}>Detay</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.kampfireSelectedAction,
+                              {
+                                backgroundColor: 'rgba(20,26,22,0.96)',
+                                borderColor: 'rgba(212,175,106,0.12)',
+                              },
+                            ]}
+                            onPress={() =>
+                              openGoogleMapsNavigation(
+                                (kampfireSheetArea as any).latitude,
+                                (kampfireSheetArea as any).longitude,
+                              )
+                            }
+                          >
+                            <Text style={styles.kampfireSelectedActionText}>Yol Tarifi</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.kampfireSelectedAction,
+                              {
+                                backgroundColor: favorites.has((kampfireSheetArea as any).id)
+                                  ? 'rgba(212,175,106,0.18)'
+                                  : 'rgba(20,26,22,0.96)',
+                                borderColor: 'rgba(212,175,106,0.12)',
+                              },
+                            ]}
+                            onPress={() =>
+                              handleToggleFavorite(kampfireSheetArea as CampingArea)
+                            }
+                          >
+                            <Text style={styles.kampfireSelectedActionText}>
+                              {favorites.has((kampfireSheetArea as any).id)
+                                ? 'Favoride'
+                                : 'Favori'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   )}
-                </TouchableOpacity>
-                {!selectForPlanMode && (
-                  <TouchableOpacity
-                    style={[styles.currentLocationButton, { backgroundColor: '#fef3c7', borderColor: '#f59e0b' }, isBusy ? { opacity: 0.6 } : {}]}
-                    onPress={() => setShowTentSetup(true)}
-                    disabled={isBusy}
-                  >
-                    <Compass size={14} color="#f59e0b" />
-                    <Text
-                      style={[styles.currentLocationButtonText, { color: '#f59e0b' }]}
-                      numberOfLines={2}
+
+                  {!kampfireSheetArea && (
+                    <View
+                      style={[
+                        styles.kampfireEmptyCard,
+                        {
+                          backgroundColor: 'rgba(20,26,22,0.92)',
+                          borderColor: 'rgba(212,175,106,0.12)',
+                        },
+                      ]}
                     >
-                      Çadır / Karavan Yönü{`\n`} Neresi Olmalı?
-                    </Text>
-                  </TouchableOpacity>
+                      <Text style={styles.kampfireEmptyCardTitle}>
+                        Haritadaki altın işaretlere dokunun
+                      </Text>
+                      <Text style={styles.kampfireEmptyCardText}>
+                        Seçtiğiniz kamp alanının görseli, mesafesi ve aksiyonları burada gösterilir.
+                      </Text>
+                    </View>
+                  )}
+
+                  {__DEV__ && (
+                    <Text style={[styles.debugText, { color: '#8A7348' }]}>Debug modu aktif</Text>
+                  )}
+                </LinearGradient>
+              ) : (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.kampfireSheetReopen}
+                  onPress={() => setKampfireSheetVisible(true)}
+                >
+                  <Text style={styles.kampfireSheetReopenText}>
+                    {kampfireSheetArea?.name || 'Detay panelini aç'}
+                  </Text>
+                  <ChevronUp size={14} color="#D4AF6A" />
+                </TouchableOpacity>
+              )
+            ) : (
+              <View style={[styles.infoPanel, { backgroundColor: colors.surface }]} pointerEvents={isBusy ? 'none' : 'auto'}>
+                <View style={styles.infoPanelHeader}>
+                  <MapPin size={16} color={colors.primary} />
+                  <Text style={[styles.infoPanelTitle, { color: colors.text }]}>
+                    {nearbyCount} kamp alanı yakınınızda
+                  </Text>
+                </View>
+                <View style={styles.infoPanelContent}>
+                  <Text style={[styles.infoPanelSubtitle, { color: colors.muted }]}>
+                    {mapSheetSubtitle}
+                  </Text>
+                  {location && (
+                    <View style={styles.buttonContainer}>
+                      <TouchableOpacity
+                        style={[styles.planCampButton, { backgroundColor: '#f3e8ff', borderColor: '#7c3aed' }, isBusy ? { opacity: 0.6 } : {}]}
+                        onPress={handlePlanCamp}
+                        disabled={isBusy}
+                      >
+                        {hasDraftPlan && <View style={[styles.draftDot, { backgroundColor: colors.danger }]} />}
+                        <Calendar size={14} color="#7c3aed" />
+                        <Text style={[styles.planCampButtonText, { color: '#7c3aed' }]}>Kamp Planla</Text>
+                        {planCount > 0 && (
+                          <View style={[styles.planBadge, { backgroundColor: colors.danger }]}>
+                            <Text style={[styles.planBadgeText, { color: '#fff' }]}>{planCount > 99 ? '99+' : String(planCount)}</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                      {!selectForPlanMode && (
+                        <TouchableOpacity
+                          style={[styles.currentLocationButton, { backgroundColor: '#fef3c7', borderColor: '#f59e0b' }, isBusy ? { opacity: 0.6 } : {}]}
+                          onPress={() => setShowTentSetup(true)}
+                          disabled={isBusy}
+                        >
+                          <Compass size={14} color="#f59e0b" />
+                          <Text
+                            style={[styles.currentLocationButtonText, { color: '#f59e0b' }]}
+                            numberOfLines={2}
+                          >
+                            Çadır / Karavan Yönü{`\n`} Neresi Olmalı?
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                </View>
+                {__DEV__ && (
+                  <Text style={[styles.debugText, { color: colors.muted }]}>Debug modu aktif</Text>
                 )}
               </View>
-            )}
-          </View>
-          {__DEV__ && (
-            <Text style={[styles.debugText, { color: colors.muted }]}>Debug modu aktif</Text>
+            )
           )}
-        </View>
-      )}
         </>
       ) : (
         /* Liste Görünümü */
@@ -4592,6 +5553,7 @@ export default function MapScreen() {
               // Bildirim kaynaklı özel liste açık ise kapat
               if (notificationCampingAreas) setNotificationCampingAreas(null);
               setSelectedCampingArea(area);
+              setKampfireFocusedArea(area as any);
               setShowDetailModal(true);
             }}
             onNavigate={handleNavigateFromList}
@@ -4940,6 +5902,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     zIndex: 200,
   },
+  kampfireMapMoveButtonContainer: {
+    bottom: 236,
+    right: 110,
+  },
   mapMoveButton: {
     paddingHorizontal: 24,
     paddingVertical: 12,
@@ -4989,6 +5955,158 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  kampfireTopOverlay: {
+    position: 'absolute',
+    top: 14,
+    left: 16,
+    right: 16,
+    zIndex: 220,
+  },
+  kampfireOverlayRow: {
+    minHeight: 64,
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28,
+    shadowRadius: 22,
+    elevation: 16,
+  },
+  kampfireOverlayActionGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  kampfireOverlayIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kampfireBellBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -5,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E07A7A',
+    borderWidth: 1,
+    borderColor: '#0E1210',
+  },
+  kampfireBellBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  kampfireBrandBlock: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  kampfireBrandTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 2.2,
+    color: '#D4AF6A',
+  },
+  kampfireBrandSubtitle: {
+    marginTop: 2,
+    fontSize: 9,
+    fontWeight: '500',
+    letterSpacing: 0.6,
+    color: '#6B655A',
+    textTransform: 'uppercase',
+  },
+  kampfireBrandMeta: {
+    marginTop: 5,
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#A89F8E',
+  },
+  kampfireFilterDot: {
+    position: 'absolute',
+    top: -3,
+    right: -4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#0E1210',
+  },
+  kampfireMapActionStack: {
+    position: 'absolute',
+    top: 78,
+    right: 0,
+    gap: 8,
+    alignItems: 'center',
+  },
+  kampfireMapActionButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.24,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  kampfireMenuBackdrop: {
+    flex: 1,
+  },
+  kampfireMenuAnchor: {
+    position: 'absolute',
+    top: 82,
+    left: 16,
+  },
+  kampfireMenuCard: {
+    minWidth: 196,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,106,0.14)',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.28,
+    shadowRadius: 20,
+    elevation: 18,
+  },
+  kampfireMenuItem: {
+    minHeight: 42,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  kampfireMenuItemText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#F2EDE3',
+  },
+  kampfireMenuDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#E8C97A',
   },
   filtersContainer: {
     position: 'absolute',
@@ -5052,6 +6170,9 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
   },
+  kampfireFabContainer: {
+    bottom: 250,
+  },
   fab: {
     width: 56,
     height: 56,
@@ -5078,6 +6199,249 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+  },
+  kampfireBottomSheet: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.34,
+    shadowRadius: 28,
+    elevation: 22,
+  },
+  kampfireBottomSheetExpanded: {
+    maxHeight: height * 0.58,
+  },
+  kampfireBottomSheetHandleTap: {
+    alignSelf: 'center',
+    paddingVertical: 2,
+    marginBottom: 10,
+  },
+  kampfireBottomSheetHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 999,
+    alignSelf: 'center',
+  },
+  kampfireSheetHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  kampfireSheetHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  kampfireSheetIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,106,0.14)',
+    backgroundColor: 'rgba(14,18,16,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kampfireSheetReopen: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 16,
+    minHeight: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,106,0.14)',
+    backgroundColor: 'rgba(14,18,16,0.96)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    elevation: 16,
+  },
+  kampfireSheetReopenText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F2EDE3',
+    marginRight: 10,
+  },
+  kampfireSheetEyebrow: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    color: '#8A7348',
+    marginBottom: 4,
+  },
+  kampfireSheetTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#E8C97A',
+    marginBottom: 3,
+  },
+  kampfireSheetSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#A89F8E',
+  },
+  kampfireCountBadge: {
+    minWidth: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kampfireCountBadgeValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#D4AF6A',
+    lineHeight: 20,
+  },
+  kampfireCountBadgeLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#8A7348',
+    marginTop: 2,
+  },
+  kampfireMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+    marginBottom: 14,
+  },
+  kampfireMetaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  kampfireMetaText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#F2EDE3',
+  },
+  kampfireSelectedCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 12,
+  },
+  kampfireSelectedCardTop: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  kampfireSelectedImageWrap: {
+    width: 92,
+    height: 92,
+    borderRadius: 16,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kampfireSelectedImage: {
+    width: '100%',
+    height: '100%',
+  },
+  kampfireSelectedImageFallback: {
+    fontSize: 34,
+  },
+  kampfireSelectedContent: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'space-between',
+  },
+  kampfireSelectedStatRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  kampfireSelectedStat: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  kampfireSelectedStatLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#8A7348',
+    marginBottom: 4,
+  },
+  kampfireSelectedStatValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F2EDE3',
+  },
+  kampfireAmenityRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  kampfireAmenityChip: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kampfireAmenityChipText: {
+    fontSize: 14,
+  },
+  kampfireSelectedActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  kampfireSelectedAction: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  kampfireSelectedActionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F2EDE3',
+  },
+  kampfireEmptyCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    marginBottom: 8,
+  },
+  kampfireEmptyCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F2EDE3',
+    marginBottom: 6,
+  },
+  kampfireEmptyCardText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#A89F8E',
   },
   infoPanelHeader: {
     flexDirection: 'row',
@@ -5164,6 +6528,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     zIndex: 999,
     elevation: 10,
+  },
+  kampfireLocationPermissionContainer: {
+    bottom: 248,
   },
   locationPermissionButton: {
     flexDirection: 'row',

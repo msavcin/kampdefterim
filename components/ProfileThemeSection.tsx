@@ -1,11 +1,6 @@
 /**
  * Profil → Görünüm paneli
  * Referans: design-alts/profile-theme-picker.html
- *
- * Kullanım (profile.tsx):
- *   import ProfileThemeSection from '@/components/ProfileThemeSection';
- *   ...
- *   <ProfileThemeSection />
  */
 
 import React, { memo } from 'react';
@@ -25,6 +20,10 @@ import {
   type LightPaletteId,
   type DarkPaletteId,
 } from '../constants/theme/colors';
+import {
+  themeVariantList,
+  type ThemeVariantId,
+} from '../constants/theme/variants';
 
 type ColorMode = 'light' | 'dark' | 'system';
 
@@ -37,9 +36,9 @@ const MODE_OPTIONS: { id: ColorMode; label: string }[] = [
 function Swatches({ colors: sw }: { colors: string[] }) {
   return (
     <View style={styles.swatchRow}>
-      {sw.map((c) => (
+      {sw.map((c, index) => (
         <View
-          key={c}
+          key={`${c}-${index}`}
           style={[
             styles.swatch,
             {
@@ -68,13 +67,75 @@ function ProfileThemeSectionComponent() {
     setLightPaletteId,
     darkPaletteId,
     setDarkPaletteId,
+    themeVariantId,
+    setThemeVariantId,
   } = useTheme();
+
+  const handleVariantChange = (id: ThemeVariantId) => {
+    setThemeVariantId(id);
+    if (id === 'kampfireGold' && darkPaletteId !== 'D4') {
+      setDarkPaletteId('D4');
+    }
+  };
+
+  const onPrimaryText = (() => {
+    const hex = (colors.primary || '').replace('#', '');
+    if (hex.length < 6) return '#FFFFFF';
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    if ([r, g, b].some((n) => Number.isNaN(n))) return '#FFFFFF';
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62
+      ? colors.background
+      : '#FFFFFF';
+  })();
 
   return (
     <View style={styles.wrap}>
       <Text style={[styles.sectionLabel, { color: colors.muted }]}>GÖRÜNÜM</Text>
 
+      <Text style={[styles.sectionLabel, { color: colors.muted, marginTop: 2 }]}>TEMA DİLİ</Text>
+      <Text style={[styles.hint, { color: colors.muted }]}>Mevcut arayüzü koruyan klasik görünüm veya Kampfire Gold alternatifi</Text>
+      {themeVariantList.map((variant) => {
+        const selected = themeVariantId === variant.id;
+        return (
+          <Pressable
+            key={variant.id}
+            onPress={() => handleVariantChange(variant.id)}
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.surface,
+                borderColor: selected ? colors.primary : colors.border,
+                borderWidth: selected ? 1.5 : 1,
+              },
+            ]}
+          >
+            <Swatches colors={variant.preview} />
+            <Text style={[styles.pid, { color: colors.primary }]}>{variant.badge}</Text>
+            <Text style={[styles.pname, { color: colors.text }]}>{variant.name}</Text>
+            <Text style={[styles.variantDescription, { color: colors.muted }]}>
+              {variant.description}
+            </Text>
+            {variant.darkOnly ? (
+              <Text style={[styles.variantHint, { color: colors.warning }]}>
+                Koyu modda en güçlü görünümü verir.
+              </Text>
+            ) : null}
+            {selected && (
+              <View style={[styles.check, { backgroundColor: colors.primary }]}>
+                <Text style={styles.checkMark}>✓</Text>
+              </View>
+            )}
+          </Pressable>
+        );
+      })}
+      {themeVariantId === 'kampfireGold' && scheme !== 'dark' ? (
+        <Text style={[styles.hint, { color: colors.warning, marginTop: 4 }]}>Kampfire Gold seçildi. Altın harita görünümü için gece moduna geçebilirsiniz.</Text>
+      ) : null}
+
       {/* Mode segment */}
+      <Text style={[styles.sectionLabel, { color: colors.muted, marginTop: 18 }]}>MOD</Text>
       <View
         style={[
           styles.segment,
@@ -101,7 +162,7 @@ function ProfileThemeSectionComponent() {
                 style={{
                   fontSize: 13,
                   fontWeight: on ? '600' : '400',
-                  color: on ? (scheme === 'dark' && colors.primary === '#F5F5F4' ? '#141414' : '#FFFFFF') : colors.textSecondary,
+                  color: on ? onPrimaryText : colors.textSecondary,
                 }}
               >
                 {opt.label}
@@ -110,18 +171,11 @@ function ProfileThemeSectionComponent() {
           );
         })}
       </View>
-      <Text style={[styles.hint, { color: colors.muted }]}>
-        Şu an: {scheme === 'light' ? 'Açık' : 'Koyu'} tema
-        {colorMode === 'system' ? ' (sistem)' : ''}
-      </Text>
+      <Text style={[styles.hint, { color: colors.muted }]}>Şu an: {scheme === 'light' ? 'Açık' : 'Koyu'} tema{colorMode === 'system' ? ' (sistem)' : ''}</Text>
 
       {/* Light palettes */}
-      <Text style={[styles.sectionLabel, { color: colors.muted, marginTop: 18 }]}>
-        AÇIK TEMA RENGİ
-      </Text>
-      <Text style={[styles.hint, { color: colors.muted }]}>
-        Gündüz modunda kullanılacak palet
-      </Text>
+      <Text style={[styles.sectionLabel, { color: colors.muted, marginTop: 18 }]}>AÇIK TEMA RENGİ</Text>
+      <Text style={[styles.hint, { color: colors.muted }]}>Gündüz modunda kullanılacak palet</Text>
       {lightPaletteList.map((p) => {
         const selected = lightPaletteId === p.id;
         return (
@@ -152,12 +206,8 @@ function ProfileThemeSectionComponent() {
       })}
 
       {/* Dark palettes */}
-      <Text style={[styles.sectionLabel, { color: colors.muted, marginTop: 18 }]}>
-        KOYU TEMA RENGİ
-      </Text>
-      <Text style={[styles.hint, { color: colors.muted }]}>
-        Gece modunda kullanılacak palet
-      </Text>
+      <Text style={[styles.sectionLabel, { color: colors.muted, marginTop: 18 }]}>KOYU TEMA RENGİ</Text>
+      <Text style={[styles.hint, { color: colors.muted }]}>Gece modunda kullanılacak palet</Text>
       {darkPaletteList.map((p) => {
         const selected = darkPaletteId === p.id;
         return (
@@ -248,6 +298,16 @@ const styles = StyleSheet.create({
   pname: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  variantDescription: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+  variantHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 6,
   },
   check: {
     position: 'absolute',

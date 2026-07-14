@@ -190,10 +190,10 @@ export const darkD3: ThemeColors = {
 
 // ─── D4 Kampfire Gold (Koyu) ───
 export const darkD4: ThemeColors = {
-  primary: '#F2EDE3',
-  primaryLight: '#141A16',
-  primaryDark: '#0E1210',
-  accent: '#D4AF6A',
+  primary: '#D4AF6A',
+  primaryLight: '#221D15',
+  primaryDark: '#8A7348',
+  accent: '#E8C97A',
   background: '#07090A',
   surface: '#0E1210',
   surfaceVariant: '#141A16',
@@ -274,8 +274,8 @@ export const darkPalettes: Record<DarkPaletteId, SchemePalette> = {
 export const lightPaletteList: SchemePalette[] = Object.values(lightPalettes);
 export const darkPaletteList: SchemePalette[] = Object.values(darkPalettes);
 
-export const defaultLightPaletteId: LightPaletteId = 'L2';
-export const defaultDarkPaletteId: DarkPaletteId = 'D4';
+export const defaultLightPaletteId: LightPaletteId = 'L3';
+export const defaultDarkPaletteId: DarkPaletteId = 'D3';
 
 // ─── Geriye dönük birleşik paletler (eski setPaletteId API) ───
 // Eski nature/ocean/sunset/lavender → yeni L/D eşlemesi
@@ -296,7 +296,7 @@ export const palettes: Record<string, ThemePalette> = {
 export const paletteList: ThemePalette[] = Object.values(palettes);
 
 /** @deprecated use defaultLightPaletteId / defaultDarkPaletteId */
-export const defaultPaletteId = 'L1_D1';
+export const defaultPaletteId = 'L3_D3';
 
 // Eski export isimleri (import kırılmasın)
 export const naturePalette = palettes.nature;
