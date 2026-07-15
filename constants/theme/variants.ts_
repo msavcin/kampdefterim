@@ -22,8 +22,9 @@ export const themeVariants: Record<ThemeVariantId, ThemeVariant> = {
     name: 'Kampfire Gold',
     badge: 'Gold',
     description:
-      'Altın vurgu, özel harita chrome ve parlayan işaretçiler ile alternatif görünüm. Açık modda L4, koyu modda D4 kullanır.',
-    preview: ['#FBF7F0', '#FFFDF9', '#D4AF6A', '#8B6A2F', '#33291B'],
+      'Koyu orman haritası, altın vurgu ve parlayan işaretçiler ile alternatif görünüm.',
+    preview: ['#07090A', '#0E1210', '#D4AF6A', '#E8C97A', '#F2EDE3'],
+    darkOnly: true,
   },
 };
 

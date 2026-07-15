@@ -69,14 +69,12 @@ function ProfileThemeSectionComponent() {
     setDarkPaletteId,
     themeVariantId,
     setThemeVariantId,
-    isPremium,
   } = useTheme();
 
   const handleVariantChange = (id: ThemeVariantId) => {
     setThemeVariantId(id);
-    if (id === 'kampfireGold') {
-      if (darkPaletteId !== 'D4') setDarkPaletteId('D4');
-      if (lightPaletteId !== 'L4') setLightPaletteId('L4');
+    if (id === 'kampfireGold' && darkPaletteId !== 'D4') {
+      setDarkPaletteId('D4');
     }
   };
 
@@ -100,19 +98,16 @@ function ProfileThemeSectionComponent() {
       <Text style={[styles.hint, { color: colors.muted }]}>Mevcut arayüzü koruyan klasik görünüm veya Kampfire Gold alternatifi</Text>
       {themeVariantList.map((variant) => {
         const selected = themeVariantId === variant.id;
-        const disabled = variant.id === 'kampfireGold' && !isPremium;
         return (
           <Pressable
             key={variant.id}
-            onPress={() => !disabled && handleVariantChange(variant.id)}
-            disabled={disabled}
+            onPress={() => handleVariantChange(variant.id)}
             style={[
               styles.card,
               {
                 backgroundColor: colors.surface,
                 borderColor: selected ? colors.primary : colors.border,
                 borderWidth: selected ? 1.5 : 1,
-                opacity: disabled ? 0.6 : 1,
               },
             ]}
           >
@@ -127,9 +122,6 @@ function ProfileThemeSectionComponent() {
                 Koyu modda en güçlü görünümü verir.
               </Text>
             ) : null}
-            {!isPremium && variant.id === 'kampfireGold' ? (
-              <Text style={[styles.variantHint, { color: colors.warning }]}>Bu görünüm sadece Premium kullanıcılar için</Text>
-            ) : null}
             {selected && (
               <View style={[styles.check, { backgroundColor: colors.primary }]}>
                 <Text style={styles.checkMark}>✓</Text>
@@ -138,8 +130,8 @@ function ProfileThemeSectionComponent() {
           </Pressable>
         );
       })}
-      {themeVariantId === 'kampfireGold' ? (
-        <Text style={[styles.hint, { color: colors.warning, marginTop: 4 }]}>Kampfire Gold seçildi. Açık modda L4, koyu modda D4 paleti ile aynı arayüz dili uygulanır.</Text>
+      {themeVariantId === 'kampfireGold' && scheme !== 'dark' ? (
+        <Text style={[styles.hint, { color: colors.warning, marginTop: 4 }]}>Kampfire Gold seçildi. Altın harita görünümü için gece moduna geçebilirsiniz.</Text>
       ) : null}
 
       {/* Mode segment */}

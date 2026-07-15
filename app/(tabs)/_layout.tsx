@@ -13,13 +13,12 @@ import {
   MessageCircle,
   Compass,
   Plus,
-  Calendar,
 } from 'lucide-react-native';
 import { View, TouchableOpacity, Text, AppState, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { emit } from '../../lib/eventBus';
+import { emit, eventBus } from '../../lib/eventBus';
 import { useTheme } from '../../components/ThemeProvider';
 import { useChatUnread } from '../../hooks/useChatUnread';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
@@ -36,15 +35,11 @@ export default function TabLayout() {
     useState(false);
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { colors, isKampfireTheme } = useTheme();
-  const tabBarBackground = isKampfireTheme ? '#0E1210' : colors.tabBar;
-  const tabBarBorderColor = isKampfireTheme
-    ? 'rgba(212,175,106,0.08)'
-    : colors.tabBarBorder;
-  const tabBarActiveTint = isKampfireTheme ? '#D4AF6A' : colors.tabBarActive;
-  const tabBarInactiveTint = isKampfireTheme
-    ? '#8A7348'
-    : colors.tabBarInactive;
+  const { colors, isKampfireTheme, scheme } = useTheme();
+  const tabBarBackground = colors.tabBar;
+  const tabBarBorderColor = colors.tabBarBorder;
+  const tabBarActiveTint = colors.tabBarActive;
+  const tabBarInactiveTint = colors.tabBarInactive;
 
   useEffect(() => {
     (async () => {
@@ -196,6 +191,38 @@ export default function TabLayout() {
   const guestDisabled = userRole === 'guest';
   const { personalUnread, communityUnread } = useChatUnread();
 
+  const [planCount, setPlanCount] = useState<number>(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const SAVED_PLANS_KEY = 'campPlannerSavedPlans';
+    const makeStorageKey = (key: string, userId?: string | null) => (userId ? `${key}:${userId}` : key);
+    const loadPlanCount = async () => {
+      try {
+        let uid = '';
+        const cached = await SecureStore.getItemAsync('localUser');
+        if (cached) {
+          try { const u = JSON.parse(cached); uid = String(u?.id ?? u?.user_id ?? ''); } catch (e) { uid = '' }
+        }
+        const key = makeStorageKey(SAVED_PLANS_KEY, uid || undefined);
+        let savedRaw = await AsyncStorage.getItem(key);
+        if (!savedRaw) savedRaw = await AsyncStorage.getItem(SAVED_PLANS_KEY);
+        if (savedRaw) {
+          const parsed = JSON.parse(savedRaw);
+          if (!cancelled) setPlanCount(Array.isArray(parsed) ? parsed.length : 0);
+        } else {
+          if (!cancelled) setPlanCount(0);
+        }
+      } catch (e) {
+        if (!cancelled) setPlanCount(0);
+      }
+    };
+    loadPlanCount();
+    const handler = () => loadPlanCount();
+    eventBus.on('camp-planner:updated', handler);
+    return () => { cancelled = true; eventBus.off('camp-planner:updated', handler); };
+  }, []);
+
   const tabScreens = [
     { name: 'index', label: 'Harita', icon: Map, disabled: false },
     {
@@ -229,12 +256,8 @@ export default function TabLayout() {
     lineHeight: 16,
   };
 
-  const handleKampfireExploreAction = (action: 'plan' | 'tent' | 'chat') => {
+  const handleKampfireExploreAction = (action: 'tent' | 'chat') => {
     setShowKampfireExploreMenu(false);
-    if (action === 'plan') {
-      router.push('/camp-plan' as any);
-      return;
-    }
     if (action === 'tent') {
       router.push('/' as any);
       setTimeout(() => emit('kampfire:openTentSetup'), 150);
@@ -256,9 +279,9 @@ export default function TabLayout() {
             backgroundColor: tabBarBackground,
             borderTopWidth: 1,
             borderTopColor: tabBarBorderColor,
-            paddingTop: 8,
-            paddingBottom: insets.bottom + 8,
-            height: 70 + insets.bottom,
+            paddingTop: isKampfireTheme ? 10 : 8,
+            paddingBottom: insets.bottom + (isKampfireTheme ? 12 : 8),
+            height: (isKampfireTheme ? 84 : 70) + insets.bottom,
             shadowColor: '#000000',
             shadowOpacity: isKampfireTheme ? 0.34 : 0.08,
             shadowRadius: isKampfireTheme ? 18 : 8,
@@ -272,18 +295,10 @@ export default function TabLayout() {
         {tabScreens.map((tab) => {
           const isKampfireExploreTab =
             isKampfireTheme && tab.name === 'announcements';
-          const isKampfirePlanTab =
-            isKampfireTheme && tab.name === 'checklist';
-          const isHiddenInKampfire = isKampfireTheme && tab.name === 'new';
-          const displayLabel = isKampfireExploreTab
-            ? 'Keşfet'
-            : isKampfirePlanTab
-              ? 'Planla'
-              : tab.label;
+          const displayLabel = isKampfireExploreTab ? 'Keşfet' : tab.label;
           const IconComponent = isKampfireExploreTab ? Compass : tab.icon;
           const resolvedDisabled =
-            isKampfireTheme &&
-            (tab.name === 'announcements' || tab.name === 'checklist')
+            isKampfireTheme && tab.name === 'announcements'
               ? false
               : tab.disabled;
 
@@ -292,6 +307,7 @@ export default function TabLayout() {
               key={tab.name}
               name={tab.name}
               options={{
+                href: undefined,
                 tabBarLabel: ({ color, focused }) => (
                   <Text
                     allowFontScaling={false}
@@ -304,7 +320,7 @@ export default function TabLayout() {
                           ? 'rgba(212,175,106,0.24)'
                           : 'transparent',
                       textShadowRadius: isKampfireTheme && focused ? 8 : 0,
-                      marginTop: isKampfirePlanTab ? 2 : 4,
+                      marginTop: 4,
                     }}
                   >
                     {displayLabel}
@@ -314,62 +330,31 @@ export default function TabLayout() {
                   <View
                     style={{
                       position: 'relative',
-                      width: isKampfirePlanTab
-                        ? 42
-                        : isKampfireTheme
-                          ? 34
-                          : undefined,
-                      height: isKampfirePlanTab
-                        ? 42
-                        : isKampfireTheme
-                          ? 34
-                          : undefined,
-                      borderRadius: isKampfirePlanTab
-                        ? 21
-                        : isKampfireTheme
-                          ? 17
-                          : undefined,
+                      width: isKampfireTheme ? 34 : undefined,
+                      height: isKampfireTheme ? 34 : undefined,
+                      borderRadius: isKampfireTheme ? 17 : undefined,
                       alignItems: 'center',
                       justifyContent: 'center',
-                      backgroundColor: isKampfirePlanTab
-                        ? 'rgba(212,175,106,0.08)'
-                        : isKampfireTheme && focused
-                          ? 'rgba(212,175,106,0.08)'
+                      backgroundColor:
+                        isKampfireTheme && focused
+                          ? colors.primaryLight
                           : 'transparent',
-                      borderWidth: isKampfirePlanTab ? 1 : 0,
-                      borderColor: isKampfirePlanTab
-                        ? 'rgba(212,175,106,0.14)'
-                        : 'transparent',
+                      borderWidth: 0,
+                      borderColor: 'transparent',
                       shadowColor:
-                        isKampfireTheme && (focused || isKampfirePlanTab)
-                          ? '#D4AF6A'
-                          : 'transparent',
-                      shadowOpacity:
-                        isKampfireTheme && (focused || isKampfirePlanTab)
-                          ? 0.3
-                          : 0,
-                      shadowRadius:
-                        isKampfireTheme && (focused || isKampfirePlanTab)
-                          ? 10
-                          : 0,
-                      elevation:
-                        isKampfireTheme && (focused || isKampfirePlanTab)
-                          ? 6
-                          : 0,
+                        isKampfireTheme && focused ? colors.accent : 'transparent',
+                      shadowOpacity: isKampfireTheme && focused ? 0.3 : 0,
+                      shadowRadius: isKampfireTheme && focused ? 10 : 0,
+                      elevation: isKampfireTheme && focused ? 6 : 0,
                     }}
                   >
-                    {isKampfirePlanTab ? (
-                      <Plus color="#D4AF6A" size={20} />
-                    ) : (
-                      <IconComponent
-                        color={resolvedDisabled ? colors.muted : color}
-                        size={size}
-                        style={{ opacity: resolvedDisabled ? 0.5 : 1 }}
-                      />
-                    )}
+                    <IconComponent
+                      color={resolvedDisabled ? colors.muted : color}
+                      size={size}
+                      style={{ opacity: resolvedDisabled ? 0.5 : 1 }}
+                    />
                     {tab.name === 'new' &&
-                      (personalUnread > 0 || communityUnread > 0) &&
-                      !isHiddenInKampfire && (
+                      (personalUnread > 0 || communityUnread > 0) && (
                         <>
                           {communityUnread > 0 && (
                             <View
@@ -431,70 +416,64 @@ export default function TabLayout() {
                       )}
                   </View>
                 ),
-                // If this tab should be hidden for kampfire theme, don't provide an href
-                // and render no tab button so it doesn't conflict with custom tabBarButton behavior.
-                tabBarButton: isHiddenInKampfire
-                  ? () => null
-                  : ({ children, onPress, accessibilityState }) =>
-                      resolvedDisabled ? (
-                        <TouchableOpacity
-                          activeOpacity={0.8}
-                          onPress={() => {
-                            if (
-                              !isPremium &&
-                              (tab.name === 'announcements' ||
-                                tab.name === 'checklist' ||
-                                tab.name === 'new')
-                            ) {
-                              router.push('/premium' as any);
-                            }
-                          }}
-                          style={{
-                            flex: 1,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <View
-                            style={{
-                              flex: 1,
-                              opacity: 0.9,
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            {children}
-                          </View>
-                        </TouchableOpacity>
-                      ) : (
-                        <TouchableOpacity
-                          activeOpacity={0.8}
-                          onPress={() => {
-                            if (isKampfireExploreTab) {
-                              setShowKampfireExploreMenu(true);
-                              return;
-                            }
-                            if (isKampfirePlanTab) {
-                              router.push('/camp-plan' as any);
-                              return;
-                            }
-                            onPress?.();
-                          }}
-                          accessibilityState={accessibilityState}
-                          style={{
-                            flex: 1,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          {children}
-                        </TouchableOpacity>
-                      ),
+                tabBarButton: ({ children, onPress, accessibilityState }) =>
+                  resolvedDisabled ? (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        if (
+                          !isPremium &&
+                          (tab.name === 'announcements' ||
+                            tab.name === 'checklist' ||
+                            tab.name === 'new')
+                        ) {
+                          router.push('/premium' as any);
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <View
+                        style={{
+                          flex: 1,
+                          opacity: 0.9,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {children}
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={(e) => {
+                        if (isKampfireExploreTab) {
+                          setShowKampfireExploreMenu(true);
+                          return;
+                        }
+                        onPress?.(e);
+                      }}
+                      accessibilityState={accessibilityState}
+                      style={{
+                        flex: 1,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {children}
+                    </TouchableOpacity>
+                  ),
               }}
             />
           );
         })}
       </Tabs>
+
+      {/* Floating center Planla removed — moved into Keşfet menu */}
 
       {isKampfireTheme && (
         <Modal
@@ -516,9 +495,9 @@ export default function TabLayout() {
               style={{
                 margin: 14,
                 borderRadius: 22,
-                backgroundColor: '#0E1210',
+                backgroundColor: colors.surface,
                 borderWidth: 1,
-                borderColor: 'rgba(212,175,106,0.14)',
+                borderColor: colors.border,
                 padding: 10,
               }}
             >
@@ -530,48 +509,50 @@ export default function TabLayout() {
                   paddingHorizontal: 12,
                   paddingVertical: 14,
                 }}
-                onPress={() => handleKampfireExploreAction('plan')}
+                onPress={() => handleKampfireExploreAction('tent')}
               >
-                <Calendar size={18} color="#D4AF6A" />
+                <Compass size={18} color={colors.primary} />
                 <Text
-                  style={{ color: '#F2EDE3', fontSize: 14, fontWeight: '600' }}
+                  style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}
+                >
+                  Çadır / Karavan Yönü Nasıl Olmalı?
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 14,
+                }}
+                onPress={() => {
+                  setShowKampfireExploreMenu(false);
+                  router.push('/camp-plan' as any);
+                }}
+              >
+                <Plus size={18} color={colors.primary} />
+                <Text
+                  style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}
                 >
                   Kamp Planla
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 10,
-                  paddingHorizontal: 12,
-                  paddingVertical: 14,
-                }}
-                onPress={() => handleKampfireExploreAction('tent')}
-              >
-                <Compass size={18} color="#D4AF6A" />
-                <Text
-                  style={{ color: '#F2EDE3', fontSize: 14, fontWeight: '600' }}
-                >
-                  Çadır / Karavan Yönü
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 10,
-                  paddingHorizontal: 12,
-                  paddingVertical: 14,
-                }}
-                onPress={() => handleKampfireExploreAction('chat')}
-              >
-                <MessageCircle size={18} color="#D4AF6A" />
-                <Text
-                  style={{ color: '#F2EDE3', fontSize: 14, fontWeight: '600' }}
-                >
-                  {isPremium ? 'Sohbet' : 'Sohbet · Premium'}
-                </Text>
+                {planCount > 0 && (
+                  <View
+                    style={{
+                      marginLeft: 8,
+                      minWidth: 26,
+                      height: 20,
+                      borderRadius: 12,
+                      paddingHorizontal: 6,
+                      backgroundColor: colors.danger,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{planCount > 99 ? '99+' : String(planCount)}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             </View>
           </TouchableOpacity>

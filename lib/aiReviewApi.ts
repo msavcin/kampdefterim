@@ -138,7 +138,7 @@ export async function evaluateCampingAreaReviews(
       return {
         success: false,
         error: errorMessage,
-        cooldown_remaining: cooldownRemaining
+        cooldown_remaining: cooldownRemaining ? Number(cooldownRemaining) : undefined
       };
     }
 

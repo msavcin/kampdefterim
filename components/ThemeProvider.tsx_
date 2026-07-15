@@ -6,11 +6,9 @@ import React, {
   useCallback,
   useMemo,
 } from 'react';
-import { useColorScheme, Appearance, StatusBar as RNStatusBar, Platform } from 'react-native';
+import { useColorScheme, Appearance } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
-import { eventBus } from '../lib/eventBus';
 import {
   type ThemeColors,
   type ThemePalette,
@@ -147,7 +145,6 @@ type ThemeContextType = {
   themeVariant: ThemeVariant;
   setThemeVariantId: (id: ThemeVariantId) => void;
   isKampfireTheme: boolean;
-  isPremium: boolean;
 };
 
 const ThemeContext = createContext<ThemeContextType>({
@@ -166,7 +163,6 @@ const ThemeContext = createContext<ThemeContextType>({
   themeVariant: themeVariants[defaultThemeVariantId],
   setThemeVariantId: () => {},
   isKampfireTheme: false,
-  isPremium: false,
 });
 
 function migrateLegacyPaletteId(legacy: string): {
@@ -216,58 +212,26 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
-  // Abonelik durum değişikliklerini dinle (ör: backend'den güncelleme geldiğinde)
-  useEffect(() => {
-    const handler = (subStatus: any) => {
-      try {
-        const prem = !!(subStatus?.offlineEnabled || subStatus?.isActive || subStatus?.is_premium);
-        setIsPremiumState(prem);
-        AsyncStorage.setItem('@cached_is_premium', prem ? '1' : '0').catch(() => {});
-        if (prem) {
-          // Premium olan kullanıcıyı otomatik Kampfire'a geçir
-          setThemeVariantIdState('kampfireGold');
-          AsyncStorage.setItem(STORAGE_KEY_VARIANT, 'kampfireGold').catch(() => {});
-        } else {
-          // Premium olmayan kullanıcıyı klasik arayüze zorla
-          setThemeVariantIdState(defaultThemeVariantId);
-          AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
-        }
-      } catch (e) {
-        /* ignore */
-      }
-    };
-    eventBus.on('subscription:statusUpdated', handler);
-    return () => eventBus.off('subscription:statusUpdated', handler);
-  }, []);
-
   const [lightPaletteId, setLightPaletteIdState] =
     useState<LightPaletteId>(defaultLightPaletteId);
   const [darkPaletteId, setDarkPaletteIdState] =
     useState<DarkPaletteId>(defaultDarkPaletteId);
   const [themeVariantId, setThemeVariantIdState] =
     useState<ThemeVariantId>(defaultThemeVariantId);
-  const [isPremium, setIsPremiumState] = useState<boolean>(false);
   const [colorMode, setColorModeState] = useState<ColorMode>('system');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const [
-          savedMode,
-          savedLight,
-          savedDark,
-          savedVariant,
-          savedLegacy,
-          savedCachedPremium,
-        ] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEY_MODE),
-          AsyncStorage.getItem(STORAGE_KEY_LIGHT),
-          AsyncStorage.getItem(STORAGE_KEY_DARK),
-          AsyncStorage.getItem(STORAGE_KEY_VARIANT),
-          AsyncStorage.getItem(STORAGE_KEY_PALETTE_LEGACY),
-          AsyncStorage.getItem('@cached_is_premium'),
-        ]);
+        const [savedMode, savedLight, savedDark, savedVariant, savedLegacy] =
+          await Promise.all([
+            AsyncStorage.getItem(STORAGE_KEY_MODE),
+            AsyncStorage.getItem(STORAGE_KEY_LIGHT),
+            AsyncStorage.getItem(STORAGE_KEY_DARK),
+            AsyncStorage.getItem(STORAGE_KEY_VARIANT),
+            AsyncStorage.getItem(STORAGE_KEY_PALETTE_LEGACY),
+          ]);
 
         if (savedMode && ['light', 'dark', 'system'].includes(savedMode)) {
           setColorModeState(savedMode as ColorMode);
@@ -289,35 +253,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
         if (dark && isDarkPaletteId(dark)) {
           setDarkPaletteIdState(dark);
         }
-        // Eğer önbelleğe alınmış premium bilgisi varsa, uygula
-        if (savedCachedPremium) {
-          setIsPremiumState(savedCachedPremium === '1');
-        } else {
-          // Eğer AsyncStorage'da yoksa, SecureStore'daki localUser'dan dene
-          try {
-            const localUserRaw = await SecureStore.getItemAsync('localUser');
-            if (localUserRaw) {
-              const parsed = JSON.parse(localUserRaw);
-              const localPrem = !!(parsed?.is_premium || parsed?.isPremium || parsed?.offline_enabled);
-              if (localPrem) {
-                setIsPremiumState(true);
-                AsyncStorage.setItem('@cached_is_premium', '1').catch(() => {});
-              }
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-
-        // Tema varyantı yüklenirken premium kısıtlarını uygula
         if (savedVariant && isThemeVariantId(savedVariant)) {
-          if (savedVariant === 'kampfireGold' && savedCachedPremium !== '1') {
-            // Non-premium kullanıcı için Kampfire önbellekliyse zorla klasik'e çek
-            setThemeVariantIdState(defaultThemeVariantId);
-            AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
-          } else {
-            setThemeVariantIdState(savedVariant);
-          }
+          setThemeVariantIdState(savedVariant);
         }
       } catch {
         // varsayılanlar
@@ -346,15 +283,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const setThemeVariantId = useCallback((id: ThemeVariantId) => {
     if (!isThemeVariantId(id)) return;
-    // Non-premium kullanıcıların Kampfire Gold'u seçmesine izin verme
-    if (id === 'kampfireGold' && !isPremium) {
-      setThemeVariantIdState(defaultThemeVariantId);
-      AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
-      return;
-    }
     setThemeVariantIdState(id);
     AsyncStorage.setItem(STORAGE_KEY_VARIANT, id).catch(() => {});
-  }, [isPremium]);
+  }, []);
 
   /** Eski API: birleşik id veya legacy id */
   const setPaletteId = useCallback(
@@ -374,25 +305,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
         : 'light'
       : colorMode;
 
-  useEffect(() => {
-    if (themeVariantId !== 'kampfireGold') return;
-    if (lightPaletteId !== 'L4') {
-      setLightPaletteIdState('L4');
-      AsyncStorage.setItem(STORAGE_KEY_LIGHT, 'L4').catch(() => {});
-    }
-    if (darkPaletteId !== 'D4') {
-      setDarkPaletteIdState('D4');
-      AsyncStorage.setItem(STORAGE_KEY_DARK, 'D4').catch(() => {});
-    }
-  }, [themeVariantId, lightPaletteId, darkPaletteId]);
-
   const colors: ThemeColors =
     scheme === 'dark'
       ? darkPalettes[darkPaletteId].colors
       : lightPalettes[lightPaletteId].colors;
 
   const themeVariant = themeVariants[themeVariantId] || themeVariants[defaultThemeVariantId];
-  const isKampfireTheme = themeVariantId === 'kampfireGold';
+  const isKampfireTheme =
+    themeVariantId === 'kampfireGold' && scheme === 'dark';
 
   // Geriye dönük palette objesi
   const palette: ThemePalette = useMemo(
@@ -423,7 +343,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
       themeVariant,
       setThemeVariantId,
       isKampfireTheme,
-      isPremium,
     }),
     [
       colors,
@@ -440,7 +359,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
       themeVariant,
       setThemeVariantId,
       isKampfireTheme,
-      isPremium,
     ],
   );
 
@@ -449,13 +367,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   return (
     <ThemeContext.Provider value={value}>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-      {Platform.OS === 'android' && (
-        <RNStatusBar
-          backgroundColor={colors.surface}
-          barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
-          translucent={false}
-        />
-      )}
       {children}
     </ThemeContext.Provider>
   );

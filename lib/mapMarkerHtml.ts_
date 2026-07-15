@@ -80,22 +80,14 @@ export function buildCampingMarkerHtml(
       ? Number(opts.rating).toFixed(1)
       : null;
   const isDark = !!opts.isDark;
-  const isKampfire = opts.variant === 'kampfireGold';
+  const isKampfire = opts.variant === 'kampfireGold' && isDark;
 
   const badgeBg = isKampfire
-    ? isDark
-      ? 'rgba(10,14,12,0.94)'
-      : 'rgba(255,253,249,0.96)'
+    ? 'rgba(10,14,12,0.94)'
     : isDark
       ? 'rgba(20,20,20,0.92)'
       : 'rgba(255,255,255,0.95)';
-  const badgeFg = isKampfire
-    ? isDark
-      ? '#E8C97A'
-      : '#8B6A2F'
-    : isDark
-      ? '#F5F5F4'
-      : '#1A1F26';
+  const badgeFg = isKampfire ? '#E8C97A' : isDark ? '#F5F5F4' : '#1A1F26';
   const badgeBorder = isKampfire
     ? 'rgba(212,175,106,0.3)'
     : isDark
@@ -109,12 +101,9 @@ export function buildCampingMarkerHtml(
         ? 'rgba(245,245,244,0.55)'
         : 'rgba(44,42,38,0.35)'
     : badgeBorder;
-  // For 5.0 ratings ensure sufficient contrast in both Kampfire (L4) light and dark modes.
-  // - Kampfire + dark: use a light foreground
-  // - Kampfire + light: use a darker foreground (readable on light badgeBg)
   const badgeAccentFg = perfect
     ? isKampfire
-      ? (isDark ? '#F2EDE3' : '#2C2A26')
+      ? '#F2EDE3'
       : isDark
         ? '#F5F5F4'
         : '#2C2A26'
@@ -125,29 +114,15 @@ export function buildCampingMarkerHtml(
     : '';
 
   if (isKampfire) {
-    const glowBg = isDark
-      ? 'radial-gradient(circle, rgba(232,201,122,0.34) 0%, rgba(212,175,106,0.08) 52%, transparent 74%)'
-      : 'radial-gradient(circle, rgba(212,175,106,0.24) 0%, rgba(212,175,106,0.06) 54%, transparent 76%)';
-    const coreBg = isDark
-      ? 'radial-gradient(circle at 35% 30%, #F0D78C, #C9A04A 55%, #8B6914)'
-      : 'radial-gradient(circle at 35% 30%, #F8E7BF, #D9B36D 58%, #A47C37)';
-    const coreBorder = isDark
-      ? 'rgba(255,240,200,0.5)'
-      : 'rgba(139,106,47,0.26)';
-    const coreShadow = isDark
-      ? '0 0 16px rgba(212,175,106,0.55), inset 0 1px 0 rgba(255,255,255,0.35)'
-      : '0 0 14px rgba(212,175,106,0.32), inset 0 1px 0 rgba(255,255,255,0.65)';
-    const tipColor = isDark ? '#B8872C' : '#C89A50';
-
     return (
       `<div class="kampfire-marker-shell" style="position:relative;width:36px;height:46px;display:flex;flex-direction:column;align-items:center;">` +
       ratingHtml +
-      `<div class="kampfire-marker-glow" style="width:36px;height:36px;border-radius:18px;background:${glowBg};display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 10px rgba(212,175,106,0.48));">` +
-      `<div class="kampfire-marker-core" style="width:28px;height:28px;border-radius:14px;background:${coreBg};display:flex;align-items:center;justify-content:center;border:1.5px solid ${coreBorder};box-shadow:${coreShadow};position:relative;z-index:1;">` +
-      `<div style="width:${iconSize}px;height:${iconSize}px;display:flex;align-items:center;justify-content:center;overflow:hidden;filter:drop-shadow(0 1px 1px rgba(0,0,0,0.22));">${icon}</div>` +
+      `<div class="kampfire-marker-glow" style="width:36px;height:36px;border-radius:18px;background:radial-gradient(circle, rgba(232,201,122,0.34) 0%, rgba(212,175,106,0.08) 52%, transparent 74%);display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 10px rgba(212,175,106,0.48));">` +
+      `<div class="kampfire-marker-core" style="width:28px;height:28px;border-radius:14px;background:radial-gradient(circle at 35% 30%, #F0D78C, #C9A04A 55%, #8B6914);display:flex;align-items:center;justify-content:center;border:1.5px solid rgba(255,240,200,0.5);box-shadow:0 0 16px rgba(212,175,106,0.55), inset 0 1px 0 rgba(255,255,255,0.35);position:relative;z-index:1;">` +
+      `<div style="width:${iconSize}px;height:${iconSize}px;display:flex;align-items:center;justify-content:center;overflow:hidden;filter:drop-shadow(0 1px 1px rgba(0,0,0,0.28));">${icon}</div>` +
       `</div>` +
       `</div>` +
-      `<div class="kampfire-marker-tip" style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:10px solid ${tipColor};margin-top:-3px;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.18));"></div>` +
+      `<div class="kampfire-marker-tip" style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:10px solid #B8872C;margin-top:-3px;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.22));"></div>` +
       `</div>`
     );
   }

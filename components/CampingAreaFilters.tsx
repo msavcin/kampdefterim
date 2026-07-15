@@ -45,7 +45,7 @@ function ModernCheckbox({ checked, disabled }: { checked: boolean; disabled?: bo
         disabled && styles.checkboxDisabled,
       ]}
     >
-      {checked && <Check size={16} color="#fff" strokeWidth={3} />}
+      {checked && <Check size={16} color={colors.surface} strokeWidth={3} />}
     </View>
   );
 }

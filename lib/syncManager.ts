@@ -231,7 +231,7 @@ export async function syncRatings(): Promise<boolean> {
                 ...area,
                 rating: summary.average_rating || summary.avg_rating || area.rating,
                 review_count: summary.total_count || summary.count || area.review_count
-              });
+              } as any);
             }
           }
         } catch (summaryErr) {
@@ -274,7 +274,7 @@ export async function syncRatings(): Promise<boolean> {
               price_range: updatedFields.price_range || (area ? area.price_range : undefined),
               website: updatedFields.website || (area ? area.website : undefined),
               phone: updatedFields.phone || (area ? area.phone : undefined)
-            });
+            } as any);
           };
 
           // Eğer sunucu cooldown bildiriyorsa, logla ve devam et
@@ -327,7 +327,7 @@ export async function syncRatings(): Promise<boolean> {
                   ...(area || {}),
                   ai_review_evaluation: finalText,
                   ai_review_generated_at: genAt
-                });
+                } as any);
                 if (__DEV__) console.log(`[syncRatings] 🤖 AI review (fallback with note) kaydedildi: ${campgroundId}`);
               } catch (saveErr) {
                 console.warn('[syncRatings] AI fallback kaydetme hatası:', saveErr);
@@ -358,7 +358,7 @@ export async function syncRatings(): Promise<boolean> {
               }
               const countLabel = typeof reviewCount === 'number' ? String(reviewCount) : 'az sayıda';
               const fallbackText = `Bu kamp alanı hakkında ${countLabel} kullanıcı yorumu bulunmaktadır. Detaylı bilgi için Google Places'i ziyaret edebilirsiniz.\n\nNot: Yorum sayısı az olduğu için değerlendirme sınırlı olabilir.`;
-              await db.insertOrUpdateCampingArea({ ...(area || {}), ai_review_evaluation: fallbackText, ai_review_generated_at: new Date().toISOString() });
+              await db.insertOrUpdateCampingArea({ ...(area || {}), ai_review_evaluation: fallbackText, ai_review_generated_at: new Date().toISOString() } as any);
               if (__DEV__) console.log(`[syncRatings] 🤖 AI review (error fallback) kaydedildi: ${campgroundId}`);
             } catch (saveErr) {
               console.warn('[syncRatings] AI error fallback kaydetme hatası:', saveErr);

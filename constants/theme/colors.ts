@@ -3,8 +3,8 @@
  *
  * Mevcut ThemeColors API korunur; ekranlar colors.primary / background vb. kullanmaya devam eder.
  *
- * Açık tema paletleri (yalnız light): L1 · L2 · L3
- * Koyu tema paletleri (yalnız dark):  D1 · D2 · D3
+ * Açık tema paletleri (yalnız light): L1 · L2 · L3 · L4
+ * Koyu tema paletleri (yalnız dark):  D1 · D2 · D3 · D4
  *
  * Kaynak mockup: kamp-defterim-palette-mockups.html
  */
@@ -119,6 +119,29 @@ export const lightL3: ThemeColors = {
   tabBarInactive: '#B0A89E',
 };
 
+// ─── L4 Gold Linen (Açık) ───
+export const lightL4: ThemeColors = {
+  primary: '#8B6A2F',
+  primaryLight: '#F5E9D4',
+  primaryDark: '#6E521F',
+  accent: '#D4AF6A',
+  background: '#FBF7F0',
+  surface: '#FFFDF9',
+  surfaceVariant: '#F2E8D9',
+  text: '#33291B',
+  textSecondary: '#8D7A5D',
+  muted: '#B3A187',
+  border: '#E7DBC7',
+  danger: '#C45C5C',
+  warning: '#D4AF6A',
+  success: '#6B8F71',
+  info: '#5B7C99',
+  tabBar: '#FFFDF9',
+  tabBarBorder: '#EFE3D1',
+  tabBarActive: '#8B6A2F',
+  tabBarInactive: '#B3A187',
+};
+
 // ─── D1 Charcoal Mono (Koyu) ───
 export const darkD1: ThemeColors = {
   primary: '#F5F5F4',
@@ -213,7 +236,7 @@ export const darkD4: ThemeColors = {
 
 // ─── Scheme-specific palette lists (Profil seçici) ───
 
-export type LightPaletteId = 'L1' | 'L2' | 'L3';
+export type LightPaletteId = 'L1' | 'L2' | 'L3' | 'L4';
 export type DarkPaletteId = 'D1' | 'D2' | 'D3' | 'D4';
 
 export const lightPalettes: Record<LightPaletteId, SchemePalette> = {
@@ -237,6 +260,13 @@ export const lightPalettes: Record<LightPaletteId, SchemePalette> = {
     emoji: '🌿',
     scheme: 'light',
     colors: lightL3,
+  },
+  L4: {
+    id: 'L4',
+    name: 'Altın Keten',
+    emoji: '✨',
+    scheme: 'light',
+    colors: lightL4,
   },
 };
 
@@ -286,6 +316,7 @@ export const palettes: Record<string, ThemePalette> = {
   L2_D2: { id: 'L2_D2', name: 'Sis / Arduvaz', emoji: '🌫️', light: lightL2, dark: darkD2 },
   L3_D3: { id: 'L3_D3', name: 'Keten / Orman', emoji: '🌿', light: lightL3, dark: darkD3 },
   L3_D4: { id: 'L3_D4', name: 'Keten / Kampfire Gold', emoji: '🌟', light: lightL3, dark: darkD4 },
+  L4_D4: { id: 'L4_D4', name: 'Altın Keten / Kampfire Gold', emoji: '✨', light: lightL4, dark: darkD4 },
   // Eski id'ler → soft map (migration)
   nature: { id: 'nature', name: 'Doğa', emoji: '🌿', light: lightL3, dark: darkD3 },
   ocean: { id: 'ocean', name: 'Okyanus', emoji: '🌊', light: lightL2, dark: darkD2 },
@@ -316,7 +347,7 @@ export function getDarkSwatches(id: DarkPaletteId): string[] {
 }
 
 export function isLightPaletteId(id: string): id is LightPaletteId {
-  return id === 'L1' || id === 'L2' || id === 'L3';
+  return id === 'L1' || id === 'L2' || id === 'L3' || id === 'L4';
 }
 
 export function isDarkPaletteId(id: string): id is DarkPaletteId {
