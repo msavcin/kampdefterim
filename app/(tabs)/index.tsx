@@ -1801,6 +1801,46 @@ export default function MapScreen() {
   const [mapMoveQuery, setMapMoveQuery] = useState<{ latitude: number; longitude: number } | null>(null);
   const [showMapPopup, setShowMapPopup] = useState(false);
 
+  // Kampfire action label animation: görünürlük kontrolü ve zamanlayıcı
+  const kampfireLabelOpacity = useRef(new Animated.Value(0)).current;
+  const kampfireLabelTimerRef = useRef<number | null>(null);
+
+  const showKampfireLabels = useCallback(() => {
+    Animated.timing(kampfireLabelOpacity, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+
+    if (kampfireLabelTimerRef.current) {
+      clearTimeout(kampfireLabelTimerRef.current);
+    }
+    kampfireLabelTimerRef.current = setTimeout(() => {
+      Animated.timing(kampfireLabelOpacity, {
+        toValue: 0,
+        duration: 600,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+      kampfireLabelTimerRef.current = null;
+    }, 3000) as unknown as number;
+  }, [kampfireLabelOpacity]);
+
+  useEffect(() => {
+    if (!isKampfireTheme) return;
+    // Harita hareketi algılandığında etiketleri göster
+    if (mapMoveQuery || mapCenter) {
+      showKampfireLabels();
+    }
+  }, [mapMoveQuery, mapCenter, isKampfireTheme, showKampfireLabels]);
+
+  useEffect(() => {
+    return () => {
+      if (kampfireLabelTimerRef.current) clearTimeout(kampfireLabelTimerRef.current);
+    };
+  }, []);
+
   // Sadece kullanıcıya ait private ve tüm public alanları kapsayacak şekilde sorgu
 
   // Varsayılan olarak konumdan başlat, harita hareket ettirilirse mapMoveQuery ile güncelle
@@ -2947,6 +2987,7 @@ export default function MapScreen() {
         rating: Number(area.rating) || 0,
         isDark: isDark,
         variant: themeVariantId,
+        mapTheme: mapTheme,
       }),
     };
   });
@@ -3185,6 +3226,37 @@ export default function MapScreen() {
               }
             }
           });
+
+          // Kullanıcı tarafından başlatılan sürüklemeleri React Native'e bildir
+          try {
+            var __lastDragPost = 0;
+            function __postMapDragStart() {
+              try {
+                var now = Date.now();
+                if (now - __lastDragPost < 300) return;
+                __lastDragPost = now;
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapDragStart' }));
+                }
+              } catch (er) {}
+            }
+
+            map.on('movestart', function(e) {
+              try {
+                // Leaflet'in movestart bazen programatik hareketlerde tetiklenebildiği için
+                // mümkünse originalEvent kontrolü yapıyoruz. Ek olarak dragstart desteği de var.
+                if (e && (e.originalEvent || e.type === 'dragstart')) {
+                  __postMapDragStart();
+                }
+              } catch (er) {}
+            });
+
+            map.on('dragstart', function(e) {
+              try {
+                __postMapDragStart();
+              } catch (er) {}
+            });
+          } catch (e) {}
           
           // Offline modda zoom seviyesi kontrolü
           if (isOffline) {
@@ -3642,6 +3714,14 @@ export default function MapScreen() {
         } else {
           setShowMapMoveButton(false);
         }
+      } else if (data.type === 'mapDragStart') {
+        // Kullanıcı haritayı sürüklemeye başladığında bottom sheet'i gizle
+        try {
+          console.log('[MapMessage] mapDragStart received; kampfireSheetVisible=', !!kampfireSheetVisible);
+          if (isMounted.current) {
+            closeKampfireSheet();
+          }
+        } catch (e) {}
       } else if (data.type === 'popupopen') {
         setShowMapPopup(true);
         const area = resolveAreaFromPayload(data);
@@ -4080,6 +4160,13 @@ export default function MapScreen() {
     kampfireUiMuted,
     kampfireUiText,
   ]);
+
+  // Kampfire etiketleri için biraz daha şeffaf, menü zeminine benzer arkaplan
+  const kampfireActionLabelBg = isKampfireTheme
+    ? scheme === 'dark'
+      ? 'rgba(14,18,16,0.72)'
+      : 'rgba(255,253,249,0.82)'
+    : colors.surface;
 
   const handleToggleViewMode = () => {
     if (offlineLocked) {
@@ -5108,72 +5195,167 @@ export default function MapScreen() {
 
                 <View style={styles.kampfireMapActionStack}>
                   {!selectForPlanMode && (
-                    <TouchableOpacity
-                      style={[
-                        styles.kampfireMapActionButton,
-                        {
-                          backgroundColor: kampfireUiSurface,
-                          borderColor: kampfireUiBorder,
-                        },
-                        isBusy && { opacity: 0.45 },
-                      ]}
-                      onPress={() => {
-                        if (!isMounted.current) return;
-                        setFabMenuVisible(true);
-                      }}
-                      disabled={isBusy}
-                    >
-                      <Plus size={20} color={kampfireUiPrimary} />
-                    </TouchableOpacity>
+                    isKampfireTheme ? (
+                      <View style={styles.kampfireActionItem}>
+                        <Animated.View style={[styles.kampfireActionLabel, { backgroundColor: kampfireActionLabelBg, borderColor: kampfireUiBorder, opacity: kampfireLabelOpacity }]}> 
+                          <Text style={[styles.kampfireActionLabelText, { color: kampfireUiPrimary }]}>Kamp Alanı Ekle</Text>
+                        </Animated.View>
+                        <TouchableOpacity
+                          style={[
+                            styles.kampfireMapActionButton,
+                            {
+                              backgroundColor: kampfireUiSurface,
+                              borderColor: kampfireUiBorder,
+                            },
+                            isBusy && { opacity: 0.45 },
+                          ]}
+                          onPress={() => {
+                            if (!isMounted.current) return;
+                            setFabMenuVisible(true);
+                          }}
+                          disabled={isBusy}
+                        >
+                          <Plus size={20} color={kampfireUiPrimary} />
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={{ alignItems: 'center', marginHorizontal: 6 }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.kampfireMapActionButton,
+                            {
+                              backgroundColor: kampfireUiSurface,
+                              borderColor: kampfireUiBorder,
+                            },
+                            isBusy && { opacity: 0.45 },
+                          ]}
+                          onPress={() => {
+                            if (!isMounted.current) return;
+                            setFabMenuVisible(true);
+                          }}
+                          disabled={isBusy}
+                        >
+                          <Plus size={20} color={kampfireUiPrimary} />
+                        </TouchableOpacity>
+                        <Text style={{ marginTop: 6, fontSize: 12, color: kampfireUiPrimary, fontWeight: '700' }}>Kamp Alanı Ekle</Text>
+                      </View>
+                    )
                   )}
 
-                  <TouchableOpacity
-                    style={[
-                      styles.kampfireMapActionButton,
-                      {
-                        backgroundColor: kampfireUiSurface,
-                        borderColor: kampfireUiBorder,
-                      },
-                      isBusy && { opacity: 0.45 },
-                    ]}
-                    onPress={handleShowCurrentLocation}
-                    disabled={isBusy}
-                  >
-                    <LocateFixed size={20} color={kampfireUiPrimary} />
-                  </TouchableOpacity>
+                  {isKampfireTheme ? (
+                    <View style={styles.kampfireActionItem}>
+                      <Animated.View style={[styles.kampfireActionLabel, { backgroundColor: kampfireActionLabelBg, borderColor: kampfireUiBorder, opacity: kampfireLabelOpacity }]}> 
+                        <Text style={[styles.kampfireActionLabelText, { color: kampfireUiPrimary }]}>Konuma Geri Dön</Text>
+                      </Animated.View>
+                      <TouchableOpacity
+                        style={[
+                          styles.kampfireMapActionButton,
+                          {
+                            backgroundColor: kampfireUiSurface,
+                            borderColor: kampfireUiBorder,
+                          },
+                          isBusy && { opacity: 0.45 },
+                        ]}
+                        onPress={handleShowCurrentLocation}
+                        disabled={isBusy}
+                      >
+                        <LocateFixed size={20} color={kampfireUiPrimary} />
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={{ alignItems: 'center', marginHorizontal: 6 }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.kampfireMapActionButton,
+                          {
+                            backgroundColor: kampfireUiSurface,
+                            borderColor: kampfireUiBorder,
+                          },
+                          isBusy && { opacity: 0.45 },
+                        ]}
+                        onPress={handleShowCurrentLocation}
+                        disabled={isBusy}
+                      >
+                        <LocateFixed size={20} color={kampfireUiPrimary} />
+                      </TouchableOpacity>
+                      <Text style={{ marginTop: 6, fontSize: 12, color: kampfireUiPrimary, fontWeight: '700' }}>Konuma Geri Dön</Text>
+                    </View>
+                  )}
 
                   {showMapMoveButton && (
-                    <TouchableOpacity
-                      style={[
-                        styles.kampfireMapActionButton,
-                        {
-                          backgroundColor: colors.primary,
-                          borderColor: kampfireUiBorder,
-                        },
-                        offlineLocked && { opacity: 0.45 },
-                      ]}
-                      onPress={() => {
-                        if (offlineLocked) {
-                          Alert.alert(
-                            'Offline Özellik Gerekli',
-                            'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
-                            [
-                              { text: 'İptal', style: 'cancel' },
-                              {
-                                text: 'Premium Ol',
-                                onPress: () => router.push('/premium' as any),
-                                style: 'default',
-                              },
-                            ],
-                          );
-                          return;
-                        }
-                        handleShowMapMoveResults();
-                      }}
-                      disabled={offlineLocked}
-                    >
-                      <Binoculars size={20} color="#fff" />
-                    </TouchableOpacity>
+                    isKampfireTheme ? (
+                      <View style={styles.kampfireActionItem}>
+                        <Animated.View style={[styles.kampfireActionLabel, { backgroundColor: kampfireActionLabelBg, borderColor: kampfireUiBorder, opacity: kampfireLabelOpacity }]}> 
+                          <Text style={[styles.kampfireActionLabelText, { color: kampfireUiPrimary }]}>Yakındaki Alanları Göster</Text>
+                        </Animated.View>
+                        <TouchableOpacity
+                          style={[
+                            styles.kampfireMapActionButton,
+                            {
+                              backgroundColor: colors.primary,
+                              borderColor: kampfireUiBorder,
+                            },
+                            offlineLocked && { opacity: 0.45 },
+                          ]}
+                          onPress={() => {
+                            if (offlineLocked) {
+                              Alert.alert(
+                                'Offline Özellik Gerekli',
+                                'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
+                                [
+                                  { text: 'İptal', style: 'cancel' },
+                                  {
+                                    text: 'Premium Ol',
+                                    onPress: () => router.push('/premium' as any),
+                                    style: 'default',
+                                  },
+                                ],
+                              );
+                              return;
+                            }
+                            handleShowMapMoveResults();
+                          }}
+                          disabled={offlineLocked}
+                        >
+                          <Binoculars size={20} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={{ alignItems: 'center', marginHorizontal: 6 }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.kampfireMapActionButton,
+                            {
+                              backgroundColor: colors.primary,
+                              borderColor: kampfireUiBorder,
+                            },
+                            offlineLocked && { opacity: 0.45 },
+                          ]}
+                          onPress={() => {
+                            if (offlineLocked) {
+                              Alert.alert(
+                                'Offline Özellik Gerekli',
+                                'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
+                                [
+                                  { text: 'İptal', style: 'cancel' },
+                                  { 
+                                    text: 'Premium Ol', 
+                                    onPress: () => router.push('/premium' as any),
+                                    style: 'default'
+                                  }
+                                ],
+                              );
+                              return;
+                            }
+                            handleShowMapMoveResults();
+                          }}
+                          disabled={offlineLocked}
+                        >
+                          <Binoculars size={20} color="#fff" />
+                        </TouchableOpacity>
+                        <Text style={{ marginTop: 6, fontSize: 12, color: kampfireUiPrimary, fontWeight: '700' }}>Yakındaki Alanları Göster</Text>
+                      </View>
+                    )
                   )}
                 </View>
               </View>
@@ -5181,42 +5363,45 @@ export default function MapScreen() {
             {/* Harita kaydırıldığında çıkan buton */}
             {!isKampfireMapView && showMapMoveButton && mapCenter && !isLocationPickerMode && !showMapPopup && (
               <View
-                style={[
-                  styles.mapMoveButtonContainer,
-                  isKampfireMapView && styles.kampfireMapMoveButtonContainer,
-                ]}
-                pointerEvents="box-none"
-              >
-                <TouchableOpacity 
                   style={[
-                    styles.fab, 
-                    styles.fabBinoculars,
-                    { backgroundColor: colors.primary },
-                    (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }
-                  ]} 
-                  onPress={() => {
-                    if (!isConnected && !user?.offline_enabled) {
-                      Alert.alert(
-                        'Offline Özellik Gerekli',
-                        'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
-                        [
-                          { text: 'İptal', style: 'cancel' },
-                          { 
-                            text: 'Premium Ol', 
-                            onPress: () => router.push('/premium' as any),
-                            style: 'default'
-                          }
-                        ]
-                      );
-                      return;
-                    }
-                    handleShowMapMoveResults();
-                  }}
-                  disabled={(!isConnected && !user?.offline_enabled)}
+                      styles.mapMoveButtonContainer,
+                      isKampfireMapView && styles.kampfireMapMoveButtonContainer,
+                  ]}
+                  pointerEvents="box-none"
                 >
-                  <Binoculars size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
+                  <View style={{ alignItems: 'center' }}>
+                    <TouchableOpacity 
+                      style={[
+                        styles.fab, 
+                        styles.fabBinoculars,
+                        { backgroundColor: colors.primary },
+                        (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }
+                      ]} 
+                      onPress={() => {
+                        if (!isConnected && !user?.offline_enabled) {
+                          Alert.alert(
+                            'Offline Özellik Gerekli',
+                            'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
+                            [
+                              { text: 'İptal', style: 'cancel' },
+                              { 
+                                text: 'Premium Ol', 
+                                onPress: () => router.push('/premium' as any),
+                                style: 'default'
+                              }
+                            ]
+                          );
+                          return;
+                        }
+                        handleShowMapMoveResults();
+                      }}
+                      disabled={(!isConnected && !user?.offline_enabled)}
+                    >
+                      <Binoculars size={24} color="#fff" />
+                    </TouchableOpacity>
+                    <Text style={{ marginTop: 6, fontSize: 12, color: colors.primary, fontWeight: '700' }}>Yakındaki Alanları Göster</Text>
+                  </View>
+                </View>
             )}
           </View>
 
@@ -5274,18 +5459,20 @@ export default function MapScreen() {
                   >
                     <Plus size={28} color="white" />
                   </TouchableOpacity>
-                  {isKampfireTheme && (
-                    <Text style={{ marginTop: 6, fontSize: 12, color: kampfireUiText, fontWeight: '700' }}>Kamp Alanı Ekle</Text>
-                  )}
+                  <Text style={{ marginTop: 6, fontSize: 12, color: colors.primary, fontWeight: '700' }}>Kamp Alanı Ekle</Text>
                 </View>
               )}
-              <TouchableOpacity
-                style={[styles.fab, { backgroundColor: colors.primary }, isBusy ? { opacity: 0.45 } : {}]}
-                onPress={handleShowCurrentLocation}
-                disabled={isBusy}
-              >
-                <LocateFixed size={24} color="white" />
-              </TouchableOpacity>
+              <View style={{ alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={[styles.fab, { backgroundColor: colors.primary }, isBusy ? { opacity: 0.45 } : {}]}
+                  onPress={handleShowCurrentLocation}
+                  disabled={isBusy}
+                >
+                  <LocateFixed size={24} color="white" />
+                </TouchableOpacity>
+                {/* "Konuma Geri Dön" yazısı gözüksün istenirse; <Text style={{ marginTop: 6, fontSize: 12, color: colors.text, fontWeight: '700' }}>Konuma Geri Dön</Text> */}
+                <Text style={{ marginTop: 6, fontSize: 12, color: colors.text, fontWeight: '700' }}></Text>
+              </View>
             </View>
           )}
             {/* Kampfire quick menu */}
@@ -5540,7 +5727,7 @@ export default function MapScreen() {
                     style={styles.kampfireBottomSheetHandleTap}
                     activeOpacity={0.85}
                     onPress={() => {
-                      if (kampfireSheetExpanded) {
+                      if (kampfireSheetVisible) {
                         closeKampfireSheet();
                       } else {
                         openKampfireSheet(true);
@@ -6380,6 +6567,31 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     shadowOpacity: 0.24,
     shadowRadius: 10,
     elevation: 10,
+  },
+  kampfireActionItem: {
+    position: 'relative',
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 6,
+  },
+  kampfireActionLabel: {
+    position: 'absolute',
+    right: 45,
+    top: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    minWidth: 160,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kampfireActionLabelText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   kampfireMenuBackdrop: {
     flex: 1,

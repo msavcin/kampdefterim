@@ -22,6 +22,7 @@
  */
 
 import type { ThemeVariantId } from '../constants/theme/variants';
+import type { MapPopupTheme } from './mapPopupTheme';
 
 export type BuildCampingMarkerHtmlOptions = {
   /** Pin fill color (existing getMarkerColor / getCampingAreaBgColor) */
@@ -35,6 +36,8 @@ export type BuildCampingMarkerHtmlOptions = {
   iconSize?: number;
   /** Current visual theme variant */
   variant?: ThemeVariantId;
+  /** Map popup/theme helpers (optional) */
+  mapTheme?: MapPopupTheme;
 };
 
 /**
@@ -63,6 +66,37 @@ function normalizeIconSvg(svg: string, size: number): string {
     );
   }
   return out;
+}
+
+function hexToRgba(hex: string, alpha = 1): string {
+  if (!hex) return `rgba(0,0,0,${alpha})`;
+  const s = hex.trim();
+  const rgbMatch = s.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/i);
+  if (rgbMatch) {
+    const r = rgbMatch[1];
+    const g = rgbMatch[2];
+    const b = rgbMatch[3];
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  let h = s.replace('#', '');
+  if (h.length === 3) {
+    h = h.split('').map(c => c + c).join('');
+  }
+  if (h.length === 6) {
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  if (h.length === 8) {
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    const a = parseInt(h.slice(6, 8), 16) / 255;
+    const combinedAlpha = Math.max(0, Math.min(1, a * alpha));
+    return `rgba(${r},${g},${b},${combinedAlpha})`;
+  }
+  return s; // fallback to original string
 }
 
 /**
@@ -125,26 +159,28 @@ export function buildCampingMarkerHtml(
     : '';
 
   if (isKampfire) {
+    const mapTheme = opts.mapTheme;
+    const baseColor = (opts.color && opts.color !== '') ? opts.color : (mapTheme && mapTheme.info) ? mapTheme.info : (color || '#D4AF6A');
     const glowBg = isDark
-      ? 'radial-gradient(circle, rgba(232,201,122,0.34) 0%, rgba(212,175,106,0.08) 52%, transparent 74%)'
-      : 'radial-gradient(circle, rgba(212,175,106,0.24) 0%, rgba(212,175,106,0.06) 54%, transparent 76%)';
+      ? `radial-gradient(circle, ${hexToRgba(baseColor, 0.34)} 0%, ${hexToRgba(baseColor, 0.08)} 52%, transparent 74%)`
+      : `radial-gradient(circle, ${hexToRgba(baseColor, 0.24)} 0%, ${hexToRgba(baseColor, 0.06)} 54%, transparent 76%)`;
     const coreBg = isDark
-      ? 'radial-gradient(circle at 35% 30%, #F0D78C, #C9A04A 55%, #8B6914)'
-      : 'radial-gradient(circle at 35% 30%, #F8E7BF, #D9B36D 58%, #A47C37)';
+      ? `radial-gradient(circle at 35% 30%, ${hexToRgba(baseColor, 0.98)}, ${hexToRgba(baseColor, 0.65)} 55%, ${hexToRgba(baseColor, 0.38)})`
+      : `radial-gradient(circle at 35% 30%, ${hexToRgba(baseColor, 0.98)}, ${hexToRgba(baseColor, 0.7)} 58%, ${hexToRgba(baseColor, 0.5)})`;
     const coreBorder = isDark
-      ? 'rgba(255,240,200,0.5)'
-      : 'rgba(139,106,47,0.26)';
+      ? hexToRgba(baseColor, 0.5)
+      : hexToRgba(baseColor, 0.26);
     const coreShadow = isDark
-      ? '0 0 16px rgba(212,175,106,0.55), inset 0 1px 0 rgba(255,255,255,0.35)'
-      : '0 0 14px rgba(212,175,106,0.32), inset 0 1px 0 rgba(255,255,255,0.65)';
-    const tipColor = isDark ? '#B8872C' : '#C89A50';
+      ? `0 0 16px ${hexToRgba(baseColor, 0.55)}, inset 0 1px 0 rgba(255,255,255,0.35)`
+      : `0 0 14px ${hexToRgba(baseColor, 0.32)}, inset 0 1px 0 rgba(255,255,255,0.65)`;
+    const tipColor = hexToRgba(baseColor, 1);
 
     return (
       `<div class="kampfire-marker-shell" style="position:relative;width:36px;height:46px;display:flex;flex-direction:column;align-items:center;">` +
       ratingHtml +
-      `<div class="kampfire-marker-glow" style="width:36px;height:36px;border-radius:18px;background:${glowBg};display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 10px rgba(212,175,106,0.48));">` +
+      `<div class="kampfire-marker-glow" style="width:36px;height:36px;border-radius:18px;background:${glowBg};display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 10px ${hexToRgba(baseColor, 0.48)});">` +
       `<div class="kampfire-marker-core" style="width:28px;height:28px;border-radius:14px;background:${coreBg};display:flex;align-items:center;justify-content:center;border:1.5px solid ${coreBorder};box-shadow:${coreShadow};position:relative;z-index:1;">` +
-      `<div style="width:${iconSize}px;height:${iconSize}px;display:flex;align-items:center;justify-content:center;overflow:hidden;filter:drop-shadow(0 1px 1px rgba(0,0,0,0.22));">${icon}</div>` +
+      `<div style="width:${iconSize}px;height:${iconSize}px;display:flex;align-items:center;justify-content:center;overflow:hidden;filter:drop-shadow(0 1px 1px rgba(0,0,0,0.22));opacity:0.92;">${icon}</div>` +
       `</div>` +
       `</div>` +
       `<div class="kampfire-marker-tip" style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:10px solid ${tipColor};margin-top:-3px;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.18));"></div>` +

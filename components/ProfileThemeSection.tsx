@@ -77,6 +77,10 @@ function ProfileThemeSectionComponent() {
     if (id === 'kampfireGold') {
       if (darkPaletteId !== 'D4') setDarkPaletteId('D4');
       if (lightPaletteId !== 'L4') setLightPaletteId('L4');
+    } else if (id === 'classic' && isPremium) {
+      // Premium kullanıcılar klasik arayüzü seçtiğinde makul bir varsayılan ata
+      if (lightPaletteId !== 'L2') setLightPaletteId('L2');
+      if (darkPaletteId !== 'D3') setDarkPaletteId('D3');
     }
   };
 
@@ -186,26 +190,29 @@ function ProfileThemeSectionComponent() {
       <Text style={[styles.hint, { color: colors.muted }]}>Gündüz modunda kullanılacak palet</Text>
       {lightPaletteList.map((p) => {
         const selected = lightPaletteId === p.id;
+        const disabled = p.id === 'L4' && (!isPremium || themeVariantId !== 'kampfireGold');
         return (
           <Pressable
             key={p.id}
-            onPress={() => setLightPaletteId(p.id as LightPaletteId)}
+            onPress={() => !disabled && setLightPaletteId(p.id as LightPaletteId)}
+            disabled={disabled}
             style={[
               styles.card,
               {
                 backgroundColor: colors.surface,
                 borderColor: selected ? colors.primary : colors.border,
                 borderWidth: selected ? 1.5 : 1,
+                opacity: disabled ? 0.6 : 1,
               },
             ]}
           >
             <Swatches colors={getLightSwatches(p.id as LightPaletteId)} />
-            <Text style={[styles.pid, { color: colors.primary }]}>
+            <Text style={[styles.pid, { color: colors.primary }]}> 
               {p.emoji} {p.id}
             </Text>
             <Text style={[styles.pname, { color: colors.text }]}>{p.name}</Text>
             {selected && (
-              <View style={[styles.check, { backgroundColor: colors.primary }]}>
+              <View style={[styles.check, { backgroundColor: colors.primary }]}> 
                 <Text style={styles.checkMark}>✓</Text>
               </View>
             )}
@@ -218,26 +225,29 @@ function ProfileThemeSectionComponent() {
       <Text style={[styles.hint, { color: colors.muted }]}>Gece modunda kullanılacak palet</Text>
       {darkPaletteList.map((p) => {
         const selected = darkPaletteId === p.id;
+        const disabled = p.id === 'D4' && (!isPremium || themeVariantId !== 'kampfireGold');
         return (
           <Pressable
             key={p.id}
-            onPress={() => setDarkPaletteId(p.id as DarkPaletteId)}
+            onPress={() => !disabled && setDarkPaletteId(p.id as DarkPaletteId)}
+            disabled={disabled}
             style={[
               styles.card,
               {
                 backgroundColor: colors.surface,
                 borderColor: selected ? colors.primary : colors.border,
                 borderWidth: selected ? 1.5 : 1,
+                opacity: disabled ? 0.6 : 1,
               },
             ]}
           >
             <Swatches colors={getDarkSwatches(p.id as DarkPaletteId)} />
-            <Text style={[styles.pid, { color: colors.primary }]}>
+            <Text style={[styles.pid, { color: colors.primary }]}> 
               {p.emoji} {p.id}
             </Text>
             <Text style={[styles.pname, { color: colors.text }]}>{p.name}</Text>
             {selected && (
-              <View style={[styles.check, { backgroundColor: colors.primary }]}>
+              <View style={[styles.check, { backgroundColor: colors.primary }]}> 
                 <Text style={styles.checkMark}>✓</Text>
               </View>
             )}

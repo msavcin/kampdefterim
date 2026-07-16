@@ -223,15 +223,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
         const prem = !!(subStatus?.offlineEnabled || subStatus?.isActive || subStatus?.is_premium);
         setIsPremiumState(prem);
         AsyncStorage.setItem('@cached_is_premium', prem ? '1' : '0').catch(() => {});
-        if (prem) {
-          // Premium olan kullanıcıyı otomatik Kampfire'a geçir
-          setThemeVariantIdState('kampfireGold');
-          AsyncStorage.setItem(STORAGE_KEY_VARIANT, 'kampfireGold').catch(() => {});
-        } else {
+        if (!prem) {
           // Premium olmayan kullanıcıyı klasik arayüze zorla
           setThemeVariantIdState(defaultThemeVariantId);
           AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
         }
+        // Not: premium kullanıcıların tema tercihini otomatik değiştirmiyoruz;
+        // kullanıcı el ile Kampfire'ı seçmedikçe tercihleri korunur.
       } catch (e) {
         /* ignore */
       }
