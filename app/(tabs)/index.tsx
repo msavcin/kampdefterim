@@ -80,6 +80,7 @@ import AddCampingAreaModal from '@/components/AddCampingAreaModal';
 import type { MarkerType } from '../icons/svgIcons';
 import CampingAreaDetailModal from '@/components/CampingAreaDetailModal';
 import EditCampingAreaModal from '@/components/EditCampingAreaModal';
+import SunPathDial from '@/components/SunPathDial';
 import { getDatabase } from '@/lib/database';
 import { getToken } from '@/lib/auth';
 import type { CampingArea } from '@/lib/database';
@@ -1647,6 +1648,9 @@ export default function MapScreen() {
   } | null>(null);
   const [kampfireSheetVisible, setKampfireSheetVisible] = useState(true);
   const [kampfireSheetExpanded, setKampfireSheetExpanded] = useState(false);
+  // Güneş yolu diyagramında pusula (yönelim sensörü) modu. true iken diyagram
+  // telefonun baktığı yöne göre döner. Kullanıcı toggle ile açar/kapar.
+  const [sunDialCompassActive, setSunDialCompassActive] = useState(false);
   const [isKampfireDragging, setIsKampfireDragging] = useState(false);
   const isKampfireDraggingRef = useRef(false);
   const [announcementUnreadCount, setAnnouncementUnreadCount] = useState(0);
@@ -4094,9 +4098,7 @@ export default function MapScreen() {
     : '';
   const mapSheetTitle = kampfireSheetArea?.name
     ? kampfireSheetArea.name
-    : mapMoveQuery
-      ? 'Harita merkezine göre sonuçlar'
-      : 'Yakındaki Kamp Alanları';
+    : 'Güneş Yolu Diyagramı';
   const mapSheetSubtitle = kampfireSheetArea
     ? [
         getCampingTypeLabel(kampfireSheetAreaType),
@@ -4105,15 +4107,8 @@ export default function MapScreen() {
         .filter(Boolean)
         .join(' · ') || 'Kamp alanı detayı'
     : location
-      ? 'Haritadaki işaretlere dokunarak detayları görün'
+      ? 'Konumunuza göre bugünün güneş hareketi'
       : 'Konum bilgisi alınıyor...';
-  const mapModeMeta = kampfireSheetArea
-    ? kampfireHeroLocation || 'Seçili kamp alanı'
-    : mapMoveQuery
-      ? 'Harita merkezi'
-      : hasLocationPermission === false
-        ? 'Konum kapalı'
-        : 'Konum aktif';
   const heroWeatherLabel = kampfireHeroWeather
     ? `${
         kampfireHeroWeather.temp != null ? `${kampfireHeroWeather.temp}°C · ` : ''
@@ -5145,7 +5140,7 @@ export default function MapScreen() {
                   }, 100);
                 }
               }}
-              pointerEvents={isKampfireDragging ? 'none' : ((!user?.offline_enabled && !isConnected) ? 'none' : 'auto')}
+              pointerEvents={(!user?.offline_enabled && !isConnected) ? 'none' : 'auto'}
             />
             {/* BLUR OVERLAY: Premium değilse ve offline ise harita üstüne blur ve dokunmatik engel */}
             {(!user?.offline_enabled && !isConnected) && (
@@ -5763,7 +5758,7 @@ export default function MapScreen() {
                       transform: [{ translateY: kampfireSheetDragY }],
                     }
                   ]}
-                  pointerEvents={isBusy ? 'none' : 'auto'}
+                  pointerEvents={isBusy ? 'none' : 'box-none'}
                 >
                 <LinearGradient
                   colors={scheme === 'dark' ? ['rgba(18, 22, 18, 0.96)', 'rgba(10, 14, 12, 0.98)'] : ['rgba(255, 253, 249, 0.98)', 'rgba(247, 239, 223, 0.98)']}
@@ -5811,47 +5806,22 @@ export default function MapScreen() {
                     </View>
                   </View>
 
-                  <View style={styles.kampfireMetaRow}>
-                    <View
-                      style={[
-                        styles.kampfireMetaChip,
-                        {
-                          backgroundColor: colors.primaryLight,
-                          borderColor: kampfireUiBorder,
-                        },
-                      ]}
-                    >
-                      <MapPin size={12} color={kampfireUiPrimary} />
-                      <Text style={[styles.kampfireMetaText, { color: kampfireUiText }]}>{mapModeMeta}</Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.kampfireMetaChip,
-                        {
-                          backgroundColor: colors.primaryLight,
-                          borderColor: kampfireUiBorder,
-                        },
-                      ]}
-                    >
-                      <Calendar size={12} color={kampfireUiPrimary} />
-                      <Text style={[styles.kampfireMetaText, { color: kampfireUiText }]}>Planlar {planCount}</Text>
-                    </View>
-                    {isGuest && (
-                      <View
-                        style={[
-                          styles.kampfireMetaChip,
-                          {
-                            backgroundColor: colors.primaryLight,
-                            borderColor: kampfireUiBorder,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.kampfireMetaText, { color: kampfireUiText }]}>
-                          Kalan {remainingAreas}/{GUEST_LIMIT}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
+                  {/* Meta row kaldırıldı — Konum/Planlar/Guest alanı kullanıcıdan gizlendi */}
+
+                  {/* Güneş Yolu Diyagramı — sadece kamp alanı seçili değilken ve konum hazırsa */}
+                  {isKampfireMapView && !kampfireSheetArea && (
+                    <SunPathDial
+                      latitude={location?.coords?.latitude}
+                      longitude={location?.coords?.longitude}
+                      primary={kampfireUiPrimary}
+                      primarySoft={scheme === 'dark' ? 'rgba(212,175,106,0.18)' : 'rgba(212,175,106,0.22)'}
+                      text={kampfireUiText}
+                      muted={kampfireUiMuted}
+                      surface={kampfireUiSurface}
+                      compassActive={sunDialCompassActive}
+                      onToggleCompass={() => setSunDialCompassActive((v) => !v)}
+                    />
+                  )}
 
                   {kampfireSheetArea && (
                     <View
