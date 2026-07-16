@@ -14,7 +14,9 @@ import {
   Compass,
   Plus,
 } from 'lucide-react-native';
-import { View, TouchableOpacity, Text, AppState, Modal } from 'react-native';
+import { View, TouchableOpacity, Text, AppState, Modal, Dimensions } from 'react-native';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -488,72 +490,111 @@ export default function TabLayout() {
             style={{
               flex: 1,
               justifyContent: 'flex-end',
-              backgroundColor: 'rgba(0,0,0,0.22)',
+              backgroundColor: 'rgba(0,0,0,0.12)',
             }}
           >
             <View
               style={{
-                margin: 14,
-                borderRadius: 22,
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: colors.border,
-                padding: 10,
+                position: 'absolute',
+                left: 14,
+                right: 14,
+                bottom: (isKampfireTheme ? 84 : 70) + insets.bottom + 12,
               }}
             >
-              <TouchableOpacity
+              <View
                 style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 10,
-                  paddingHorizontal: 12,
-                  paddingVertical: 14,
+                  width: 0,
+                  height: 0,
+                  backgroundColor: 'transparent',
+                  borderStyle: 'solid',
+                  borderLeftWidth: 10,
+                  borderRightWidth: 10,
+                  borderTopWidth: 10,
+                  borderLeftColor: 'transparent',
+                  borderRightColor: 'transparent',
+                  borderTopColor: scheme === 'dark' ? 'rgba(18, 22, 18, 0.98)' : 'rgba(255, 253, 249, 0.98)',
+                  position: 'absolute',
+                  bottom: -10,
+                  left: (SCREEN_WIDTH / 6) * 1 + (SCREEN_WIDTH / 12) - 24,
                 }}
-                onPress={() => handleKampfireExploreAction('tent')}
-              >
-                <Compass size={18} color={colors.primary} />
-                <Text
-                  style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}
-                >
-                  Çadır / Karavan Yönü Nasıl Olmalı?
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              />
+              <View
                 style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 10,
-                  paddingHorizontal: 12,
-                  paddingVertical: 14,
-                }}
-                onPress={() => {
-                  setShowKampfireExploreMenu(false);
-                  router.push('/camp-plan' as any);
+                  borderRadius: 22,
+                  overflow: 'hidden',
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 8 },
+                  shadowOpacity: 0.28,
+                  shadowRadius: 20,
+                  elevation: 18,
                 }}
               >
-                <Plus size={18} color={colors.primary} />
-                <Text
-                  style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}
+                <View
+                  style={{
+                    backgroundColor: scheme === 'dark' ? 'rgba(18, 22, 18, 0.98)' : 'rgba(255, 253, 249, 0.98)',
+                    padding: 4,
+                  }}
                 >
-                  Kamp Planla
-                </Text>
-                {planCount > 0 && (
-                  <View
+                  <TouchableOpacity
                     style={{
-                      marginLeft: 8,
-                      minWidth: 26,
-                      height: 20,
-                      borderRadius: 12,
-                      paddingHorizontal: 6,
-                      backgroundColor: colors.danger,
+                      flexDirection: 'row',
                       alignItems: 'center',
-                      justifyContent: 'center',
+                      gap: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      minHeight: 42,
+                    }}
+                    onPress={() => handleKampfireExploreAction('tent')}
+                  >
+                    <Compass size={16} color={colors.primary} />
+                    <Text
+                      style={{ color: colors.text, fontSize: 13, fontWeight: '600', flex: 1 }}
+                    >
+                      Çadır / Karavan Yönü Neresi Olmalı?
+                    </Text>
+                  </TouchableOpacity>
+                  <View style={{ height: 1, backgroundColor: colors.border, opacity: 0.3, marginHorizontal: 12 }} />
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      minHeight: 42,
+                    }}
+                    onPress={() => {
+                      setShowKampfireExploreMenu(false);
+                      router.push('/camp-plan' as any);
                     }}
                   >
-                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{planCount > 99 ? '99+' : String(planCount)}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
+                    <Plus size={16} color={colors.primary} />
+                    <Text
+                      style={{ color: colors.text, fontSize: 13, fontWeight: '600', flex: 1 }}
+                    >
+                      Kamp Planla
+                    </Text>
+                    {planCount > 0 && (
+                      <View
+                        style={{
+                          marginLeft: 8,
+                          minWidth: 26,
+                          height: 20,
+                          borderRadius: 12,
+                          paddingHorizontal: 6,
+                          backgroundColor: colors.danger,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{planCount > 99 ? '99+' : String(planCount)}</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
           </TouchableOpacity>
         </Modal>

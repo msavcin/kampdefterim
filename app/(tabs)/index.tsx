@@ -3717,17 +3717,17 @@ export default function MapScreen() {
       } else if (data.type === 'mapDragStart') {
         // Kullanıcı haritayı sürüklemeye başladığında bottom sheet'i gizle
         try {
-          console.log('[MapMessage] mapDragStart received; kampfireSheetVisible=', !!kampfireSheetVisible);
-          if (isMounted.current) {
+          if (isMounted.current && kampfireSheetVisible) {
             closeKampfireSheet();
           }
         } catch (e) {}
       } else if (data.type === 'popupopen') {
+        if (isAnimatingRef.current) return; // Animasyon varken harita sinyalini reddet
         setShowMapPopup(true);
         const area = resolveAreaFromPayload(data);
         if (area) {
           setKampfireFocusedArea(area);
-          if (!suppressAutoOpenRef.current) {
+          if (!suppressAutoOpenRef.current && !kampfireSheetVisible) {
             openKampfireSheet(kampfireSheetExpanded);
           }
         }
@@ -4153,12 +4153,15 @@ export default function MapScreen() {
   const kampfireUiText = isKampfireTheme ? colors.text : colors.text;
   const kampfireUiMuted = isKampfireTheme ? colors.textSecondary : colors.muted;
 
-  const styles = useMemo(() => createStyles(kampfireUiBorder, kampfireUiSurface, kampfireUiPrimary, kampfireUiMuted, kampfireUiText), [
+  const kampfireCaretColor = scheme === 'dark' ? 'rgba(18, 22, 18, 0.98)' : 'rgba(255, 253, 249, 0.98)';
+
+  const styles = useMemo(() => createStyles(kampfireUiBorder, kampfireUiSurface, kampfireUiPrimary, kampfireUiMuted, kampfireUiText, kampfireCaretColor), [
     kampfireUiBorder,
     kampfireUiSurface,
     kampfireUiPrimary,
     kampfireUiMuted,
     kampfireUiText,
+    kampfireCaretColor,
   ]);
 
   // Kampfire etiketleri için biraz daha şeffaf, menü zeminine benzer arkaplan
@@ -4323,13 +4326,18 @@ export default function MapScreen() {
     router.push('/announcements' as any);
   }, [markKampfireAnnouncementsRead, router]);
 
+  const isAnimatingRef = useRef(false);
+
   const animateKampfireSheet = useCallback(
     (toValue: number, onComplete?: () => void) => {
+      isAnimatingRef.current = true;
       Animated.timing(kampfireSheetDragY, {
         toValue,
-        duration: 180,
+        duration: 400, // Daha yumuşak geçiş için süre artırıldı
+        easing: Easing.out(Easing.cubic), // Akışkan animasyon
         useNativeDriver: true,
       }).start(({ finished }) => {
+        isAnimatingRef.current = false;
         if (!finished) return;
         if (onComplete) onComplete();
       });
@@ -4338,34 +4346,37 @@ export default function MapScreen() {
   );
 
   const closeKampfireSheet = useCallback(() => {
-    // Temporarily suppress automatic re-opening triggered by map popup events
+    if (isAnimatingRef.current) return;
+    
+    // Haritadan gelen otomatik açılma sinyallerini daha uzun süre engelle
     suppressAutoOpenRef.current = true;
-    try {
-      if (suppressAutoOpenTimerRef.current) {
-        clearTimeout(suppressAutoOpenTimerRef.current as any);
-        suppressAutoOpenTimerRef.current = null;
-      }
-    } catch (e) {}
-    const suppressTimer: any = setTimeout(() => {
+    if (suppressAutoOpenTimerRef.current) {
+      clearTimeout(suppressAutoOpenTimerRef.current);
+    }
+    suppressAutoOpenTimerRef.current = setTimeout(() => {
       suppressAutoOpenRef.current = false;
-      suppressAutoOpenTimerRef.current = null;
-    }, 700);
-    suppressAutoOpenTimerRef.current = suppressTimer;
-    timeoutRefs.current.push(suppressTimer as any);
+    }, 1000) as any;
 
-    animateKampfireSheet(180, () => {
+    animateKampfireSheet(350, () => {
       setKampfireSheetVisible(false);
       setKampfireSheetExpanded(false);
-      kampfireSheetDragY.setValue(0);
+      // setValue(0) kaldırıldı, flash etkisini bu satır yaratıyordu.
     });
   }, [animateKampfireSheet, kampfireSheetDragY]);
 
   const openKampfireSheet = useCallback(
     (expanded = false) => {
+      if (isAnimatingRef.current) return;
+      
+      // Animasyon başlamadan önce görünürlüğü aç ve pozisyonu en alta çek
       setKampfireSheetVisible(true);
       setKampfireSheetExpanded(expanded);
-      kampfireSheetDragY.setValue(120);
-      animateKampfireSheet(0);
+      kampfireSheetDragY.setValue(350); 
+      
+      // Küçük bir gecikme ile (render sonrası) yukarı kaydır
+      requestAnimationFrame(() => {
+        animateKampfireSheet(0);
+      });
     },
     [animateKampfireSheet, kampfireSheetDragY],
   );
@@ -4396,7 +4407,7 @@ export default function MapScreen() {
       },
       onPanResponderMove: (_evt, gestureState) => {
         if (gestureState.dy > 0) {
-          kampfireSheetDragY.setValue(Math.min(gestureState.dy, 180));
+          kampfireSheetDragY.setValue(Math.min(gestureState.dy, 350));
         } else if (kampfireSheetExpanded && gestureState.dy < 0) {
           kampfireSheetDragY.setValue(Math.max(gestureState.dy * 0.35, -30));
         }
@@ -4702,9 +4713,11 @@ export default function MapScreen() {
     };
   }, [refreshKampfireAnnouncementBadge]);
 
+  const hasOpenedInitialRef = useRef(false);
   useEffect(() => {
-    if (isKampfireTheme) {
+    if (isKampfireTheme && !hasOpenedInitialRef.current) {
       openKampfireSheet(false);
+      hasOpenedInitialRef.current = true;
     }
   }, [isKampfireTheme, openKampfireSheet]);
 
@@ -4913,19 +4926,25 @@ export default function MapScreen() {
       )}
       {/* Bildirim Barı - Filtre satırının hemen altında */}
       {showNotificationBar && Array.isArray(notifications) && notifications.length > 0 && !!(user?.isPremium || user?.offline_enabled) && (
-        <Animated.View style={[styles.notificationBar, {
-          opacity: notificationBarAnim,
-          backgroundColor:
-            notifications[notificationIndex]?.type === 'announcement'
-              ? colors.info
-              : notifications[notificationIndex]?.type === 'friend_request'
-                ? colors.primary
-                : notifications[notificationIndex]?.type === 'checklist_share'
-                  ? colors.warning
-                  : notifications[notificationIndex]?.type === 'camping_area_share'
-                    ? '#8b5cf6'
-                    : colors.warning,
-        }]}> 
+        <Animated.View style={[
+          isKampfireTheme ? styles.kampfireNotificationBar : styles.notificationBar,
+          {
+            opacity: notificationBarAnim,
+            backgroundColor: (() => {
+              const baseColor = notifications[notificationIndex]?.type === 'announcement'
+                ? colors.info
+                : notifications[notificationIndex]?.type === 'friend_request'
+                  ? colors.primary
+                  : notifications[notificationIndex]?.type === 'checklist_share'
+                    ? colors.warning
+                    : notifications[notificationIndex]?.type === 'camping_area_share'
+                      ? '#8b5cf6'
+                      : colors.warning;
+              return isKampfireTheme ? baseColor + 'D9' : baseColor; // %85 transparanlık eklendi
+            })(),
+            borderColor: isKampfireTheme ? kampfireUiBorder : 'transparent',
+          }
+        ]}> 
           <TouchableOpacity style={styles.notificationContent} onPress={() => notifications[notificationIndex]?.goto()}>
             {notifications[notificationIndex]?.type === 'friend_request' ? (
               <UserPlus size={20} color="#fff" style={{ marginRight: 8 }} />
@@ -4966,18 +4985,30 @@ export default function MapScreen() {
       )}
       {/* Offline Mode Banner */}
       {!isConnected && (
-        <View style={[styles.offlineBanner, !user?.offline_enabled && { paddingVertical: 12 }, { backgroundColor: colors.warning + '20', borderBottomColor: colors.warning }]}>
-          <Text style={[styles.offlineBannerText, { color: colors.warning }]}>
+        <View style={[
+          isKampfireTheme ? styles.kampfireOfflineBanner : styles.offlineBanner,
+          !user?.offline_enabled && { paddingVertical: 12 },
+          isKampfireTheme 
+            ? { backgroundColor: colors.warning + 'D9', borderColor: kampfireUiBorder } 
+            : { backgroundColor: colors.warning + '20', borderBottomColor: colors.warning }
+        ]}>
+          <Text style={[styles.offlineBannerText, { color: isKampfireTheme ? '#fff' : colors.warning }]}>
             {user?.offline_enabled 
               ? '📵 Offline Mod - Cache\'lenmiş harita gösteriliyor' 
               : <>📵 Offline mod için <Text style={{fontWeight: 'bold', fontStyle: 'italic'}}>Premium</Text> aboneliği gerekmektedir.</>}
           </Text>
           {!user?.offline_enabled && (
             <TouchableOpacity
-              style={[styles.premiumButton, { backgroundColor: colors.primary }]}
+              style={[
+                isKampfireTheme ? styles.kampfirePremiumButton : styles.premiumButton, 
+                { backgroundColor: isKampfireTheme ? kampfireUiSurface : colors.primary }
+              ]}
               onPress={() => router.push('/premium' as any)}
             >
-              <Text style={[styles.premiumButtonText, { color: '#fff' }]}>Premium Ol!</Text>
+              <Text style={[
+                styles.premiumButtonText, 
+                { color: isKampfireTheme ? kampfireUiPrimary : '#fff' }
+              ]}>Premium Ol!</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -5487,7 +5518,9 @@ export default function MapScreen() {
                 activeOpacity={1}
                 onPress={() => setShowKampfireMenu(false)}
               >
-                <View style={styles.kampfireMenuAnchor}>
+                <View style={[styles.kampfireMenuAnchor, { top: 78, left: 16 }]}>
+                  {/* Triangle Caret */}
+                  <View style={[styles.kampfireMenuCaret, { left: 20 }]} />
                   <LinearGradient
                     colors={scheme === 'dark' ? ['rgba(18, 22, 18, 0.98)', 'rgba(10, 14, 12, 0.98)'] : ['rgba(255, 253, 249, 0.98)', 'rgba(247, 239, 223, 0.96)']}
                     start={{ x: 0, y: 0 }}
@@ -5507,6 +5540,8 @@ export default function MapScreen() {
                       </Text>
                     </TouchableOpacity>
 
+                    <View style={{ height: 1, backgroundColor: kampfireUiBorder, opacity: 0.6, marginHorizontal: 12 }} />
+
                     <TouchableOpacity
                       style={styles.kampfireMenuItem}
                       onPress={async () => {
@@ -5517,6 +5552,8 @@ export default function MapScreen() {
                       <Feather name="search" size={16} color={kampfireUiPrimary} />
                       <Text style={styles.kampfireMenuItemText}>Ara</Text>
                     </TouchableOpacity>
+
+                    <View style={{ height: 1, backgroundColor: kampfireUiBorder, opacity: 0.6, marginHorizontal: 12 }} />
 
                     <TouchableOpacity
                       style={styles.kampfireMenuItem}
@@ -5529,6 +5566,8 @@ export default function MapScreen() {
                       <Text style={styles.kampfireMenuItemText}>Filtreler</Text>
                       {isFilterActive && <View style={styles.kampfireMenuDot} />}
                     </TouchableOpacity>
+
+                    <View style={{ height: 1, backgroundColor: kampfireUiBorder, opacity: 0.6, marginHorizontal: 12 }} />
 
                     <TouchableOpacity
                       style={styles.kampfireMenuItem}
@@ -5560,43 +5599,53 @@ export default function MapScreen() {
                       : { position: 'absolute', right: 20, bottom: 240 }
                   }
                 >
-                  <View
-                    style={{
-                      backgroundColor: scheme === 'dark' ? '#0E1210' : colors.surface,
-                      borderRadius: 10,
-                      padding: 8,
-                      elevation: 10,
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.2,
-                      shadowRadius: 6,
-                      borderWidth: scheme === 'dark' ? 1 : 0,
-                      borderColor: scheme === 'dark'
-                        ? 'rgba(212,175,106,0.14)'
-                        : 'transparent',
-                    }}
+                  {isKampfireMapView && (
+                    <View style={[styles.kampfireMenuCaret, { right: 20, top: -8, transform: [{ rotate: '0deg' }] }]} />
+                  )}
+                  <LinearGradient
+                    colors={scheme === 'dark' ? ['rgba(18, 22, 18, 0.98)', 'rgba(10, 14, 12, 0.98)'] : ['rgba(255, 253, 249, 0.98)', 'rgba(247, 239, 223, 0.96)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[
+                      styles.kampfireMenuCard,
+                      !isKampfireMapView && {
+                        backgroundColor: scheme === 'dark' ? '#0E1210' : colors.surface,
+                        borderRadius: 10,
+                        padding: 8,
+                        elevation: 10,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.2,
+                        shadowRadius: 6,
+                        borderWidth: scheme === 'dark' ? 1 : 0,
+                        borderColor: scheme === 'dark'
+                          ? 'rgba(212,175,106,0.14)'
+                          : 'transparent',
+                      }
+                    ]}
                   >
                     <TouchableOpacity
-                      style={[styles.menuItem]}
+                      style={styles.kampfireMenuItem}
                       onPress={() => {
                         setFabMenuVisible(false);
                         addCampingAreaAtCurrentLocation();
                       }}
                     >
-                      <LocateFixed size={18} color={colors.primary} />
-                      <Text style={{ marginLeft: 10, color: colors.text, fontWeight: '600' }}>Mevcut Konumu Ekle</Text>
+                      <LocateFixed size={16} color={kampfireUiPrimary} />
+                      <Text style={styles.kampfireMenuItemText}>Mevcut Konumu Ekle</Text>
                     </TouchableOpacity>
+                    <View style={{ height: 1, backgroundColor: kampfireUiBorder, opacity: 0.6, marginHorizontal: 12 }} />
                     <TouchableOpacity
-                      style={[styles.menuItem, { marginTop: 8 }]}
+                      style={styles.kampfireMenuItem}
                       onPress={() => {
                         setFabMenuVisible(false);
                         startLocationPicker();
                       }}
                     >
-                      <Map size={18} color={colors.primary} />
-                      <Text style={{ marginLeft: 10, color: colors.text, fontWeight: '600' }}>Haritadan Ekle</Text>
+                      <Map size={16} color={kampfireUiPrimary} />
+                      <Text style={styles.kampfireMenuItemText}>Haritadan Ekle</Text>
                     </TouchableOpacity>
-                  </View>
+                  </LinearGradient>
                 </View>
               </TouchableOpacity>
             </Modal>
@@ -5708,9 +5757,12 @@ export default function MapScreen() {
             isKampfireMapView ? (
               kampfireSheetVisible ? (
                 <Animated.View
-                  style={{
-                    transform: [{ translateY: kampfireSheetDragY }],
-                  }}
+                  style={[
+                    styles.kampfireBottomSheetContainer,
+                    {
+                      transform: [{ translateY: kampfireSheetDragY }],
+                    }
+                  ]}
                   pointerEvents={isBusy ? 'none' : 'auto'}
                 >
                 <LinearGradient
@@ -5954,10 +6006,9 @@ export default function MapScreen() {
                 </LinearGradient>
                 </Animated.View>
               ) : (
-                <Animated.View
-                  style={{
-                    transform: [{ translateY: Animated.multiply(kampfireSheetDragY, 0.25) }],
-                  }}
+                <View
+                  style={styles.kampfireSheetReopenContainer}
+                  pointerEvents="box-none"
                 >
                   <TouchableOpacity
                     activeOpacity={0.85}
@@ -5969,7 +6020,7 @@ export default function MapScreen() {
                     </Text>
                     <ChevronUp size={14} color={kampfireUiPrimary} />
                   </TouchableOpacity>
-                </Animated.View>
+                </View>
               )
             ) : (
               <View style={[styles.infoPanel, { backgroundColor: colors.surface }]} pointerEvents={isBusy ? 'none' : 'auto'}>
@@ -6239,7 +6290,7 @@ export default function MapScreen() {
   );
 }
 
-function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampfireUiPrimary: string, kampfireUiMuted: string, kampfireUiText: string) {
+function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampfireUiPrimary: string, kampfireUiMuted: string, kampfireUiText: string, kampfireCaretColor: string) {
   return StyleSheet.create({
   notificationBar: {
     borderBottomWidth: 1,
@@ -6250,6 +6301,24 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     justifyContent: 'space-between',
     marginBottom: 4,
     zIndex: 999,
+  },
+  kampfireNotificationBar: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 10,
   },
   notificationContent: {
     flexDirection: 'row',
@@ -6598,8 +6667,21 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
   },
   kampfireMenuAnchor: {
     position: 'absolute',
-    top: 26,
-    left: 16,
+  },
+  kampfireMenuCaret: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 10,
+    borderRightWidth: 10,
+    borderBottomWidth: 10,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: kampfireCaretColor,
+    position: 'absolute',
+    top: -10,
+    zIndex: 1001,
   },
   kampfireMenuCard: {
     minWidth: 196,
@@ -6727,11 +6809,26 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
+  kampfireBottomSheetContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1000,
+  },
+  kampfireSheetReopenContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 100, // Container'a yükseklik verildi
+    zIndex: 1000,
+  },
   kampfireBottomSheet: {
     position: 'absolute',
     left: 12,
     right: 12,
-    bottom: 12,
+    bottom: 24, // 12'den 24'e çıkarıldı, Tab Bar'ın biraz üstünde kalsın
     borderRadius: 24,
     borderWidth: 1,
     paddingHorizontal: 18,
@@ -6781,10 +6878,11 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 16,
+    bottom: 24, 
     minHeight: 44,
     borderRadius: 22,
     borderWidth: 1,
+    zIndex: 1001, // Butonun zIndex'i artırıldı
     borderColor: kampfireUiBorder,
     backgroundColor: kampfireUiSurface,
     flexDirection: 'row',
@@ -7142,6 +7240,26 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     flexWrap: 'wrap',
     gap: 8,
   },
+  kampfireOfflineBanner: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 10,
+    flexWrap: 'wrap',
+    gap: 12,
+  },
   offlineBannerText: {
     fontSize: 13,
     fontWeight: '600',
@@ -7152,6 +7270,13 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     paddingVertical: 6,
     borderRadius: 16,
     marginLeft: 8,
+  },
+  kampfirePremiumButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,106,0.3)',
   },
   premiumButtonText: {
     fontSize: 12,
