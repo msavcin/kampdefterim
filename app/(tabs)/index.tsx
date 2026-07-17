@@ -70,7 +70,7 @@ import { on as onEvent, off as offEvent, emit as emitEvent } from '@/lib/eventBu
 import { eventBus } from '@/lib/eventBus';
 import { Animated, Easing, AppState, PanResponder } from 'react-native';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, BackHandler, Image } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { MapPin, Filter, Navigation, Plus, Calendar, RefreshCw, Loader2, Binoculars, LocateFixed, List, Map, X, ArrowLeft, ArrowRight, CheckCircle, Menu, Bell, ChevronUp } from 'lucide-react-native';
 import { Feather } from '@expo/vector-icons';
@@ -105,6 +105,7 @@ const KAMPFIRE_READ_ANNOUNCEMENT_BOOTSTRAP_KEY =
   'kampfireAnnouncementBadgeBootstrapped';
 
 export default function MapScreen() {
+    const insets = useSafeAreaInsets();
     const { colors, scheme, themeVariantId, isKampfireTheme } = useTheme();
     // Son sorgulanan konumu saklamak için ref
     const lastQueriedLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
@@ -4894,31 +4895,52 @@ export default function MapScreen() {
       </View>
       )}
 
-      {/* Filters */}
-      {showFilters && (
-        <View style={[styles.filtersContainer, { backgroundColor: colors.surface }]}>
-          <CampingAreaFilters
-            userFilters={FILTERS}
-            selectedUserFilters={selectedFilters}
-            selectedCampingTypes={selectedTags}
-            onUserFilterToggle={toggleCustomFilter}
-            onCampingTypeToggle={toggleTagFilter}
-            onToggleAllCampingTypes={toggleAllCampingTypes}
-            onClose={() => {
-              if (isMounted.current) setShowFilters(false);
-            }}
-            disabled={isBusy}
-            filteredAreas={filteredCampingAreas}
-            userId={user?.id}
-            turkeyWideFilters={turkeyWideKeys}
-            onTurkeyWideToggle={toggleTurkeyWide}
-            isOffline={!isConnected}
-            isPremium={!!(user?.isPremium || user?.offline_enabled)}
-            selectedProvinces={selectedProvinces}
-            onProvinceToggle={toggleProvince}
-          />
-        </View>
-      )}
+      {/* Filters Modal */}
+      <Modal
+        visible={showFilters}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => {
+          if (isMounted.current) setShowFilters(false);
+        }}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text }}>Filtreler</Text>
+            <TouchableOpacity
+              onPress={() => {
+                if (isMounted.current) setShowFilters(false);
+              }}
+              style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceVariant, alignItems: 'center', justifyContent: 'center' }}
+              activeOpacity={0.7}
+            >
+              <X size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 12 }}>
+            <CampingAreaFilters
+              userFilters={FILTERS}
+              selectedUserFilters={selectedFilters}
+              selectedCampingTypes={selectedTags}
+              onUserFilterToggle={toggleCustomFilter}
+              onCampingTypeToggle={toggleTagFilter}
+              onToggleAllCampingTypes={toggleAllCampingTypes}
+              onClose={() => {
+                if (isMounted.current) setShowFilters(false);
+              }}
+              disabled={isBusy}
+              filteredAreas={filteredCampingAreas}
+              userId={user?.id}
+              turkeyWideFilters={turkeyWideKeys}
+              onTurkeyWideToggle={toggleTurkeyWide}
+              isOffline={!isConnected}
+              isPremium={!!(user?.isPremium || user?.offline_enabled)}
+              selectedProvinces={selectedProvinces}
+              onProvinceToggle={toggleProvince}
+            />
+          </View>
+        </SafeAreaView>
+      </Modal>
       {/* Bildirim Barı - Filtre satırının hemen altında */}
       {showNotificationBar && Array.isArray(notifications) && notifications.length > 0 && !!(user?.isPremium || user?.offline_enabled) && (
         <Animated.View style={[
@@ -5748,7 +5770,7 @@ export default function MapScreen() {
           )}
 
           {/* Info Panel / Kampfire Bottom Sheet */}
-          {!isLocationPickerMode && (
+          {!isLocationPickerMode && !showFilters && (
             isKampfireMapView ? (
               kampfireSheetVisible ? (
                 <Animated.View
@@ -6693,7 +6715,7 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 1000,
+    zIndex: 2000,
     paddingHorizontal: 20,
     paddingVertical: 16,
     shadowColor: '#000',
