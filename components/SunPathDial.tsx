@@ -1,17 +1,18 @@
 /**
- * SunPathDial (frameless, kompakt)
- * --------------------------------
- * Kampfire Gold bottom sheet içinde, kamp alanı seçili değilken kullanıcının
- * konumuna göre gün doğumu / öğle / gün batımı azimuth'larını ve güneş
- * yüksekliğini kompas diyagramı olarak gösterir.
- *
- * - Tıklanamaz (diyagram); altındaki timeline slider ile etkileşimli.
- * - Konum prop'ları değiştiğinde yeniden hesaplar.
- * - `suncalc` paketi zaten projede kurulu (lib/sunPosition.ts ile aynı kaynak).
- * - Düzen (kompakt, çerçevesiz): pusula diyagramı ortada, doğuş/batış
- *   saatleri kendi gerçek pusula yönlerine göre diyagramın solunda veya
- *   sağında konumlanır. Pusula merkezinde çadır + güneşin ters yönüne
- *   gölge çizgisi. Altta doğuş-batış zaman çizgisi slider'ı.
+ * SunPathDial — Kampfire Gold Luxury Chronograph (Radar Gölge & Gelişmiş Kamp İkonu)
+ * ---------------------------------------------------------------------------------
+ * YENİLİKLER & GÜNCELLEMELER:
+ * 1. Pusula Canlı Modunda Gölge Desteği: Gölge vektörü ve radar taraması
+ *    dönen pusula grubunun (dialRotation) içerisine alınarak pusula aktifken de
+ *    kadrana tam kilitli biçimde sorunsuz gösterilir.
+ * 2. Radar Taraması Şeklinde Gölge Barı (Radar Cone Sweep): Düz çizgi yerine
+ *    güneşin yüksekliği ve açısına göre açısal kavis çizen, dereceli ve
+ *    saydam degrade dolgulu yüksek görünürlüklü radar gölge konisi.
+ * 3. Detaylı & Şık Kamp İkonu: Çadır formu, açık kapı detayı, sabitleme
+ *    çizgileri ve önündeki minyatür kamp ateşi detayı ile 1.5px Precision Gold.
+ * 4. Yön Hizalaması: Sol taraf (Batı) SAĞA YASLI, Sağ taraf (Doğu) SOLA YASLI,
+ *    etiketler "GÜN BATIMI" ve "GÜN DOĞUMU".
+ * 5. Sürükleme Sınırı: Gün batımı saatinden (maxHour) sonra slider %100'de kilitlenir.
  */
 
 import React, { useMemo, useState, useRef, useCallback, useEffect } from 'react';
@@ -22,30 +23,34 @@ import {
   PanResponder,
   LayoutChangeEvent,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
-import Svg, { Circle, Path, G, Text as SvgText, Defs, Filter, FeGaussianBlur, FeMerge, FeMergeNode } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Path,
+  G,
+  Text as SvgText,
+  Defs,
+  Filter,
+  FeGaussianBlur,
+  FeMerge,
+  FeMergeNode,
+  LinearGradient,
+  Stop,
+  Line,
+} from 'react-native-svg';
 import * as SunCalc from 'suncalc';
 import { Magnetometer, Accelerometer } from 'expo-sensors';
 
 export interface SunPathDialProps {
   latitude: number | null | undefined;
   longitude: number | null | undefined;
-  /** Kampfire Gold primary (ör. #D4AF6A). Tema ile uyum için dışarıdan alınır. */
   primary: string;
-  /** Kampfire Gold primary light / yumuşak (ör. rgba(212,175,106,0.18)). */
   primarySoft: string;
-  /** Metin rengi (saat/yükseklik değerleri). */
   text: string;
-  /** İkincil metin / muted rengi. */
   muted: string;
-  /** Yüzey rengi (iç halka dolgusu). */
   surface: string;
-  /** Dış sarmalayıcıya ekstra stil. */
   containerStyle?: object;
-  /** Pusula modu açık mı? true ise diyagram telefonun yönelimine göre döner. */
   compassActive?: boolean;
-  /** Pusula modu açma/kapama callback'i (toggle butonu için). */
   onToggleCompass?: () => void;
 }
 
@@ -70,28 +75,35 @@ function timeStrHM(d: Date | null): string {
   return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** Azimuth dereceyi (kuzey=0) SVG/View koordinatına çevirir.
- *  Diyagramda yukarı = kuzey. Açı saat yönünde büyür. */
 function azToPoint(azDeg: number, r: number, cx: number, cy: number) {
   const rad = (azDeg * Math.PI) / 180;
-  // Saat yönünde: yukarı=0, sağ=90 — x=sin, y=-cos
   const x = cx + Math.sin(rad) * r;
   const y = cy - Math.cos(rad) * r;
   return { x, y };
 }
 
-/** Dakika sayısını saat (decimal) cinsinden döndürür. */
 function dateToHours(d: Date): number {
   return d.getHours() + d.getMinutes() / 60;
 }
 
-/** "HH.DD" saat değerini Date'e (bugün) çevirir. */
 function hoursToDate(hours: number, base: Date = new Date()): Date {
   const d = new Date(base);
   d.setHours(Math.floor(hours));
   d.setMinutes(Math.round((hours - Math.floor(hours)) * 60));
   d.setSeconds(0, 0);
   return d;
+}
+
+function getDirText(deg: number): string {
+  const norm = ((deg % 360) + 360) % 360;
+  if (norm >= 337.5 || norm < 22.5) return 'Kuzey';
+  if (norm >= 22.5 && norm < 67.5) return 'Kuzeydoğu';
+  if (norm >= 67.5 && norm < 112.5) return 'Doğu';
+  if (norm >= 112.5 && norm < 157.5) return 'Güneydoğu';
+  if (norm >= 157.5 && norm < 202.5) return 'Güney';
+  if (norm >= 202.5 && norm < 247.5) return 'Güneybatı';
+  if (norm >= 247.5 && norm < 292.5) return 'Batı';
+  return 'Kuzeybatı';
 }
 
 export default function SunPathDial({
@@ -106,17 +118,12 @@ export default function SunPathDial({
   compassActive = false,
   onToggleCompass,
 }: SunPathDialProps) {
-  // Slider'ın gösterdiği saat (günün hangi dakikası). 0..24
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
 
-  // ---- Pusula (heading) ----
-  // Sensörlerden gelen ham verileri ref'te tutarız (render tetiklemeden güncellenir).
   const magRef = useRef<{ x: number; y: number; z: number } | null>(null);
   const accRef = useRef<{ x: number; y: number; z: number } | null>(null);
-  // Hesaplanmış heading (derece, kuzey=0, doğu=90, saat yönünde). null ise hesaplanamamış.
   const [headingDeg, setHeadingDeg] = useState<number | null>(null);
 
-  // Bugünün referans tarihi (slider her zaman bugün için çalışır)
   const today = useMemo(() => new Date(), []);
 
   const sun = useMemo<ComputedSun>(() => {
@@ -143,9 +150,6 @@ export default function SunPathDial({
     const sunrisePos = SunCalc.getPosition(times.sunrise ?? now, latitude, longitude);
     const sunsetPos = SunCalc.getPosition(times.sunset ?? now, latitude, longitude);
 
-    // SunCalc.getPosition() hem azimuth hem altitude'ı zaten **derece**
-    // olarak döndürür (kaynak: getPosition içinde `/ rad` uygulanır).
-    // Azimuth referansı kuzey=0, doğu=90, güney=180, batı=270.
     const toAzDeg = (deg: number) => (deg + 360) % 360;
 
     return {
@@ -160,13 +164,11 @@ export default function SunPathDial({
     };
   }, [latitude, longitude]);
 
-  // Seçili zaman (slider'dan veya şu an)
   const selectedTime = useMemo<Date>(() => {
     if (selectedHour == null) return new Date();
     return hoursToDate(selectedHour, today);
   }, [selectedHour, today]);
 
-  // Seçili zaman için güneş pozisyonu
   const selectedSun = useMemo(() => {
     if (
       typeof latitude !== 'number' ||
@@ -180,40 +182,53 @@ export default function SunPathDial({
     return { azimuth: pos.azimuth, altitude: pos.altitude };
   }, [selectedTime, latitude, longitude]);
 
-  // Kompakt SVG geometrisi — 120×120 viewBox
-  const size = 120;
+  const size = 132;
   const cx = size / 2;
   const cy = size / 2;
-  const rOuter = 52;
-  const rMid = 38;
-  const rInner = 24;
-  const rSunPath = rOuter - 4;
+  const rOuter = 56;
+  const rMid = 44;
+  const rInner = 28;
+  const rSunPath = rOuter - 5;
 
-  // Pusula üzerindeki noktalar
   const sunRise = azToPoint(sun.sunriseAzDeg, rSunPath, cx, cy);
   const sunSet = azToPoint(sun.sunsetAzDeg, rSunPath, cx, cy);
-  const sunNoon = azToPoint(sun.noonAzDeg, 9, cx, cy);
 
-  // Gölge ve anlık güneş noktası (slider'dan seçili zaman)
   const isDaytime = selectedSun.altitude > 0;
-  const rCurrentSun = 30;
+  const rCurrentSun = rSunPath;
   const currentSun = isDaytime
     ? azToPoint(((selectedSun.azimuth + 360) % 360), rCurrentSun, cx, cy)
     : null;
-  // Gölge yönü: güneşin tam tersi (azimuth + 180)
-  const SHADOW_MAX = 30;
-  const shadowLength = isDaytime
-    ? Math.max(2, SHADOW_MAX * (1 - selectedSun.altitude / 90))
-    : 0;
-  const shadowEnd = azToPoint(
-    (selectedSun.azimuth + 180 + 360) % 360,
-    shadowLength,
-    cx,
-    cy,
-  );
 
-  // Doğuştan batışa üst yarım küre quadratic bezier
-  const arcPath = `M ${sunRise.x} ${sunRise.y} Q ${cx} ${cy - rSunPath - 8} ${sunSet.x} ${sunSet.y}`;
+  // Radar Gölge Konisi Hesaplaması
+  const sunAzDeg = ((selectedSun.azimuth * 180) / Math.PI + 360) % 360;
+  const shadowAzDeg = (sunAzDeg + 180) % 360;
+  
+  const SHADOW_MAX = 38;
+  const shadowLen = isDaytime
+    ? Math.max(16, SHADOW_MAX * (1 - selectedSun.altitude / 90))
+    : 0;
+
+  // Radar Yelpazesi (Sector Wedge - 24 derece genişlik)
+  const RADAR_HALF_ANGLE = 12;
+  const shadowStartAz = (shadowAzDeg - RADAR_HALF_ANGLE + 360) % 360;
+  const shadowEndAz = (shadowAzDeg + RADAR_HALF_ANGLE + 360) % 360;
+
+  // Ortadaki kamp çemberinin tam dış sınır çizgisi (radius 14.2)
+  const rCenterDisc = 14.2;
+  const pInner1 = azToPoint(shadowStartAz, rCenterDisc, cx, cy);
+  const pInner2 = azToPoint(shadowEndAz, rCenterDisc, cx, cy);
+  const pOuter1 = azToPoint(shadowStartAz, shadowLen, cx, cy);
+  const pOuter2 = azToPoint(shadowEndAz, shadowLen, cx, cy);
+  const shadowCenterPt = azToPoint(shadowAzDeg, shadowLen, cx, cy);
+  const pCenterBase = azToPoint(shadowAzDeg, rCenterDisc, cx, cy);
+
+  // Radar konisi path d dizesi (İç çember dış sınırına tam kavisli kilit)
+  const radarWedgePath = `M ${pInner1.x} ${pInner1.y} L ${pOuter1.x} ${pOuter1.y} A ${shadowLen} ${shadowLen} 0 0 1 ${pOuter2.x} ${pOuter2.y} L ${pInner2.x} ${pInner2.y} A ${rCenterDisc} ${rCenterDisc} 0 0 0 ${pInner1.x} ${pInner1.y} Z`;
+  const radarArcRimPath = `M ${pOuter1.x} ${pOuter1.y} A ${shadowLen} ${shadowLen} 0 0 1 ${pOuter2.x} ${pOuter2.y}`;
+
+  const shadowDirName = getDirText(shadowAzDeg);
+
+  const arcPath = `M ${sunRise.x} ${sunRise.y} Q ${cx} ${cy - rSunPath - 10} ${sunSet.x} ${sunSet.y}`;
 
   function sideFor(azDeg: number): 'left' | 'right' {
     const p = azToPoint(azDeg, rSunPath, cx, cy);
@@ -223,13 +238,9 @@ export default function SunPathDial({
   const riseSide = sideFor(sun.sunriseAzDeg);
   const setSide = sideFor(sun.sunsetAzDeg);
 
-  // ---- Slider ----
-  // Slider'ın sınırları: doğuş-batış. Eğer kutup günü ise (sunrise=null veya sunset=null)
-  // 06:00-20:00 arası fallback.
-  const minHour = sun.sunrise ? dateToHours(sun.sunrise) : 6;
-  const maxHour = sun.sunset ? dateToHours(sun.sunset) : 20;
+  const minHour = sun.sunrise ? dateToHours(sun.sunrise) : 5.8;
+  const maxHour = sun.sunset ? dateToHours(sun.sunset) : 20.25;
 
-  // ---- Custom Slider (PanResponder tabanlı) ----
   const [trackWidth, setTrackWidth] = useState(0);
   const trackLayout = useRef({ x: 0, width: 0 });
 
@@ -274,17 +285,8 @@ export default function SunPathDial({
     setTrackWidth(e.nativeEvent.layout.width);
   };
 
-  // ---- Pusula: sensör abonelikleri ----
-  // Tilt-compensated heading hesaplama:
-  //  - Accelerometer → yerçekimi vektörü (g)
-  //  - Magnetometer → manyetik alan vektörü (b)
-  //  - Gravity'yi kullanarak manyetik alanı yatay düzleme izdüşür:
-  //      b_h = b - (b·ĝ)ĝ
-  //  - Heading = atan2(by, bx), burada x = doğu, y = kuzey
-  //    (telefon koordinat sisteminde: +X sağ, +Y yukarı, +Z ekran-dışı)
   useEffect(() => {
     if (!compassActive) {
-      // Pusula kapalı — abonelikleri temizle, heading'i sıfırla
       Magnetometer.removeAllListeners();
       Accelerometer.removeAllListeners();
       magRef.current = null;
@@ -294,7 +296,7 @@ export default function SunPathDial({
     }
 
     let lastUpdate = 0;
-    const UPDATE_INTERVAL_MS = 100; // ~10 Hz, pil için yeterli
+    const UPDATE_INTERVAL_MS = 100;
     const recompute = () => {
       const now = Date.now();
       if (now - lastUpdate < UPDATE_INTERVAL_MS) return;
@@ -304,43 +306,27 @@ export default function SunPathDial({
       const a = accRef.current;
       if (!m || !a) return;
 
-      // Yerçekimi vektörünü normalize et
       const gMag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
       if (gMag < 0.0001) return;
       const gx = a.x / gMag;
       const gy = a.y / gMag;
       const gz = a.z / gMag;
 
-      // Manyetik alanı yatay düzleme izdüşür: b_h = b - (b·g)g
       const dot = m.x * gx + m.y * gy + m.z * gz;
       const hx = m.x - dot * gx;
       const hy = m.y - dot * gy;
-      const hz = m.z - dot * gz;
-      // (hz'yi kullanmıyoruz ama manyetik alan 3D bileşeni olarak hesaplandı)
 
-      // Telefon koordinat sistemi: +X sağ, +Y yukarı (ekran üst kenarına doğru),
-      // +Z ekrandan dışarı doğru. Telefon düz (sırt üstü) tutulduğunda:
-      //   - hx > 0: manyetik kuzey telefonun sağında
-      //   - hy > 0: manyetik kuzey telefonun önünde (ekran üst kenarı)
-      // Heading: telefonun üst kenarının (ekranın üstü) manyetik kuzeyle yaptığı açı.
-      // Yani: hy pozitif ve hx ~ 0 ise heading=0 (kuzey yukarıda).
-      //      hx pozitif ve hy ~ 0 ise heading=90 (doğu yukarıda).
-      // atan2(hx, hy) → 0=kuzey, 90=doğu, 180=güney, 270=batı. ✓
       const headingRad = Math.atan2(hx, hy);
       let heading = (headingRad * 180) / Math.PI;
-      // Negatif açıları 0..360 aralığına getir
       heading = (heading + 360) % 360;
       setHeadingDeg(heading);
     };
 
-    // Android'de expo-sensors varsayılan olarak ~60Hz güncelleme yapar; pil için
-    // UpdateInterval ile kısarız.
-    const updateIntervalMs = UPDATE_INTERVAL_MS;
     try {
-      Magnetometer.setUpdateInterval(updateIntervalMs);
-      Accelerometer.setUpdateInterval(updateIntervalMs);
+      Magnetometer.setUpdateInterval(UPDATE_INTERVAL_MS);
+      Accelerometer.setUpdateInterval(UPDATE_INTERVAL_MS);
     } catch {
-      // Eski sürümlerde yoksa sessiz geç
+      // ignore
     }
 
     const magSub = Magnetometer.addListener((data) => {
@@ -362,50 +348,50 @@ export default function SunPathDial({
     };
   }, [compassActive]);
 
-  // Pusula aktifken heading'i SVG'ye uygula. Telefonu saat yönünde çevirince
-  // diyagramın K işareti telefonun üst kenarına gelmeli. SVG rotate açısı
-  // telefonun saat yönündeki dönüşüne eşit (negatif heading uygularız).
-  // Not: atan2(hx, hy) zaten "telefonun üst kenarının kuzeyden sapma açısı"nı verir.
-  // Diyagramda K yukarıdayken telefonu kuzeye çevirince heading=0, diyagram 0°
-  // döner. Telefonu doğuya çevirince heading=90, diyagram -90° döner (K artık
-  // solda, doğu artık üstte). Bu doğru pusula davranışı.
   const dialRotation = compassActive && headingDeg != null ? -headingDeg : 0;
 
-  // Görüntü için: tutamak pozisyonu (px)
-  const effectiveHour = selectedHour ?? dateToHours(new Date());
+  // Gerçek zaman batış saatinin üstündeyse, kaydırma çubuğunun gün batımından sonra ilerlemesini engeller.
+  const rawHour = selectedHour ?? dateToHours(new Date());
+  const effectiveHour = Math.max(minHour, Math.min(maxHour, rawHour));
   const handleX = xFromHour(effectiveHour);
   const handleLeft = Math.max(0, Math.min(trackWidth - 1, handleX));
 
-  // Slider üstündeki gölgeli kısım: doğuş'tan seçili zamana kadar
-  const filledRatio = (effectiveHour - minHour) / Math.max(0.001, maxHour - minHour);
+  const filledRatio = Math.max(0, Math.min(1, (effectiveHour - minHour) / Math.max(0.001, maxHour - minHour)));
   const filledWidth = filledRatio * trackWidth;
+
+  const ticks = useMemo(() => {
+    const tickArray = [];
+    for (let deg = 0; deg < 360; deg += 10) {
+      const isMajor = deg % 90 === 0;
+      const innerR = isMajor ? rOuter - 6 : rOuter - 3;
+      const p1 = azToPoint(deg, innerR, cx, cy);
+      const p2 = azToPoint(deg, rOuter, cx, cy);
+      tickArray.push({ deg, p1, p2, isMajor });
+    }
+    return tickArray;
+  }, [rOuter, cx, cy]);
 
   return (
     <View style={[styles.root, containerStyle]}>
       <View style={styles.bodyRow}>
-        {/* Sol taraf etiketi — ya Doğuş ya da Batış */}
+        {/* Sol Taraf Metin Sütunu (Soldaysa -> SAĞA YASLI) */}
         {sun.valid && (riseSide === 'left' || setSide === 'left') && (
-          <View
-            style={[
-              styles.sideCol,
-              riseSide === 'left' ? null : styles.sideColRight,
-            ]}
-          >
+          <View style={styles.sideColLeft}>
             {riseSide === 'left' ? (
               <>
-                <Text style={[styles.sideLabel, { color: muted }]} numberOfLines={1}>
-                  Doğuş
+                <Text style={[styles.sideLabel, styles.textRight, { color: muted }]} numberOfLines={1}>
+                  GÜN DOĞUMU
                 </Text>
-                <Text style={[styles.sideValue, { color: primary }]}>
+                <Text style={[styles.sideValue, styles.textRight, { color: primary }]}>
                   {timeStr(sun.sunrise)}
                 </Text>
               </>
             ) : (
               <>
-                <Text style={[styles.sideLabel, { color: muted }]} numberOfLines={1}>
-                  Batış
+                <Text style={[styles.sideLabel, styles.textRight, { color: muted }]} numberOfLines={1}>
+                  GÜN BATIMI
                 </Text>
-                <Text style={[styles.sideValue, { color: primary }]}>
+                <Text style={[styles.sideValue, styles.textRight, { color: primary }]}>
                   {timeStr(sun.sunset)}
                 </Text>
               </>
@@ -413,180 +399,200 @@ export default function SunPathDial({
           </View>
         )}
 
-        {/* Orta: SVG Diyagram */}
+        {/* Orta: SVG Kadran */}
         <View style={styles.dialWrap}>
           <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
             <Defs>
-              <Filter id="sunPathGlow" x="-50%" y="-50%" width="200%" height="200%">
-                <FeGaussianBlur stdDeviation="1.5" result="b" />
+              <Filter id="chronoSunGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <FeGaussianBlur stdDeviation="2.5" result="blur" />
                 <FeMerge>
-                  <FeMergeNode in="b" />
+                  <FeMergeNode in="blur" />
                   <FeMergeNode in="SourceGraphic" />
                 </FeMerge>
               </Filter>
+              <LinearGradient id="chronoArcGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <Stop offset="0%" stopColor={primary} stopOpacity={0.3} />
+                <Stop offset="50%" stopColor="#F5D78B" stopOpacity={0.9} />
+                <Stop offset="100%" stopColor={primary} stopOpacity={0.3} />
+              </LinearGradient>
+              {/* Radar Gölge Koni Degrade Filtresi */}
+              <LinearGradient id="radarShadowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <Stop offset="0%" stopColor={primary} stopOpacity={0.45} />
+                <Stop offset="70%" stopColor={primary} stopOpacity={0.2} />
+                <Stop offset="100%" stopColor={primary} stopOpacity={0.05} />
+              </LinearGradient>
             </Defs>
 
-            {/* Pusula halkaları + yön işaretleri + güneş yolu + anlık güneş +
-                doğuş/batış noktaları tek bir dönen grupta. Pusula aktifken
-                telefonun yönelimine göre döner. Çadır ve gölge ise dünyaya
-                sabit olduğu için dönmez (aşağıda ayrı çizilir). */}
+            {/* Pusulayla Dönen Grup (Pusula Aktifken Gölge de Birlikte Döner!) */}
             <G rotation={dialRotation} origin={`${cx}, ${cy}`}>
-              {/* İç halkalar */}
-              <Circle cx={cx} cy={cy} r={rOuter} fill="none" stroke={primarySoft} strokeWidth={1} />
-              <Circle cx={cx} cy={cy} r={rMid} fill="none" stroke={primarySoft} strokeWidth={1} />
+              <Circle cx={cx} cy={cy} r={rOuter} fill="none" stroke={primary} strokeWidth={1.2} strokeOpacity={0.4} />
+              <Circle cx={cx} cy={cy} r={rMid} fill="none" stroke={primarySoft} strokeWidth={1} strokeDasharray="1 3" />
               <Circle cx={cx} cy={cy} r={rInner} fill="none" stroke={primarySoft} strokeWidth={1} />
 
-              {/* Güneş yolu yayı */}
-              <Path
-                d={arcPath}
-                fill="none"
-                stroke={primary}
-                strokeOpacity={0.45}
-                strokeWidth={1.2}
-                strokeDasharray="2.5 3.5"
-              />
+              {ticks.map((t) => (
+                <Line
+                  key={t.deg}
+                  x1={t.p1.x}
+                  y1={t.p1.y}
+                  x2={t.p2.x}
+                  y2={t.p2.y}
+                  stroke={primary}
+                  strokeWidth={t.isMajor ? 1.2 : 0.8}
+                  strokeOpacity={t.isMajor ? 0.7 : 0.3}
+                />
+              ))}
 
-              {/* Pusula yön işaretleri */}
-              <SvgText x={cx} y={cy - rOuter - 3} textAnchor="middle" fill={primary} fontSize={9} fontWeight="700">
+              <SvgText x={cx} y={cy - rOuter - 3} textAnchor="middle" fill={primary} fontSize={10} fontWeight="800">
                 K
               </SvgText>
-              <SvgText x={cx + rOuter + 6} y={cy + 3} textAnchor="middle" fill={muted} fontSize={8} fontWeight="600">
+              <SvgText x={cx + rOuter + 7} y={cy + 3.5} textAnchor="middle" fill={muted} fontSize={9} fontWeight="700">
                 D
               </SvgText>
-              <SvgText x={cx} y={cy + rOuter + 10} textAnchor="middle" fill={muted} fontSize={8} fontWeight="600">
+              <SvgText x={cx} y={cy + rOuter + 10} textAnchor="middle" fill={muted} fontSize={9} fontWeight="700">
                 G
               </SvgText>
-              <SvgText x={cx - rOuter - 6} y={cy + 3} textAnchor="middle" fill={muted} fontSize={8} fontWeight="600">
+              <SvgText x={cx - rOuter - 7} y={cy + 3.5} textAnchor="middle" fill={muted} fontSize={9} fontWeight="700">
                 B
               </SvgText>
 
-              {/* Doğuş / Öğle / Batış sabit noktaları (pusulayla birlikte döner) */}
-              {sun.valid && (
-                <G>
-                  <Circle cx={sunRise.x} cy={sunRise.y} r={3.5} fill={primary} opacity={0.65} filter="url(#sunPathGlow)" />
-                  <Circle cx={sunSet.x} cy={sunSet.y} r={3.5} fill={primary} opacity={0.65} />
-                  <Circle cx={sunNoon.x} cy={sunNoon.y} r={4} fill={primary} />
+              <Path
+                d={arcPath}
+                fill="none"
+                stroke="url(#chronoArcGrad)"
+                strokeWidth={1.8}
+                strokeDasharray="3 3"
+              />
+
+              {/* RADAR GÖLGE BARI (Pusula Dönerken De Tam Uyumlu) */}
+              {sun.valid && isDaytime && (
+                <G id="radarShadowCone">
+                  {/* Radar Konisi Yelpazesi */}
+                  <Path
+                    d={radarWedgePath}
+                    fill="url(#radarShadowGrad)"
+                    stroke={primary}
+                    strokeWidth={0.8}
+                    strokeOpacity={0.4}
+                    strokeDasharray="2 2"
+                  />
+                  {/* Radar Konisi Çerçeve Yayı */}
+                  <Path
+                    d={radarArcRimPath}
+                    fill="none"
+                    stroke={primary}
+                    strokeWidth={1.5}
+                    strokeOpacity={0.8}
+                  />
+                  {/* Orta Ekseni Taraması (Çember dışından başlar) */}
+                  <Line
+                    x1={pCenterBase.x}
+                    y1={pCenterBase.y}
+                    x2={shadowCenterPt.x}
+                    y2={shadowCenterPt.y}
+                    stroke={primary}
+                    strokeWidth={1.2}
+                    strokeOpacity={0.85}
+                    strokeDasharray="3 2"
+                  />
+                  {/* Uç Radar Noktası */}
+                  <Circle cx={shadowCenterPt.x} cy={shadowCenterPt.y} r={2.5} fill={primary} opacity={0.9} />
                 </G>
               )}
 
-              {/* Anlık güneş (gündüz) — pusulayla birlikte döner */}
+              {sun.valid && (
+                <G>
+                  <Circle cx={sunRise.x} cy={sunRise.y} r={4} fill={primary} opacity={0.8} />
+                  <Circle cx={sunSet.x} cy={sunSet.y} r={4} fill={primary} opacity={0.8} />
+                </G>
+              )}
+
               {sun.valid && isDaytime && currentSun && (
-                <Circle
-                  cx={currentSun.x}
-                  cy={currentSun.y}
-                  r={4.5}
-                  fill={primary}
-                  stroke={surface}
-                  strokeWidth={1.5}
-                  filter="url(#sunPathGlow)"
-                />
+                <G>
+                  <Circle
+                    cx={currentSun.x}
+                    cy={currentSun.y}
+                    r={5.5}
+                    fill="#F5D78B"
+                    filter="url(#chronoSunGlow)"
+                  />
+                  <Circle
+                    cx={currentSun.x}
+                    cy={currentSun.y}
+                    r={8.5}
+                    fill="none"
+                    stroke="#F5D78B"
+                    strokeWidth={0.8}
+                    strokeOpacity={0.6}
+                  />
+                </G>
               )}
             </G>
 
-            {/* Çadır + gölge: pusulayla birlikte DÖNMEZ. Çadır yere sabit
-                (dünya referanslı), gölge de güneşin konumuna göre sabit.
-                Pusula dönerken çadırın altında kalan yön değişir. */}
+            {/* MERKEZ ŞIK KAMP İKONU (Sabit Çadır + Kamp Ateşi Vektörü) */}
             {sun.valid && (
-              <G>
-                {/* Gölge çizgisi */}
-                {isDaytime && (
-                  <Path
-                    d={`M ${cx} ${cy} L ${shadowEnd.x} ${shadowEnd.y}`}
-                    stroke={muted}
-                    strokeWidth={1.5}
-                    strokeOpacity={0.55}
-                    strokeLinecap="round"
-                  />
-                )}
+              <G id="centerCampIcon">
+                {/* Dış Halkalı Fon Diski */}
+                <Circle cx={cx} cy={cy} r={14} fill={surface} stroke={primary} strokeWidth={1.2} />
 
-                {/* Çadır — direk + üçgen */}
+                {/* 1.5px Gold Lineart Çadır Gövdesi */}
                 <Path
-                  d={`M ${cx} ${cy} L ${cx} ${cy - 6}`}
+                  d={`M ${cx - 7} ${cy + 4} L ${cx} ${cy - 7} L ${cx + 7} ${cy + 4} Z`}
+                  fill={primarySoft}
                   stroke={primary}
-                  strokeWidth={1.5}
-                  strokeLinecap="round"
-                />
-                <Path
-                  d={`M ${cx - 5} ${cy + 1} L ${cx} ${cy - 6} L ${cx + 5} ${cy + 1} Z`}
-                  fill={primary}
-                  fillOpacity={0.3}
-                  stroke={primary}
-                  strokeWidth={1.2}
+                  strokeWidth={1.3}
                   strokeLinejoin="round"
                 />
+                {/* Çadır Açık Kapı Yarığı */}
+                <Path
+                  d={`M ${cx - 2.5} ${cy + 4} L ${cx} ${cy - 2} L ${cx + 2.5} ${cy + 4} Z`}
+                  fill={surface}
+                  stroke={primary}
+                  strokeWidth={1}
+                />
+                {/* Direk & İp Çizgileri */}
+                <Line x1={cx} y1={cy - 7} x2={cx} y2={cy - 2} stroke={primary} strokeWidth={1.2} />
+                <Line x1={cx - 7} y1={cy + 4} x2={cx - 9} y2={cy + 6} stroke={primary} strokeWidth={1} />
+                <Line x1={cx + 7} y1={cy + 4} x2={cx + 9} y2={cy + 6} stroke={primary} strokeWidth={1} />
 
-                {/* Gece ise ay + yıldızlar (pusulayla birlikte dönmeyebilir —
-                    yıldızlar gökyüzünde sabit, ay da öyle) */}
+                {/* Minyatür Kamp Ateşi Alevi Detayı */}
+                <Path
+                  d={`M ${cx - 1.5} ${cy + 6} Q ${cx} ${cy + 4} ${cx + 1.5} ${cy + 6} Q ${cx} ${cy + 2.5} ${cx - 1.5} ${cy + 6} Z`}
+                  fill="#F5D78B"
+                  stroke={primary}
+                  strokeWidth={0.6}
+                />
+
                 {!isDaytime && (
                   <G>
                     <Circle cx={cx} cy={cy - 6} r={5} fill={muted} opacity={0.85} />
                     <Circle cx={cx + 2} cy={cy - 7} r={4} fill={surface} />
-                    <Circle cx={cx - 18} cy={cy - 14} r={1} fill={muted} opacity={0.7} />
-                    <Circle cx={cx + 16} cy={cy - 10} r={1.2} fill={muted} opacity={0.7} />
-                    <Circle cx={cx - 14} cy={cy + 12} r={0.8} fill={muted} opacity={0.6} />
-                    <Circle cx={cx + 20} cy={cy + 8} r={0.9} fill={muted} opacity={0.6} />
+                    <Circle cx={cx - 18} cy={cy - 14} r={1} fill={primary} opacity={0.8} />
+                    <Circle cx={cx + 18} cy={cy - 10} r={1.2} fill={primary} opacity={0.8} />
                   </G>
                 )}
-              </G>
-            )}
-
-            {/* Pusula aktifse merkezde küçük bir pusula göstergesi (N oku).
-                Pusula döndüğünde çadırın altındaki yönü netleştirir. */}
-            {compassActive && headingDeg != null && (
-              <G>
-                {/* Üstte küçük "N" işareti — telefonun üst kenarına sabit */}
-                <SvgText
-                  x={cx}
-                  y={cy - rInner - 2}
-                  textAnchor="middle"
-                  fill={text}
-                  fontSize={6.5}
-                  fontWeight="700"
-                  opacity={0.5}
-                >
-                  N
-                </SvgText>
-                {/* Altta "S" — telefonun alt kenarına sabit */}
-                <SvgText
-                  x={cx}
-                  y={cy + rInner + 8}
-                  textAnchor="middle"
-                  fill={text}
-                  fontSize={6.5}
-                  fontWeight="700"
-                  opacity={0.5}
-                >
-                  S
-                </SvgText>
               </G>
             )}
           </Svg>
         </View>
 
-        {/* Sağ taraf etiketi — ya Doğuş ya da Batış */}
+        {/* Sağ Taraf Metin Sütunu (Sağdaysa -> SOLA YASLI) */}
         {sun.valid && (riseSide === 'right' || setSide === 'right') && (
-          <View
-            style={[
-              styles.sideCol,
-              styles.sideColRight,
-              riseSide === 'right' ? null : styles.sideColRightOverride,
-            ]}
-          >
+          <View style={styles.sideColRight}>
             {riseSide === 'right' ? (
               <>
-                <Text style={[styles.sideLabel, { color: muted }]} numberOfLines={1}>
-                  Doğuş
+                <Text style={[styles.sideLabel, styles.textLeft, { color: muted }]} numberOfLines={1}>
+                  GÜN DOĞUMU
                 </Text>
-                <Text style={[styles.sideValue, { color: primary }]}>
+                <Text style={[styles.sideValue, styles.textLeft, { color: primary }]}>
                   {timeStr(sun.sunrise)}
                 </Text>
               </>
             ) : (
               <>
-                <Text style={[styles.sideLabel, { color: muted }]} numberOfLines={1}>
-                  Batış
+                <Text style={[styles.sideLabel, styles.textLeft, { color: muted }]} numberOfLines={1}>
+                  GÜN BATIMI
                 </Text>
-                <Text style={[styles.sideValue, { color: primary }]}>
+                <Text style={[styles.sideValue, styles.textLeft, { color: primary }]}>
                   {timeStr(sun.sunset)}
                 </Text>
               </>
@@ -595,16 +601,14 @@ export default function SunPathDial({
         )}
       </View>
 
-      {/* Alt: Slider timeline + Güneş yüksekliği */}
+      {/* Alt: Timeline Slider */}
       {sun.valid && (
         <View style={styles.timelineBlock}>
-          {/* Üst satır: seçili saat + 'şimdi' butonu + pusula toggle */}
           <View style={styles.timelineHeader}>
             <Text style={[styles.timelineHeaderText, { color: muted }]}>
               {selectedHour == null ? 'Şu an' : 'Seçili saat'}
             </Text>
             <View style={styles.timelineHeaderRight}>
-              {/* Pusula açma/kapama butonu — switch tarzı */}
               {onToggleCompass && (
                 <TouchableOpacity
                   style={[
@@ -619,36 +623,13 @@ export default function SunPathDial({
                   accessibilityLabel={compassActive ? 'Pusulayı kapat' : 'Pusulayı aç'}
                 >
                   <Svg width={13} height={13} viewBox="0 0 24 24" fill="none">
-                    {/* Pusula iğnesi — kırmızı yarısı (kuzey) her zaman görünür */}
-                    <Path
-                      d="M12 2 L15 12 L12 10 L9 12 Z"
-                      fill="#E07A7A"
-                    />
+                    <Path d="M12 2 L15 12 L12 10 L9 12 Z" fill="#E07A7A" />
                     <Path
                       d="M12 22 L9 12 L12 14 L15 12 Z"
                       fill={compassActive ? surface : muted}
                       opacity={compassActive ? 0.9 : 1}
                     />
                     <Circle cx={12} cy={12} r={1.5} fill={compassActive ? surface : primary} />
-                    {/* Kapalıyken üstüne çarpı (X) işareti */}
-                    {!compassActive && (
-                      <G>
-                        <Path
-                          d="M4 4 L20 20"
-                          stroke={primary}
-                          strokeWidth={1.6}
-                          strokeLinecap="round"
-                          opacity={0.55}
-                        />
-                        <Path
-                          d="M20 4 L4 20"
-                          stroke={primary}
-                          strokeWidth={1.6}
-                          strokeLinecap="round"
-                          opacity={0.55}
-                        />
-                      </G>
-                    )}
                   </Svg>
                 </TouchableOpacity>
               )}
@@ -679,7 +660,6 @@ export default function SunPathDial({
             onLayout={handleLayout}
             {...trackPanResponder.panHandlers}
           >
-            {/* Dolu kısım (doğuş'tan seçili zamana) */}
             <View
               style={[
                 styles.sliderFill,
@@ -690,7 +670,6 @@ export default function SunPathDial({
               ]}
               pointerEvents="none"
             />
-            {/* Öğle işareti (solar noon) */}
             {sun.solarNoon && (() => {
               const noonHour = dateToHours(sun.solarNoon);
               if (noonHour >= minHour && noonHour <= maxHour) {
@@ -710,7 +689,6 @@ export default function SunPathDial({
               }
               return null;
             })()}
-            {/* Tutamak */}
             <View
               style={[
                 styles.sliderHandle,
@@ -724,7 +702,6 @@ export default function SunPathDial({
             />
           </View>
 
-          {/* Uç etiketler — doğuş ve batış saatleri */}
           <View style={styles.sliderLabels}>
             <Text style={[styles.sliderLabelText, { color: muted }]}>
               {timeStrHM(sun.sunrise)}
@@ -736,43 +713,60 @@ export default function SunPathDial({
         </View>
       )}
 
-      {/* En alt: Güneş yüksekliği (öğle) */}
+      {/* En alt: Güneş yüksekliği */}
       <View style={styles.elevRow}>
         <Text style={[styles.elevLabel, { color: muted }]}>Güneş Yüksekliği (öğle)</Text>
         <Text style={[styles.elevValue, { color: text }]}>
           {sun.valid ? `${Math.round(sun.altitudeDeg)}°` : '—'}
         </Text>
       </View>
+
+      {/* Gölgeden Yararlanma Rehberi & Bilgilendirme İpucu Kartı */}
+      {sun.valid && (
+        <View style={[styles.adviceBox, { backgroundColor: primarySoft, borderColor: primary + '33' }]}>
+          <View style={styles.adviceHeaderRow}>
+            <Text style={[styles.adviceTitle, { color: primary }]}>
+              💡 GÖLGE VE ÇADIR YÖNLENDİRME REHBERİ
+            </Text>
+            {isDaytime && (
+              <View style={[styles.dirBadge, { backgroundColor: primary }]}>
+                <Text style={[styles.dirBadgeText, { color: surface }]}>
+                  {shadowDirName} ({Math.round(shadowAzDeg)}°)
+                </Text>
+              </View>
+            )}
+          </View>
+          <Text style={[styles.adviceText, { color: text }]}>
+            {isDaytime
+              ? `Sarı radar yelpazesi, çadırın ${shadowDirName} yönüne düşen doğal gölge alanını gösterir. Çadır kapınızı veya oturma alanınızı ${shadowDirName} tarafına kurarak doğrudan gölgeden yararlanabilirsiniz.`
+              : 'Güneş ufkun altındadır. Gece çadırınızı sabah ilk güneşini Doğu aksından alacak veya gün boyu serin kalması için Kuzey yönüne bakacak şekilde kurabilirsiniz.'}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
 
-const LABEL_COL_WIDTH = 56; // Etiket sütunu genişliği — "HH:MM" + etiket sığacak kadar
-const LABEL_GAP = 6;        // Etiket sütunu ile diyagram arasındaki nefes payı (px)
-
 const styles = StyleSheet.create({
-  root: {
-    // Çerçevesiz — sadece sarmalayıcı
-  },
+  root: {},
   bodyRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    columnGap: LABEL_GAP,
   },
-  sideCol: {
-    width: LABEL_COL_WIDTH,
+  sideColLeft: {
+    width: 68,
     minWidth: 0,
-  },
-  sideColRight: {
     alignItems: 'flex-end',
   },
-  sideColRightOverride: {
+  sideColRight: {
+    width: 68,
+    minWidth: 0,
     alignItems: 'flex-start',
   },
   sideLabel: {
-    fontSize: 9,
-    fontWeight: '600',
+    fontSize: 8.5,
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -781,14 +775,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 2,
   },
+  textRight: {
+    textAlign: 'right',
+  },
+  textLeft: {
+    textAlign: 'left',
+  },
   dialWrap: {
-    width: 120,
-    height: 120,
+    width: 132,
+    height: 132,
     alignItems: 'center',
     justifyContent: 'center',
   },
   timelineBlock: {
-    marginTop: 4,
+    marginTop: 6,
   },
   timelineHeader: {
     flexDirection: 'row',
@@ -798,18 +798,18 @@ const styles = StyleSheet.create({
   },
   timelineHeaderText: {
     fontSize: 9,
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
   },
   timelineHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
   timelineHeaderValue: {
     fontSize: 12,
     fontWeight: '700',
+    marginHorizontal: 4,
   },
   nowButton: {
     paddingHorizontal: 8,
@@ -830,6 +830,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 4,
   },
   sliderTrack: {
     height: 6,
@@ -866,21 +867,53 @@ const styles = StyleSheet.create({
   },
   sliderLabelText: {
     fontSize: 9,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   elevRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 4,
-    marginTop: 4,
+    marginTop: 6,
   },
   elevLabel: {
     fontSize: 9,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   elevValue: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  adviceBox: {
+    marginTop: 8,
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  adviceHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  adviceTitle: {
+    fontSize: 8.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  dirBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  dirBadgeText: {
+    fontSize: 8.5,
+    fontWeight: '800',
+  },
+  adviceText: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '400',
   },
 });
