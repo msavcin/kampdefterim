@@ -40,6 +40,8 @@ import Svg, {
 } from 'react-native-svg';
 import * as SunCalc from 'suncalc';
 import { Magnetometer, Accelerometer } from 'expo-sensors';
+import { emit as emitEvent } from '@/lib/eventBus';
+import { getSunPathShadowInfo } from '@/lib/sunPathShadowModel';
 
 export interface SunPathDialProps {
   latitude: number | null | undefined;
@@ -84,6 +86,10 @@ function azToPoint(azDeg: number, r: number, cx: number, cy: number) {
 
 function dateToHours(d: Date): number {
   return d.getHours() + d.getMinutes() / 60;
+}
+
+function sunCalcAzimuthToCompassDegrees(azimuthRad: number): number {
+  return ((azimuthRad * 180) / Math.PI + 180) % 360;
 }
 
 function hoursToDate(hours: number, base: Date = new Date()): Date {
@@ -150,15 +156,13 @@ export default function SunPathDial({
     const sunrisePos = SunCalc.getPosition(times.sunrise ?? now, latitude, longitude);
     const sunsetPos = SunCalc.getPosition(times.sunset ?? now, latitude, longitude);
 
-    const toAzDeg = (deg: number) => (deg + 360) % 360;
-
     return {
       sunrise: times.sunrise ?? null,
       solarNoon: times.solarNoon ?? null,
       sunset: times.sunset ?? null,
-      sunriseAzDeg: toAzDeg(sunrisePos.azimuth),
-      noonAzDeg: toAzDeg(noonPos.azimuth),
-      sunsetAzDeg: toAzDeg(sunsetPos.azimuth),
+      sunriseAzDeg: sunCalcAzimuthToCompassDegrees(sunrisePos.azimuth),
+      noonAzDeg: sunCalcAzimuthToCompassDegrees(noonPos.azimuth),
+      sunsetAzDeg: sunCalcAzimuthToCompassDegrees(sunsetPos.azimuth),
       altitudeDeg: noonPos.altitude,
       valid: true,
     };
@@ -196,12 +200,25 @@ export default function SunPathDial({
   const isDaytime = selectedSun.altitude > 0;
   const rCurrentSun = rSunPath;
   const currentSun = isDaytime
-    ? azToPoint(((selectedSun.azimuth + 360) % 360), rCurrentSun, cx, cy)
+    ? azToPoint(sunCalcAzimuthToCompassDegrees(selectedSun.azimuth), rCurrentSun, cx, cy)
     : null;
 
-  // Radar Gölge Konisi Hesaplaması
-  const sunAzDeg = ((selectedSun.azimuth * 180) / Math.PI + 360) % 360;
-  const shadowAzDeg = (sunAzDeg + 180) % 360;
+  // Radar Gölge Konisi Hesaplaması — paylaşılan SunPathDial gölge modeli
+  const shadowInfo = useMemo(() => {
+    if (
+      typeof latitude !== 'number' ||
+      typeof longitude !== 'number' ||
+      Number.isNaN(latitude) ||
+      Number.isNaN(longitude)
+    ) {
+      return null;
+    }
+    return getSunPathShadowInfo(latitude, longitude, selectedTime, {
+      fallbackToSolarNoon: false,
+    });
+  }, [latitude, longitude, selectedTime]);
+  const sunAzDeg = shadowInfo?.sunAzimuthDegrees ?? 0;
+  const shadowAzDeg = shadowInfo?.shadowDirectionDegrees ?? 0;
   
   const SHADOW_MAX = 38;
   const shadowLen = isDaytime
@@ -226,7 +243,7 @@ export default function SunPathDial({
   const radarWedgePath = `M ${pInner1.x} ${pInner1.y} L ${pOuter1.x} ${pOuter1.y} A ${shadowLen} ${shadowLen} 0 0 1 ${pOuter2.x} ${pOuter2.y} L ${pInner2.x} ${pInner2.y} A ${rCenterDisc} ${rCenterDisc} 0 0 0 ${pInner1.x} ${pInner1.y} Z`;
   const radarArcRimPath = `M ${pOuter1.x} ${pOuter1.y} A ${shadowLen} ${shadowLen} 0 0 1 ${pOuter2.x} ${pOuter2.y}`;
 
-  const shadowDirName = getDirText(shadowAzDeg);
+  const shadowDirName = shadowInfo?.shadowDirectionName ?? getDirText(shadowAzDeg);
 
   const arcPath = `M ${sunRise.x} ${sunRise.y} Q ${cx} ${cy - rSunPath - 10} ${sunSet.x} ${sunSet.y}`;
 
@@ -264,15 +281,33 @@ export default function SunPathDial({
     [minHour, maxHour],
   );
 
+  const hourFromXRef = useRef(hourFromX);
+
+  useEffect(() => {
+    hourFromXRef.current = hourFromX;
+  }, [hourFromX]);
+
   const trackPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
       onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: (evt) => {
-        setSelectedHour(hourFromX(evt.nativeEvent.locationX));
+        emitEvent('kampfire:sunTimelineInteractionStart');
+        setSelectedHour(hourFromXRef.current(evt.nativeEvent.locationX));
       },
       onPanResponderMove: (evt) => {
-        setSelectedHour(hourFromX(evt.nativeEvent.locationX));
+        emitEvent('kampfire:sunTimelineInteractionMove');
+        setSelectedHour(hourFromXRef.current(evt.nativeEvent.locationX));
+      },
+      onPanResponderRelease: () => {
+        emitEvent('kampfire:sunTimelineInteractionEnd');
+      },
+      onPanResponderTerminate: () => {
+        emitEvent('kampfire:sunTimelineInteractionEnd');
       },
     }),
   ).current;

@@ -4,6 +4,7 @@
  */
 
 import * as SunCalc from 'suncalc';
+import { getSunPathShadowInfo, type SunPathShadowInfo } from './sunPathShadowModel';
 
 export interface SunTimes {
   sunrise: Date;
@@ -42,6 +43,7 @@ export interface OptimalTentOrientation {
     sunset: number;  // Gün batımı azimuth (derece)
     noon: number;    // Öğlen azimuth (derece)
   };
+  shadowModel?: SunPathShadowInfo; // SunPathDial ile aynı modelden doğal gölge yönü
 }
 
 /**
@@ -142,6 +144,11 @@ export function calculateOptimalTentOrientation(
   const noonPos = getSunPosition(latitude, longitude, sunTimes.solarNoon);
   const sunsetPos = getSunPosition(latitude, longitude, sunTimes.sunset);
   
+  // SunPathDial ile aynı modelden doğal gölge yönü
+  const shadowModel = getSunPathShadowInfo(latitude, longitude, date, {
+    fallbackToSolarNoon: true,
+  });
+  
   // Mevsimsel ayarlama
   const seasonalAdjustment = getSeasonalAdjustment(date);
   
@@ -155,11 +162,19 @@ export function calculateOptimalTentOrientation(
   };
   
   if (priorityShade) {
-    // Gölge öncelikli: Çadır girişi kuzeye bakmalı (güney yarımkürede tersi)
-    // Türkiye kuzey yarımkürede, bu yüzden çadır girişi kuzeye
-    directionDegrees = 0 + seasonalAdjustment;
-    recommendedDirection = getDirectionName(directionDegrees);
-    reasoning = `Gün boyu maksimum gölge için çadır girişi ${recommendedDirection} yönüne bakmalı. Güneş güney taraftan dolaşacağı için çadır içi serin kalacak.`;
+    // Gölge öncelikli: SunPathDial'daki radar gölge modeliyle aynı hesap kullanılır.
+    if (shadowModel.valid) {
+      directionDegrees = shadowModel.shadowDirectionDegrees;
+      recommendedDirection = shadowModel.shadowDirectionName;
+      const referenceText = shadowModel.usedSolarNoonFallback
+        ? 'güneş ufkun altında olduğu için öğle referansına göre'
+        : 'mevcut güneş konumuna göre';
+      reasoning = `Güneş Yolu Diyagramı ile aynı gölge modeli kullanıldı. ${referenceText} doğal gölge ${recommendedDirection} (${Math.round(directionDegrees)}°) yönüne düşüyor. Çadır/karavan kapınızı veya oturma alanınızı bu yöne alarak gölgeden yararlanabilirsiniz.`;
+    } else {
+      directionDegrees = 0 + seasonalAdjustment;
+      recommendedDirection = getDirectionName(directionDegrees);
+      reasoning = `Gölge modeli hesaplanamadı. Gün boyu maksimum gölge için çadır girişi ${recommendedDirection} yönüne bakmalı.`;
+    }
     shadeAnalysis.allDayShade = true;
     shadeAnalysis.morningShade = true;
     shadeAnalysis.afternoonShade = true;
@@ -183,6 +198,7 @@ export function calculateOptimalTentOrientation(
       sunset: sunsetPos.azimuthDegrees,
       noon: noonPos.azimuthDegrees,
     },
+    shadowModel,
   };
 }
 

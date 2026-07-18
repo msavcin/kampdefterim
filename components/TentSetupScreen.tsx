@@ -31,10 +31,19 @@ import {
 } from '../lib/compassUtils';
 import TentOrientationCamera from './TentOrientationCamera';
 import OptimalDirectionIndicator from './OptimalDirectionIndicator';
+import { useTheme } from './ThemeProvider';
 
 const { width } = Dimensions.get('window');
 
-export default function TentSetupScreen() {
+interface TentSetupScreenProps {
+  sourceLocation?: Location.LocationObject | null;
+  evaluationKey?: number | string;
+}
+
+export default function TentSetupScreen({
+  sourceLocation = null,
+  evaluationKey,
+}: TentSetupScreenProps) {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [loading, setLoading] = useState(true);
   const [sunTimes, setSunTimes] = useState<SunTimes | null>(null);
@@ -43,10 +52,38 @@ export default function TentSetupScreen() {
   const [showCamera, setShowCamera] = useState(false);
   const [magnetometerAvailable, setMagnetometerAvailable] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const { colors, scheme, isKampfireTheme } = useTheme();
+  const isKampfireDark = isKampfireTheme && scheme === 'dark';
+  const screenBg = isKampfireTheme ? colors.background : '#f8fafc';
+  const cardBg = isKampfireTheme ? colors.surface : '#fff';
+  const cardAltBg = isKampfireTheme ? colors.surfaceVariant : '#eff6ff';
+  const borderColor = isKampfireTheme ? colors.border : 'transparent';
+  const primaryColor = isKampfireTheme ? colors.primary : '#10b981';
+  const accentColor = isKampfireTheme ? colors.accent : '#f59e0b';
+  const infoColor = isKampfireTheme ? colors.primary : '#3b82f6';
+  const dangerColor = isKampfireTheme ? colors.danger : '#ef4444';
+  const textColor = isKampfireTheme ? colors.text : '#1f2937';
+  const secondaryTextColor = isKampfireTheme ? colors.textSecondary : '#6b7280';
+  const mutedTextColor = isKampfireTheme ? colors.muted : '#9ca3af';
+  const softGoldBg = isKampfireTheme ? colors.primaryLight : '#fef3c7';
+  const themedCardStyle = isKampfireTheme
+    ? {
+        backgroundColor: cardBg,
+        borderColor,
+        borderWidth: 1,
+        shadowOpacity: isKampfireDark ? 0.34 : 0.12,
+        shadowRadius: isKampfireDark ? 18 : 10,
+        elevation: isKampfireDark ? 8 : 3,
+      }
+    : null;
 
   useEffect(() => {
     initializeScreen();
-  }, []);
+  }, [
+    evaluationKey,
+    sourceLocation?.coords?.latitude,
+    sourceLocation?.coords?.longitude,
+  ]);
 
   useEffect(() => {
     if (location) {
@@ -58,17 +95,25 @@ export default function TentSetupScreen() {
     try {
       setLoading(true);
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('İzin Gerekli', 'Konum izni olmadan çadır konumlandırma önerileri verilemez.');
-        setLoading(false);
-        return;
-      }
+      // Ekran her açıldığında zamanı yenile. Modal görünmezken component canlı kalsa bile
+      // değerlendirme açılış anındaki konum + zamana göre tekrar hesaplanır.
+      setSelectedDate(new Date());
 
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setLocation(currentLocation);
+      if (sourceLocation?.coords) {
+        setLocation(sourceLocation);
+      } else {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('İzin Gerekli', 'Konum izni olmadan çadır konumlandırma önerileri verilemez.');
+          setLoading(false);
+          return;
+        }
+
+        const currentLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        setLocation(currentLocation);
+      }
 
       const hasPermission = await checkMagnetometerPermission();
       const isAvailable = await isMagnetometerAvailable();
@@ -111,19 +156,19 @@ export default function TentSetupScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#10b981" />
-        <Text style={styles.loadingText}>Konum bilgileri alınıyor...</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: screenBg }]}>
+        <ActivityIndicator size="large" color={primaryColor} />
+        <Text style={[styles.loadingText, { color: secondaryTextColor }]}>Konum bilgileri alınıyor...</Text>
       </View>
     );
   }
 
   if (!location) {
     return (
-      <View style={styles.errorContainer}>
-        <MapPin size={48} color="#ef4444" />
-        <Text style={styles.errorText}>Konum bilgisi alınamadı</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={initializeScreen}>
+      <View style={[styles.errorContainer, { backgroundColor: screenBg }]}>
+        <MapPin size={48} color={dangerColor} />
+        <Text style={[styles.errorText, { color: textColor }]}>Konum bilgisi alınamadı</Text>
+        <TouchableOpacity style={[styles.retryButton, { backgroundColor: primaryColor }]} onPress={initializeScreen}>
           <Text style={styles.retryButtonText}>Tekrar Dene</Text>
         </TouchableOpacity>
       </View>
@@ -142,33 +187,33 @@ export default function TentSetupScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <ScrollView style={[styles.container, { backgroundColor: screenBg }]} contentContainerStyle={styles.contentContainer}>
       {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerIcon}>
-          <Sun size={32} color="#f59e0b" />
+      <View style={[styles.header, isKampfireTheme && styles.kampfireHeader]}>
+        <View style={[styles.headerIcon, { backgroundColor: softGoldBg, borderColor: isKampfireTheme ? borderColor : softGoldBg }]}>
+          <Sun size={32} color={accentColor} />
         </View>
-        <Text style={styles.headerTitle}>Çadır Konumlandırma</Text>
-        <Text style={styles.headerSubtitle}>Güneş yönüne göre optimal çadır kurulumu</Text>
+        <Text style={[styles.headerTitle, { color: textColor }]}>Çadır Konumlandırma</Text>
+        <Text style={[styles.headerSubtitle, { color: secondaryTextColor }]}>Güneş yönüne göre optimal çadır kurulumu</Text>
       </View>
 
       {/* Öncelik Seçimi */}
-      <View style={styles.priorityCard}>
+      <View style={[styles.priorityCard, themedCardStyle]}>
         <View style={styles.priorityHeader}>
-          <Text style={styles.priorityTitle}>Öncelik</Text>
-          <Info size={20} color="#6b7280" />
+          <Text style={[styles.priorityTitle, { color: textColor }]}>Öncelik</Text>
+          <Info size={20} color={secondaryTextColor} />
         </View>
         <View style={styles.priorityToggle}>
-          <Text style={[styles.priorityLabel, !priorityShade && styles.priorityLabelActive]}>Sabah Güneşi</Text>
+          <Text style={[styles.priorityLabel, { color: mutedTextColor }, !priorityShade && styles.priorityLabelActive, !priorityShade && { color: textColor }]}>Sabah Güneşi</Text>
           <Switch
             value={priorityShade}
             onValueChange={setPriorityShade}
-            trackColor={{ false: '#fbbf24', true: '#3b82f6' }}
-            thumbColor="#fff"
+            trackColor={{ false: accentColor, true: primaryColor }}
+            thumbColor={isKampfireTheme ? colors.surface : '#fff'}
           />
-          <Text style={[styles.priorityLabel, priorityShade && styles.priorityLabelActive]}>Gün Boyu Gölge</Text>
+          <Text style={[styles.priorityLabel, { color: mutedTextColor }, priorityShade && styles.priorityLabelActive, priorityShade && { color: textColor }]}>Gün Boyu Gölge</Text>
         </View>
-        <Text style={styles.priorityDescription}>
+        <Text style={[styles.priorityDescription, { color: secondaryTextColor }]}>
           {priorityShade
             ? 'Çadırınız gün boyu serin kalacak şekilde konumlandırılır.'
             : 'Sabah güneşinden faydalanarak ısınma sağlar, öğleden sonra gölgede olur.'}
@@ -177,20 +222,20 @@ export default function TentSetupScreen() {
 
       {/* Güneş Zamanları */}
       {sunTimes && (
-        <View style={styles.sunTimesCard}>
-          <Text style={styles.sectionTitle}><Sun size={18} color="#f59e0b" /> Güneş Zamanları</Text>
+        <View style={[styles.sunTimesCard, themedCardStyle]}>
+          <Text style={[styles.sectionTitle, { color: textColor }]}><Sun size={18} color={accentColor} /> Güneş Zamanları</Text>
           <View style={styles.sunTimesGrid}>
             <View style={styles.sunTimeItem}>
-              <Text style={styles.sunTimeLabel}>Gün Doğumu</Text>
-              <Text style={styles.sunTimeValue}>{formatTime(sunTimes.sunrise)}</Text>
+              <Text style={[styles.sunTimeLabel, { color: secondaryTextColor }]}>Gün Doğumu</Text>
+              <Text style={[styles.sunTimeValue, { color: textColor }]}>{formatTime(sunTimes.sunrise)}</Text>
             </View>
             <View style={styles.sunTimeItem}>
-              <Text style={styles.sunTimeLabel}>Öğle</Text>
-              <Text style={styles.sunTimeValue}>{formatTime(sunTimes.solarNoon)}</Text>
+              <Text style={[styles.sunTimeLabel, { color: secondaryTextColor }]}>Öğle</Text>
+              <Text style={[styles.sunTimeValue, { color: textColor }]}>{formatTime(sunTimes.solarNoon)}</Text>
             </View>
             <View style={styles.sunTimeItem}>
-              <Text style={styles.sunTimeLabel}>Gün Batımı</Text>
-              <Text style={styles.sunTimeValue}>{formatTime(sunTimes.sunset)}</Text>
+              <Text style={[styles.sunTimeLabel, { color: secondaryTextColor }]}>Gün Batımı</Text>
+              <Text style={[styles.sunTimeValue, { color: textColor }]}>{formatTime(sunTimes.sunset)}</Text>
             </View>
           </View>
         </View>
@@ -207,29 +252,47 @@ export default function TentSetupScreen() {
 
       {/* Gölge Analizi */}
       {optimalOrientation && (
-        <View style={styles.shadeCard}>
-          <Text style={styles.sectionTitle}><CloudRain size={18} color="#3b82f6" /> Gölge Durumu</Text>
+        <View style={[styles.shadeCard, themedCardStyle]}>
+          <Text style={[styles.sectionTitle, { color: textColor }]}><CloudRain size={18} color={infoColor} /> Gölge Durumu</Text>
+          {optimalOrientation.shadowModel?.valid && (
+            <View style={[styles.shadowModelBox, { backgroundColor: cardAltBg, borderColor: isKampfireTheme ? borderColor : '#bfdbfe' }]}>
+              <View style={styles.shadowModelHeader}>
+                <Text style={[styles.shadowModelLabel, { color: primaryColor }]}>Gölge Yönü</Text>
+                <Text style={[styles.shadowModelBadge, { color: isKampfireTheme ? colors.surface : '#1e40af', backgroundColor: primaryColor }]}>SunPathDial modeli</Text>
+              </View>
+              <Text style={[styles.shadowModelDirection, { color: textColor }]}>
+                {optimalOrientation.shadowModel.shadowDirectionName} · {Math.round(optimalOrientation.shadowModel.shadowDirectionDegrees)}°
+              </Text>
+              <Text style={[styles.shadowModelDescription, { color: secondaryTextColor }]}>
+                {optimalOrientation.shadowModel.usedSolarNoonFallback
+                  ? `Güneş ufkun altında olduğu için ${formatTime(optimalOrientation.shadowModel.referenceTime)} öğle referansı kullanıldı.`
+                  : `${formatTime(optimalOrientation.shadowModel.referenceTime)} anlık güneş konumuna göre hesaplandı.`}
+              </Text>
+            </View>
+          )}
           <View style={styles.shadeGrid}>
             <View style={styles.shadeItem}>
-              <Text style={styles.shadeLabel}>Sabah</Text>
+              <Text style={[styles.shadeLabel, { color: secondaryTextColor }]}>Sabah</Text>
               <View style={[
                 styles.shadeIndicator,
                 optimalOrientation.shadeAnalysis.morningShade
                   ? styles.shadeIndicatorActive
                   : styles.shadeIndicatorInactive,
+                { backgroundColor: optimalOrientation.shadeAnalysis.morningShade ? cardAltBg : softGoldBg },
               ]}>
-                <Text style={styles.shadeIndicatorText}>{optimalOrientation.shadeAnalysis.morningShade ? '🌤️ Gölge' : '☀️ Güneş'}</Text>
+                <Text style={[styles.shadeIndicatorText, { color: textColor }]}>{optimalOrientation.shadeAnalysis.morningShade ? '🌤️ Gölge' : '☀️ Güneş'}</Text>
               </View>
             </View>
             <View style={styles.shadeItem}>
-              <Text style={styles.shadeLabel}>Öğleden Sonra</Text>
+              <Text style={[styles.shadeLabel, { color: secondaryTextColor }]}>Öğleden Sonra</Text>
               <View style={[
                 styles.shadeIndicator,
                 optimalOrientation.shadeAnalysis.afternoonShade
                   ? styles.shadeIndicatorActive
                   : styles.shadeIndicatorInactive,
+                { backgroundColor: optimalOrientation.shadeAnalysis.afternoonShade ? cardAltBg : softGoldBg },
               ]}>
-                <Text style={styles.shadeIndicatorText}>{optimalOrientation.shadeAnalysis.afternoonShade ? '🌤️ Gölge' : '☀️ Güneş'}</Text>
+                <Text style={[styles.shadeIndicatorText, { color: textColor }]}>{optimalOrientation.shadeAnalysis.afternoonShade ? '🌤️ Gölge' : '☀️ Güneş'}</Text>
               </View>
             </View>
           </View>
@@ -238,34 +301,34 @@ export default function TentSetupScreen() {
 
       {/* Güneş Yolu Bilgisi */}
       {optimalOrientation && (
-        <View style={styles.sunPathCard}>
-          <Text style={styles.sectionTitle}>Güneş Yolu</Text>
+        <View style={[styles.sunPathCard, themedCardStyle]}>
+          <Text style={[styles.sectionTitle, { color: textColor }]}>Güneş Yolu</Text>
           <View style={styles.sunPathInfo}>
             <View style={styles.sunPathItem}>
-              <Text style={styles.sunPathLabel}>Doğuş</Text>
-              <Text style={styles.sunPathValue}>{getDirectionName(optimalOrientation.sunPath.sunrise)}</Text>
-              <Text style={styles.sunPathDegrees}>{Math.round(optimalOrientation.sunPath.sunrise)}°</Text>
+              <Text style={[styles.sunPathLabel, { color: mutedTextColor }]}>Doğuş</Text>
+              <Text style={[styles.sunPathValue, { color: textColor }]}>{getDirectionName(optimalOrientation.sunPath.sunrise)}</Text>
+              <Text style={[styles.sunPathDegrees, { color: secondaryTextColor }]}>{Math.round(optimalOrientation.sunPath.sunrise)}°</Text>
             </View>
-            <View style={styles.sunPathArrow}><Text style={styles.sunPathArrowText}>→</Text></View>
+            <View style={styles.sunPathArrow}><Text style={[styles.sunPathArrowText, { color: accentColor }]}>→</Text></View>
             <View style={styles.sunPathItem}>
-              <Text style={styles.sunPathLabel}>Öğle</Text>
-              <Text style={styles.sunPathValue}>{getDirectionName(optimalOrientation.sunPath.noon)}</Text>
-              <Text style={styles.sunPathDegrees}>{Math.round(optimalOrientation.sunPath.noon)}°</Text>
+              <Text style={[styles.sunPathLabel, { color: mutedTextColor }]}>Öğle</Text>
+              <Text style={[styles.sunPathValue, { color: textColor }]}>{getDirectionName(optimalOrientation.sunPath.noon)}</Text>
+              <Text style={[styles.sunPathDegrees, { color: secondaryTextColor }]}>{Math.round(optimalOrientation.sunPath.noon)}°</Text>
             </View>
-            <View style={styles.sunPathArrow}><Text style={styles.sunPathArrowText}>→</Text></View>
+            <View style={styles.sunPathArrow}><Text style={[styles.sunPathArrowText, { color: accentColor }]}>→</Text></View>
             <View style={styles.sunPathItem}>
-              <Text style={styles.sunPathLabel}>Batış</Text>
-              <Text style={styles.sunPathValue}>{getDirectionName(optimalOrientation.sunPath.sunset)}</Text>
-              <Text style={styles.sunPathDegrees}>{Math.round(optimalOrientation.sunPath.sunset)}°</Text>
+              <Text style={[styles.sunPathLabel, { color: mutedTextColor }]}>Batış</Text>
+              <Text style={[styles.sunPathValue, { color: textColor }]}>{getDirectionName(optimalOrientation.sunPath.sunset)}</Text>
+              <Text style={[styles.sunPathDegrees, { color: secondaryTextColor }]}>{Math.round(optimalOrientation.sunPath.sunset)}°</Text>
             </View>
           </View>
         </View>
       )}
 
       {/* Bilgi Notu */}
-      <View style={styles.infoCard}>
-        <Info size={20} color="#3b82f6" />
-        <Text style={styles.infoText}>
+      <View style={[styles.infoCard, { backgroundColor: cardAltBg, borderColor: isKampfireTheme ? borderColor : 'transparent' }]}>
+        <Info size={20} color={infoColor} />
+        <Text style={[styles.infoText, { color: isKampfireTheme ? secondaryTextColor : '#1e40af' }]}>
           Bu öneriler mevcut konumunuz ve seçtiğiniz tarihe göre hesaplanmıştır. Yerel arazi özellikleri
           (ağaçlar, tepeler vb.) de göz önünde bulundurulmalıdır.
         </Text>
@@ -324,10 +387,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
+  kampfireHeader: {
+    marginBottom: 20,
+    paddingTop: 4,
+  },
   headerIcon: {
     width: 64,
     height: 64,
     borderRadius: 32,
+    borderWidth: 1,
     backgroundColor: '#fef3c7',
     justifyContent: 'center',
     alignItems: 'center',
@@ -432,6 +500,48 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  shadowModelBox: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    marginBottom: 16,
+  },
+  shadowModelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  shadowModelLabel: {
+    fontSize: 12,
+    color: '#1d4ed8',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  shadowModelBadge: {
+    fontSize: 10,
+    color: '#1e40af',
+    backgroundColor: '#dbeafe',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    overflow: 'hidden',
+    fontWeight: '700',
+  },
+  shadowModelDirection: {
+    fontSize: 20,
+    color: '#1e3a8a',
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  shadowModelDescription: {
+    fontSize: 12,
+    color: '#1e40af',
+    lineHeight: 17,
+  },
   shadeGrid: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -504,6 +614,7 @@ const styles = StyleSheet.create({
   infoCard: {
     backgroundColor: '#eff6ff',
     borderRadius: 12,
+    borderWidth: 1,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'flex-start',

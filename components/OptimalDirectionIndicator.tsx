@@ -14,6 +14,7 @@ import {
 import { Navigation, Camera, CheckCircle, Compass } from 'lucide-react-native';
 import type { OptimalTentOrientation } from '../lib/sunPosition';
 import Svg, { Circle, Line, Text as SvgText, G, Path } from 'react-native-svg';
+import { useTheme } from './ThemeProvider';
 
 const { width } = Dimensions.get('window');
 const COMPASS_SIZE = width * 0.7;
@@ -31,6 +32,21 @@ export default function OptimalDirectionIndicator({
   onOpenCamera,
   cameraAvailable,
 }: OptimalDirectionIndicatorProps) {
+  const { colors, scheme, isKampfireTheme } = useTheme();
+  const isKampfireDark = isKampfireTheme && scheme === 'dark';
+  const primaryColor = isKampfireTheme ? colors.primary : '#10b981';
+  const accentColor = isKampfireTheme ? colors.accent : '#f59e0b';
+  const sunriseColor = isKampfireTheme ? colors.warning : '#fbbf24';
+  const sunsetColor = isKampfireTheme ? colors.primaryDark : '#f97316';
+  const cardBg = isKampfireTheme ? colors.surface : '#fff';
+  const compassBg = isKampfireTheme ? colors.surfaceVariant : '#f9fafb';
+  const softBg = isKampfireTheme ? colors.primaryLight : '#d1fae5';
+  const reasoningBg = isKampfireTheme ? colors.surfaceVariant : '#f0fdf4';
+  const borderColor = isKampfireTheme ? colors.border : '#e5e7eb';
+  const textColor = isKampfireTheme ? colors.text : '#1f2937';
+  const secondaryTextColor = isKampfireTheme ? colors.textSecondary : '#6b7280';
+  const mutedColor = isKampfireTheme ? colors.muted : '#9ca3af';
+
   // Ana yön çizgisi için koordinat hesaplama
   const getLineCoords = (angle: number, length: number) => {
     const rad = ((angle - 90) * Math.PI) / 180; // -90 çünkü 0° yukarı olmalı
@@ -57,9 +73,9 @@ export default function OptimalDirectionIndicator({
 
   return (
     <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>
-          <Navigation size={18} color="#10b981" /> Önerilen Çadır Yönü
+      <View style={[styles.card, isKampfireTheme && { backgroundColor: cardBg, borderColor, borderWidth: 1, shadowOpacity: isKampfireDark ? 0.34 : 0.12, shadowRadius: isKampfireDark ? 18 : 10, elevation: isKampfireDark ? 8 : 3 }]}>
+        <Text style={[styles.cardTitle, { color: textColor }]}>
+          <Navigation size={18} color={primaryColor} /> Önerilen Çadır Yönü
         </Text>
 
         {/* Compass Visualization */}
@@ -70,8 +86,8 @@ export default function OptimalDirectionIndicator({
               cx={CENTER}
               cy={CENTER}
               r={COMPASS_RADIUS - 5}
-              fill="#f9fafb"
-              stroke="#e5e7eb"
+              fill={compassBg}
+              stroke={borderColor}
               strokeWidth="2"
             />
 
@@ -87,7 +103,7 @@ export default function OptimalDirectionIndicator({
                     y1={innerPoint.y}
                     x2={point.x}
                     y2={point.y}
-                    stroke="#9ca3af"
+                    stroke={mutedColor}
                     strokeWidth="2"
                   />
                   <SvgText
@@ -95,7 +111,7 @@ export default function OptimalDirectionIndicator({
                     y={point.y + (dir.angle === 180 ? 15 : dir.angle === 0 ? -8 : 5)}
                     fontSize="14"
                     fontWeight="600"
-                    fill="#4b5563"
+                    fill={secondaryTextColor}
                     textAnchor="middle"
                   >
                     {dir.label}
@@ -116,21 +132,21 @@ export default function OptimalDirectionIndicator({
                   y1={innerPoint.y}
                   x2={outerPoint.x}
                   y2={outerPoint.y}
-                  stroke="#d1d5db"
+                  stroke={borderColor}
                   strokeWidth="1"
                 />
               );
             })}
 
             {/* Sun Path Points */}
-            <Circle cx={sunrisePoint.x} cy={sunrisePoint.y} r="6" fill="#fbbf24" />
-            <Circle cx={noonPoint.x} cy={noonPoint.y} r="8" fill="#f59e0b" />
-            <Circle cx={sunsetPoint.x} cy={sunsetPoint.y} r="6" fill="#f97316" />
+            <Circle cx={sunrisePoint.x} cy={sunrisePoint.y} r="6" fill={sunriseColor} />
+            <Circle cx={noonPoint.x} cy={noonPoint.y} r="8" fill={accentColor} />
+            <Circle cx={sunsetPoint.x} cy={sunsetPoint.y} r="6" fill={sunsetColor} />
 
             {/* Sun Path Line */}
             <Path
               d={`M ${sunrisePoint.x} ${sunrisePoint.y} Q ${noonPoint.x} ${noonPoint.y} ${sunsetPoint.x} ${sunsetPoint.y}`}
-              stroke="#fbbf24"
+              stroke={accentColor}
               strokeWidth="2"
               fill="none"
               strokeDasharray="4,4"
@@ -143,7 +159,7 @@ export default function OptimalDirectionIndicator({
               y1={CENTER}
               x2={optimalPoint.x}
               y2={optimalPoint.y}
-              stroke="#10b981"
+              stroke={primaryColor}
               strokeWidth="4"
               strokeLinecap="round"
             />
@@ -153,53 +169,53 @@ export default function OptimalDirectionIndicator({
               d={`M ${optimalPoint.x} ${optimalPoint.y} 
                   L ${optimalPoint.x - 8} ${optimalPoint.y - 12} 
                   L ${optimalPoint.x + 8} ${optimalPoint.y - 12} Z`}
-              fill="#10b981"
+              fill={primaryColor}
               rotation={orientation.directionDegrees}
               origin={`${optimalPoint.x}, ${optimalPoint.y}`}
             />
 
             {/* Center Point */}
-            <Circle cx={CENTER} cy={CENTER} r="8" fill="#fff" stroke="#10b981" strokeWidth="3" />
+            <Circle cx={CENTER} cy={CENTER} r="8" fill={cardBg} stroke={primaryColor} strokeWidth="3" />
           </Svg>
         </View>
 
         {/* Direction Info */}
         <View style={styles.directionInfo}>
-          <View style={styles.directionBadge}>
-            <Compass size={20} color="#10b981" />
-            <Text style={styles.directionText}>{orientation.recommendedDirection}</Text>
+          <View style={[styles.directionBadge, { backgroundColor: softBg }]}>
+            <Compass size={20} color={primaryColor} />
+            <Text style={[styles.directionText, { color: primaryColor }]}>{orientation.recommendedDirection}</Text>
           </View>
-          <Text style={styles.directionDegrees}>{Math.round(orientation.directionDegrees)}°</Text>
+          <Text style={[styles.directionDegrees, { color: primaryColor }]}>{Math.round(orientation.directionDegrees)}°</Text>
         </View>
 
         {/* Reasoning */}
-        <View style={styles.reasoningContainer}>
-          <Text style={styles.reasoningText}>{orientation.reasoning}</Text>
+        <View style={[styles.reasoningContainer, { backgroundColor: reasoningBg, borderLeftColor: primaryColor }]}>
+          <Text style={[styles.reasoningText, { color: textColor }]}>{orientation.reasoning}</Text>
         </View>
 
         {/* Legend */}
         <View style={styles.legend}>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#fbbf24' }]} />
-            <Text style={styles.legendText}>Gün Doğumu</Text>
+            <View style={[styles.legendDot, { backgroundColor: sunriseColor }]} />
+            <Text style={[styles.legendText, { color: secondaryTextColor }]}>Gün Doğumu</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#f59e0b' }]} />
-            <Text style={styles.legendText}>Öğle</Text>
+            <View style={[styles.legendDot, { backgroundColor: accentColor }]} />
+            <Text style={[styles.legendText, { color: secondaryTextColor }]}>Öğle</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#f97316' }]} />
-            <Text style={styles.legendText}>Gün Batımı</Text>
+            <View style={[styles.legendDot, { backgroundColor: sunsetColor }]} />
+            <Text style={[styles.legendText, { color: secondaryTextColor }]}>Gün Batımı</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#10b981' }]} />
-            <Text style={styles.legendText}>Önerilen Yön</Text>
+            <View style={[styles.legendDot, { backgroundColor: primaryColor }]} />
+            <Text style={[styles.legendText, { color: secondaryTextColor }]}>Önerilen Yön</Text>
           </View>
         </View>
 
         {/* Camera Button */}
         <TouchableOpacity
-          style={[styles.cameraButton, !cameraAvailable && styles.cameraButtonDisabled]}
+          style={[styles.cameraButton, { backgroundColor: primaryColor, shadowColor: primaryColor }, !cameraAvailable && styles.cameraButtonDisabled, !cameraAvailable && { backgroundColor: mutedColor }]}
           onPress={onOpenCamera}
           disabled={!cameraAvailable}
         >
@@ -210,7 +226,7 @@ export default function OptimalDirectionIndicator({
         </TouchableOpacity>
 
         {!cameraAvailable && (
-          <Text style={styles.cameraDisabledNote}>
+          <Text style={[styles.cameraDisabledNote, { color: secondaryTextColor }]}>
             Cihazınızda magnetometre bulunmuyor veya izin verilmedi.
           </Text>
         )}

@@ -103,6 +103,20 @@ const { width, height } = Dimensions.get('window');
 const KAMPFIRE_READ_ANNOUNCEMENT_IDS_KEY = 'kampfireReadAnnouncementIds';
 const KAMPFIRE_READ_ANNOUNCEMENT_BOOTSTRAP_KEY =
   'kampfireAnnouncementBadgeBootstrapped';
+const KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS = 10000;
+const KAMPFIRE_USER_ACTIVITY_MESSAGE_TYPES = new Set([
+  'kampfireUserActivity',
+  'locationSelected',
+  'addCampingAreaAtCurrentLocation',
+  'markerPressed',
+  'campingAreaClicked',
+  'toggleFavorite',
+  'openGoogleMaps',
+  'openYandexMaps',
+  'mapDragStart',
+  'popupopen',
+  'popupclose',
+]);
 
 export default function MapScreen() {
     const insets = useSafeAreaInsets();
@@ -1649,6 +1663,8 @@ export default function MapScreen() {
   } | null>(null);
   const [kampfireSheetVisible, setKampfireSheetVisible] = useState(true);
   const [kampfireSheetExpanded, setKampfireSheetExpanded] = useState(false);
+  const [kampfireSheetIdleWatchNonce, setKampfireSheetIdleWatchNonce] =
+    useState(0);
   // Güneş yolu diyagramında pusula (yönelim sensörü) modu. true iken diyagram
   // telefonun baktığı yöne göre döner. Kullanıcı toggle ile açar/kapar.
   const [sunDialCompassActive, setSunDialCompassActive] = useState(false);
@@ -1658,6 +1674,8 @@ export default function MapScreen() {
   const kampfireSheetDragY = useRef(new Animated.Value(0)).current;
   const suppressAutoOpenRef = useRef(false);
   const suppressAutoOpenTimerRef = useRef<number | null>(null);
+  const kampfireSheetIdleHideTimerRef = useRef<number | null>(null);
+  const lastKampfireMapActivityAtRef = useRef<number>(Date.now());
   const heroLocationCacheRef = useRef<Record<string, string>>({});
   const heroWeatherCacheRef = useRef<
     Record<string, { temp: number | null; text: string }>
@@ -3262,6 +3280,42 @@ export default function MapScreen() {
               } catch (er) {}
             });
           } catch (e) {}
+
+          // Kampfire: kullanıcı haritada herhangi bir etkileşim başlatırsa
+          // React Native tarafındaki 10 sn. boşta kalma zamanlayıcısını sıfırla.
+          if (${mapTheme.isKampfire ? 'true' : 'false'}) {
+            try {
+              var __lastKampfireActivityPost = 0;
+              function __postKampfireUserActivity(source) {
+                try {
+                  var now = Date.now();
+                  if (now - __lastKampfireActivityPost < 250) return;
+                  __lastKampfireActivityPost = now;
+                  if (window.ReactNativeWebView) {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'kampfireUserActivity',
+                      source: source || 'map'
+                    }));
+                  }
+                } catch (er) {}
+              }
+              map.on('click dblclick zoomstart', function(e) {
+                try {
+                  if (e && e.originalEvent) {
+                    __postKampfireUserActivity(e.type || 'mapEvent');
+                  }
+                } catch (er) {}
+              });
+              var __kampfireMapContainer = map.getContainer && map.getContainer();
+              if (__kampfireMapContainer && __kampfireMapContainer.addEventListener) {
+                ['touchstart', 'mousedown', 'wheel'].forEach(function(eventName) {
+                  __kampfireMapContainer.addEventListener(eventName, function() {
+                    __postKampfireUserActivity(eventName);
+                  }, { passive: true });
+                });
+              }
+            } catch (e) {}
+          }
           
           // Offline modda zoom seviyesi kontrolü
           if (isOffline) {
@@ -3606,6 +3660,12 @@ export default function MapScreen() {
   const handleWebViewMessage = (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
+      if (KAMPFIRE_USER_ACTIVITY_MESSAGE_TYPES.has(data?.type)) {
+        registerKampfireMapActivity();
+      }
+      if (data?.type === 'kampfireUserActivity') {
+        return;
+      }
       if (data?.type === 'selectCampingAreaForPlan') {
         try {
           // bulabiliyorsak detaylı area bilgisini al
@@ -3910,6 +3970,12 @@ export default function MapScreen() {
   };
 
   const [showTentSetup, setShowTentSetup] = useState(false);
+  const [tentSetupOpenNonce, setTentSetupOpenNonce] = useState(0);
+
+  const openTentSetupScreen = useCallback(() => {
+    setTentSetupOpenNonce((nonce) => nonce + 1);
+    setShowTentSetup(true);
+  }, []);
 
   const openGoogleMapsNavigation = (latitude: number, longitude: number) => {
     const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
@@ -3932,6 +3998,33 @@ export default function MapScreen() {
     });
   };
 
+  const openNavigationProviderChooser = (latitude: number, longitude: number) => {
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      Alert.alert('Hata', 'Yol tarifi için geçerli konum bulunamadı.');
+      return;
+    }
+
+    Alert.alert(
+      'Yol Tarifi',
+      'Harita uygulamasını seçin.',
+      [
+        {
+          text: 'Google Maps',
+          onPress: () => openGoogleMapsNavigation(lat, lng),
+        },
+        {
+          text: 'Yandex Maps',
+          onPress: () => openYandexMapsNavigation(lat, lng),
+        },
+        { text: 'İptal', style: 'cancel' },
+      ],
+      { cancelable: true },
+    );
+  };
+
   // Liste görünümü için navigasyon wrapper fonksiyonları
   const handleNavigateFromList = (area: CampingArea, provider: 'google' | 'yandex') => {
     const latitude = (area as any).latitude;
@@ -3941,6 +4034,62 @@ export default function MapScreen() {
     } else {
       openYandexMapsNavigation(latitude, longitude);
     }
+  };
+
+  const selectCampingAreaForPlan = async (area: CampingArea | any) => {
+    if (!area) return;
+
+    const latitude = Number((area as any).latitude);
+    const longitude = Number((area as any).longitude);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      Alert.alert('Hata', 'Bu kamp alanı için geçerli konum bulunamadı.');
+      return;
+    }
+
+    const areaTags = (area as any).tags;
+    const areaType =
+      typeof areaTags === 'string'
+        ? areaTags
+        : areaTags?.type || (area as any).type || (area as any).areaType;
+
+    const raw = {
+      id: (area as any).id,
+      latitude,
+      longitude,
+      name: (area as any).name,
+      areaType,
+      gotoStep: 3,
+    };
+    const eventPayload = { ...raw, type: raw.areaType };
+
+    try {
+      await AsyncStorage.setItem(
+        getUserScopedStorageKey('campPlanPendingSelected', user?.id),
+        JSON.stringify(eventPayload),
+      );
+    } catch (e) {}
+    try { eventBus.emit('camp-plan:selectedArea', eventPayload); } catch (e) {}
+    setSelectForPlanMode(false);
+    try { eventBus.emit('camp-plan:modeActive', { active: false }); } catch {}
+    try { router.push('/camp-plan'); } catch (e) {}
+  };
+
+  const setLeafletMapInteractionsEnabled = (enabled: boolean, errorContext = 'KampfireMapInteractions') => {
+    const action = enabled ? 'enable' : 'disable';
+    safeInjectJavaScript(`(function(){
+      try {
+        if (window.map) {
+          ['dragging', 'touchZoom', 'scrollWheelZoom', 'doubleClickZoom', 'boxZoom', 'keyboard'].forEach(function(handlerName) {
+            try {
+              if (window.map[handlerName] && window.map[handlerName].${action}) {
+                window.map[handlerName].${action}();
+              }
+            } catch (handlerError) {}
+          });
+        }
+      } catch (e) {}
+    })();true;`, errorContext);
   };
 
 
@@ -4097,6 +4246,58 @@ export default function MapScreen() {
         (kampfireSheetArea as any)?.type ||
         ''
     : '';
+
+  const formatProvinceDistrict = (province?: string | null, district?: string | null) => {
+    const il = typeof province === 'string' ? province.trim() : '';
+    const ilce = typeof district === 'string' ? district.trim() : '';
+    if (il && ilce && il.toLocaleLowerCase('tr-TR') !== ilce.toLocaleLowerCase('tr-TR')) {
+      return `${il}, ${ilce}`;
+    }
+    return il || ilce || '';
+  };
+
+  const getAreaProvinceDistrictText = (area?: CampingArea | null) => {
+    if (!area) return '';
+
+    const directText = formatProvinceDistrict(
+      (area as any).city || (area as any).province_name || (area as any).state,
+      (area as any).district || (area as any).county || (area as any).town,
+    );
+    if (directText) return directText;
+
+    const rawProvince = (area as any).province;
+    if (!rawProvince) return '';
+
+    try {
+      const provinceObj =
+        typeof rawProvince === 'string' && rawProvince.trim().startsWith('{')
+          ? JSON.parse(rawProvince)
+          : rawProvince;
+
+      if (provinceObj && typeof provinceObj === 'object') {
+        return formatProvinceDistrict(
+          provinceObj.il || provinceObj.state || provinceObj.province || provinceObj.city || provinceObj.region,
+          provinceObj.ilce || provinceObj.county || provinceObj.town || provinceObj.district || provinceObj.city_district || provinceObj.suburb,
+        );
+      }
+
+      if (typeof rawProvince === 'string') return rawProvince.trim();
+    } catch {
+      if (typeof rawProvince === 'string') return rawProvince.trim();
+    }
+
+    return '';
+  };
+
+  const kampfireAreaLocationText = getAreaProvinceDistrictText(kampfireSheetArea);
+  const kampfireHeroLooksLikeAreaName =
+    !!kampfireSheetArea?.name &&
+    kampfireHeroLocation.trim().toLocaleLowerCase('tr-TR') ===
+      kampfireSheetArea.name.trim().toLocaleLowerCase('tr-TR');
+  const kampfireLocationEyebrowText =
+    kampfireAreaLocationText ||
+    (!kampfireHeroLooksLikeAreaName ? kampfireHeroLocation.trim() : '');
+
   const mapSheetTitle = kampfireSheetArea?.name
     ? kampfireSheetArea.name
     : 'Güneş Yolu Diyagramı';
@@ -4126,9 +4327,10 @@ export default function MapScreen() {
     : isConnected
       ? 'Bekleniyor'
       : 'Offline';
-  const kampfireSheetEyebrowText = kampfireSheetArea
-    ? getCampingTypeLabel(kampfireSheetAreaType) || 'KAMPFIRE GOLD'
-    : 'KAMPFIRE GOLD';
+  const kampfireSheetEyebrowText =
+    kampfireLocationEyebrowText ||
+    getCampingTypeLabel(kampfireSheetAreaType) ||
+    'Konum bilgisi alınıyor';
   const kampfireUiSurface = isKampfireTheme
     ? scheme === 'dark'
       ? 'rgba(14,18,16,0.92)'
@@ -4324,6 +4526,13 @@ export default function MapScreen() {
 
   const isAnimatingRef = useRef(false);
 
+  const clearKampfireSheetIdleHideTimer = useCallback(() => {
+    if (kampfireSheetIdleHideTimerRef.current) {
+      clearTimeout(kampfireSheetIdleHideTimerRef.current);
+      kampfireSheetIdleHideTimerRef.current = null;
+    }
+  }, []);
+
   const animateKampfireSheet = useCallback(
     (toValue: number, onComplete?: () => void) => {
       isAnimatingRef.current = true;
@@ -4342,6 +4551,7 @@ export default function MapScreen() {
   );
 
   const closeKampfireSheet = useCallback(() => {
+    clearKampfireSheetIdleHideTimer();
     if (isAnimatingRef.current) return;
     
     // Haritadan gelen otomatik açılma sinyallerini daha uzun süre engelle
@@ -4358,15 +4568,18 @@ export default function MapScreen() {
       setKampfireSheetExpanded(false);
       // setValue(0) kaldırıldı, flash etkisini bu satır yaratıyordu.
     });
-  }, [animateKampfireSheet, kampfireSheetDragY]);
+  }, [animateKampfireSheet, clearKampfireSheetIdleHideTimer]);
 
   const openKampfireSheet = useCallback(
     (expanded = false) => {
       if (isAnimatingRef.current) return;
+      lastKampfireMapActivityAtRef.current = Date.now();
       
       // Animasyon başlamadan önce görünürlüğü aç ve pozisyonu en alta çek
       setKampfireSheetVisible(true);
       setKampfireSheetExpanded(expanded);
+      // Bottom sheet her açıldığında 10 sn. boşta kalma takibini yeniden başlat.
+      setKampfireSheetIdleWatchNonce((nonce) => nonce + 1);
       kampfireSheetDragY.setValue(350); 
       
       // Küçük bir gecikme ile (render sonrası) yukarı kaydır
@@ -4377,12 +4590,76 @@ export default function MapScreen() {
     [animateKampfireSheet, kampfireSheetDragY],
   );
 
+  const registerKampfireMapActivity = useCallback(() => {
+    lastKampfireMapActivityAtRef.current = Date.now();
+  }, []);
+
+  const scheduleKampfireSheetIdleHide = useCallback(() => {
+    clearKampfireSheetIdleHideTimer();
+
+    const shouldWatchSheetIdle = () =>
+      isMounted.current &&
+      isKampfireTheme &&
+      viewMode === 'map' &&
+      isWebViewReady &&
+      kampfireSheetVisible &&
+      !isLocationPickerMode &&
+      !selectForPlanMode &&
+      !showFilters &&
+      !showKampfireMenu &&
+      !fabMenuVisible &&
+      !showAddModal &&
+      !showDetailModal &&
+      !showEditModal &&
+      !showTentSetup;
+
+    if (!shouldWatchSheetIdle()) return;
+
+    const armIdleTimer = (delay: number) => {
+      kampfireSheetIdleHideTimerRef.current = setTimeout(() => {
+        if (!shouldWatchSheetIdle()) return;
+
+        if (isKampfireDraggingRef.current || isAnimatingRef.current) {
+          armIdleTimer(250);
+          return;
+        }
+
+        const idleFor = Date.now() - lastKampfireMapActivityAtRef.current;
+        if (idleFor >= KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS) {
+          closeKampfireSheet();
+          return;
+        }
+
+        armIdleTimer(Math.max(KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS - idleFor, 250));
+      }, delay) as any;
+    };
+
+    armIdleTimer(KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS);
+  }, [
+    clearKampfireSheetIdleHideTimer,
+    isKampfireTheme,
+    viewMode,
+    isWebViewReady,
+    kampfireSheetVisible,
+    isLocationPickerMode,
+    selectForPlanMode,
+    showFilters,
+    showKampfireMenu,
+    fabMenuVisible,
+    showAddModal,
+    showDetailModal,
+    showEditModal,
+    showTentSetup,
+    closeKampfireSheet,
+  ]);
+
   const kampfireHandlePanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_evt, gestureState) =>
         Math.abs(gestureState.dy) > 6,
       onPanResponderGrant: () => {
+        registerKampfireMapActivity();
         if (!isKampfireDraggingRef.current) {
           isKampfireDraggingRef.current = true;
           setIsKampfireDragging(true);
@@ -4509,6 +4786,7 @@ export default function MapScreen() {
       onMoveShouldSetPanResponder: (_evt, gestureState) =>
         Math.abs(gestureState.dy) > 6,
       onPanResponderGrant: () => {
+        registerKampfireMapActivity();
         if (!isKampfireDraggingRef.current) {
           isKampfireDraggingRef.current = true;
           setIsKampfireDragging(true);
@@ -4695,19 +4973,36 @@ export default function MapScreen() {
     const openTentSetup = () => {
       if (!isMounted.current) return;
       changeViewMode('map');
-      setShowTentSetup(true);
+      openTentSetupScreen();
+    };
+    const handleSunTimelineStart = () => {
+      registerKampfireMapActivity();
+      setLeafletMapInteractionsEnabled(false, 'SunPathTimelineDisableMap');
+    };
+    const handleSunTimelineMove = () => {
+      registerKampfireMapActivity();
+    };
+    const handleSunTimelineEnd = () => {
+      registerKampfireMapActivity();
+      setLeafletMapInteractionsEnabled(true, 'SunPathTimelineEnableMap');
     };
     onEvent('announcements:updated', refresh);
     onEvent('announcements:new', refresh);
     onEvent('valilikIdChanged', refresh);
     onEvent('kampfire:openTentSetup', openTentSetup);
+    onEvent('kampfire:sunTimelineInteractionStart', handleSunTimelineStart);
+    onEvent('kampfire:sunTimelineInteractionMove', handleSunTimelineMove);
+    onEvent('kampfire:sunTimelineInteractionEnd', handleSunTimelineEnd);
     return () => {
       offEvent('announcements:updated', refresh);
       offEvent('announcements:new', refresh);
       offEvent('valilikIdChanged', refresh);
       offEvent('kampfire:openTentSetup', openTentSetup);
+      offEvent('kampfire:sunTimelineInteractionStart', handleSunTimelineStart);
+      offEvent('kampfire:sunTimelineInteractionMove', handleSunTimelineMove);
+      offEvent('kampfire:sunTimelineInteractionEnd', handleSunTimelineEnd);
     };
-  }, [refreshKampfireAnnouncementBadge]);
+  }, [refreshKampfireAnnouncementBadge, registerKampfireMapActivity, openTentSetupScreen]);
 
   const hasOpenedInitialRef = useRef(false);
   useEffect(() => {
@@ -4716,6 +5011,25 @@ export default function MapScreen() {
       hasOpenedInitialRef.current = true;
     }
   }, [isKampfireTheme, openKampfireSheet]);
+
+  useEffect(() => {
+    if (isKampfireMapView && isWebViewReady && kampfireSheetVisible) {
+      lastKampfireMapActivityAtRef.current = Date.now();
+      scheduleKampfireSheetIdleHide();
+      return clearKampfireSheetIdleHideTimer;
+    }
+
+    clearKampfireSheetIdleHideTimer();
+    return undefined;
+  }, [
+    isKampfireMapView,
+    isWebViewReady,
+    mapKey,
+    kampfireSheetVisible,
+    kampfireSheetIdleWatchNonce,
+    scheduleKampfireSheetIdleHide,
+    clearKampfireSheetIdleHideTimer,
+  ]);
 
   if (error) {
     return (
@@ -5188,7 +5502,10 @@ export default function MapScreen() {
                         borderColor: kampfireUiBorder,
                       },
                     ]}
-                    onPress={() => setShowKampfireMenu(true)}
+                    onPress={() => {
+                      registerKampfireMapActivity();
+                      setShowKampfireMenu(true);
+                    }}
                     disabled={isBusy}
                   >
                     <Menu size={18} color={kampfireUiPrimary} />
@@ -5212,7 +5529,10 @@ export default function MapScreen() {
                           borderColor: kampfireUiBorder,
                         },
                       ]}
-                      onPress={openKampfireAnnouncements}
+                      onPress={() => {
+                        registerKampfireMapActivity();
+                        openKampfireAnnouncements();
+                      }}
                       disabled={isBusy}
                     >
                       <Bell size={18} color={kampfireUiPrimary} />
@@ -5796,6 +6116,7 @@ export default function MapScreen() {
                     style={styles.kampfireBottomSheetHandleTap}
                     activeOpacity={0.85}
                     onPress={() => {
+                      registerKampfireMapActivity();
                       if (kampfireSheetVisible) {
                         closeKampfireSheet();
                       } else {
@@ -5832,17 +6153,33 @@ export default function MapScreen() {
 
                   {/* Güneş Yolu Diyagramı — sadece kamp alanı seçili değilken ve konum hazırsa */}
                   {isKampfireMapView && !kampfireSheetArea && (
-                    <SunPathDial
-                      latitude={location?.coords?.latitude}
-                      longitude={location?.coords?.longitude}
-                      primary={kampfireUiPrimary}
-                      primarySoft={scheme === 'dark' ? 'rgba(212,175,106,0.18)' : 'rgba(212,175,106,0.22)'}
-                      text={kampfireUiText}
-                      muted={kampfireUiMuted}
-                      surface={kampfireUiSurface}
-                      compassActive={sunDialCompassActive}
-                      onToggleCompass={() => setSunDialCompassActive((v) => !v)}
-                    />
+                    <View
+                      onTouchStart={() => {
+                        registerKampfireMapActivity();
+                        setLeafletMapInteractionsEnabled(false, 'SunPathTimelineDisableMap');
+                      }}
+                      onTouchMove={registerKampfireMapActivity}
+                      onTouchEnd={() => {
+                        registerKampfireMapActivity();
+                        setLeafletMapInteractionsEnabled(true, 'SunPathTimelineEnableMap');
+                      }}
+                      onTouchCancel={() => {
+                        registerKampfireMapActivity();
+                        setLeafletMapInteractionsEnabled(true, 'SunPathTimelineEnableMap');
+                      }}
+                    >
+                      <SunPathDial
+                        latitude={location?.coords?.latitude}
+                        longitude={location?.coords?.longitude}
+                        primary={kampfireUiPrimary}
+                        primarySoft={scheme === 'dark' ? 'rgba(212,175,106,0.18)' : 'rgba(212,175,106,0.22)'}
+                        text={kampfireUiText}
+                        muted={kampfireUiMuted}
+                        surface={kampfireUiSurface}
+                        compassActive={sunDialCompassActive}
+                        onToggleCompass={() => setSunDialCompassActive((v) => !v)}
+                      />
+                    </View>
                   )}
 
                   {kampfireSheetArea && (
@@ -5933,6 +6270,28 @@ export default function MapScreen() {
                         </View>
                       </View>
 
+                      {selectForPlanMode && (
+                        <TouchableOpacity
+                          style={[
+                            styles.kampfireSelectForPlanButton,
+                            {
+                              backgroundColor: kampfireUiPrimary,
+                              borderColor: kampfireUiBorder,
+                            },
+                          ]}
+                          activeOpacity={0.86}
+                          onPress={() => {
+                            registerKampfireMapActivity();
+                            selectCampingAreaForPlan(kampfireSheetArea);
+                          }}
+                        >
+                          <CheckCircle size={15} color={kampfireUiSurface} />
+                          <Text style={[styles.kampfireSelectForPlanButtonText, { color: kampfireUiSurface }]}>
+                            Bu kampı seç
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
                       <View style={styles.kampfireSelectedActionRow}>
                         <TouchableOpacity
                           style={[
@@ -5958,12 +6317,13 @@ export default function MapScreen() {
                               borderColor: kampfireUiBorder,
                             },
                           ]}
-                          onPress={() =>
-                            openGoogleMapsNavigation(
+                          onPress={() => {
+                            registerKampfireMapActivity();
+                            openNavigationProviderChooser(
                               (kampfireSheetArea as any).latitude,
                               (kampfireSheetArea as any).longitude,
-                            )
-                          }
+                            );
+                          }}
                         >
                           <Text style={[styles.kampfireSelectedActionText, { color: kampfireUiText }]}>Yol Tarifi</Text>
                         </TouchableOpacity>
@@ -6005,7 +6365,10 @@ export default function MapScreen() {
                   <TouchableOpacity
                     activeOpacity={0.85}
                     style={[styles.kampfireSheetReopen, { backgroundColor: kampfireUiSurface, borderColor: kampfireUiBorder }]}
-                    onPress={() => openKampfireSheet(true)}
+                    onPress={() => {
+                      registerKampfireMapActivity();
+                      openKampfireSheet(true);
+                    }}
                   >
                     <Text style={styles.kampfireSheetReopenText}>
                       {kampfireSheetArea?.name || 'Detay panelini aç'}
@@ -6045,7 +6408,7 @@ export default function MapScreen() {
                       {!selectForPlanMode && (
                         <TouchableOpacity
                           style={[styles.currentLocationButton, { backgroundColor: '#fef3c7', borderColor: '#f59e0b' }, isBusy ? { opacity: 0.6 } : {}]}
-                          onPress={() => setShowTentSetup(true)}
+                          onPress={openTentSetupScreen}
                           disabled={isBusy}
                         >
                           <Compass size={14} color="#f59e0b" />
@@ -6211,7 +6574,11 @@ export default function MapScreen() {
               <X size={24} color={colors.muted} />
             </TouchableOpacity>
           </View>
-          <TentSetupScreen />
+          <TentSetupScreen
+            key={`tent-setup-${tentSetupOpenNonce}`}
+            sourceLocation={location}
+            evaluationKey={tentSetupOpenNonce}
+          />
         </SafeAreaView>
       </Modal>
       
@@ -7061,6 +7428,21 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     fontSize: 12,
     fontWeight: '700',
     color: kampfireUiText,
+  },
+  kampfireSelectForPlanButton: {
+    minHeight: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 12,
+    paddingHorizontal: 14,
+  },
+  kampfireSelectForPlanButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
   },
   kampfireEmptyCard: {
     borderRadius: 18,
