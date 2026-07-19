@@ -551,7 +551,8 @@ const styles = StyleSheet.create({
   },
   searchBarContainer: {
     paddingHorizontal: 12,
-    paddingBottom: 8,
+    paddingTop: 10,
+    paddingBottom: 0,
   },
   searchInput: {
     width: '100%',

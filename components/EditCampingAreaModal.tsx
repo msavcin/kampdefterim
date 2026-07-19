@@ -1327,7 +1327,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    minWidth: 80,
+    minWidth: 96,
   },
   typeCardSelected: {
   },
@@ -1338,6 +1338,9 @@ const styles = StyleSheet.create({
   typeLabel: {
     fontSize: 12,
     textAlign: 'center',
+    flexShrink: 0,
+    includeFontPadding: true,
+    paddingHorizontal: 2,
   },
   typeLabelSelected: {
     fontWeight: '600',
@@ -1354,6 +1357,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
+    minWidth: 74,
   },
   amenityChipSelected: {
   },
@@ -1363,6 +1367,9 @@ const styles = StyleSheet.create({
   },
   amenityLabel: {
     fontSize: 12,
+    flexShrink: 0,
+    includeFontPadding: true,
+    paddingRight: 2,
   },
   amenityLabelSelected: {
     fontWeight: '600',

@@ -27,7 +27,7 @@ export default function ProfileAppearanceScreen() {
   return (
     <SafeAreaView
       style={[styles.root, { backgroundColor: colors.background }]}
-      edges={['top', 'left', 'right']}
+      edges={['left', 'right', 'bottom']}
     >
       <ProfileSubScreenHeader title="Görünüm" onBack={() => router.replace('/profile')} />
       <ScrollView

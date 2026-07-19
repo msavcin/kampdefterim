@@ -336,7 +336,7 @@ export default function ProfileFriendsScreen() {
   }, [friendSearch]);
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['left', 'right', 'bottom']}>
       <ProfileSubScreenHeader title="Arkadaşlar" onBack={() => router.replace('/profile')} />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>

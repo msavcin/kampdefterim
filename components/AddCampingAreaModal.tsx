@@ -1155,7 +1155,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                 disabled={imagePickerLoading || formData.images.length >= 5}
               >
                 <Camera size={20} color={formData.images.length >= 5 ? colors.muted : colors.primary} />
-                <Text style={[styles.imagePickerText, formData.images.length >= 5 && styles.imagePickerTextDisabled]}>
+                <Text style={[styles.imagePickerText, formData.images.length >= 5 && styles.imagePickerTextDisabled, { color: colors.primary }, formData.images.length >= 5 && { color: colors.muted }]}>
                   {imagePickerLoading ? 'Kamera açılıyor...' :
                    formData.images.length >= 5 ? 'Maksimum 5 fotoğraf eklenebilir' : 'Kamera ile Çek'}
                 </Text>

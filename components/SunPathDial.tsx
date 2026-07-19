@@ -255,6 +255,20 @@ export default function SunPathDial({
   const riseSide = sideFor(sun.sunriseAzDeg);
   const setSide = sideFor(sun.sunsetAzDeg);
 
+  const intermediateDirectionLabels = useMemo(
+    () =>
+      [
+        { deg: 45, label: 'KD' },
+        { deg: 135, label: 'GD' },
+        { deg: 225, label: 'GB' },
+        { deg: 315, label: 'KB' },
+      ].map((item) => ({
+        ...item,
+        p: azToPoint(item.deg, rOuter + 8, cx, cy),
+      })),
+    [rOuter, cx, cy],
+  );
+
   const minHour = sun.sunrise ? dateToHours(sun.sunrise) : 5.8;
   const maxHour = sun.sunset ? dateToHours(sun.sunset) : 20.25;
 
@@ -489,6 +503,21 @@ export default function SunPathDial({
               <SvgText x={cx - rOuter - 7} y={cy + 3.5} textAnchor="middle" fill={muted} fontSize={9} fontWeight="700">
                 B
               </SvgText>
+
+              {intermediateDirectionLabels.map((dir) => (
+                <SvgText
+                  key={dir.label}
+                  x={dir.p.x}
+                  y={dir.p.y + 2.5}
+                  textAnchor="middle"
+                  fill={muted}
+                  fontSize={6.8}
+                  fontWeight="700"
+                  opacity={0.82}
+                >
+                  {dir.label}
+                </SvgText>
+              ))}
 
               <Path
                 d={arcPath}

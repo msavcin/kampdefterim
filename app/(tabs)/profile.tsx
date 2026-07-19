@@ -741,8 +741,11 @@ export default function ProfileHubScreen() {
               );
             }}
           >
-            <Text style={{ color: colors.muted, fontSize: 13, textDecorationLine: 'underline' }}>
-              {isDeletingAccount ? 'Siliniyor...' : 'Hesabımı sil'}
+            <Text
+              numberOfLines={1}
+              style={[styles.deleteAccountText, { color: colors.muted }]}
+            >
+              {isDeletingAccount ? 'Siliniyor...' : 'Hesabımı Sil'}
             </Text>
           </TouchableOpacity>
         )}
@@ -999,6 +1002,16 @@ const styles = StyleSheet.create({
   deleteAccount: {
     alignItems: 'center',
     paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignSelf: 'center',
+  },
+  deleteAccountText: {
+    fontSize: 13,
+    textDecorationLine: 'underline',
+    minWidth: 104,
+    textAlign: 'center',
+    flexShrink: 0,
+    includeFontPadding: true,
   },
   modalOverlay: {
     flex: 1,

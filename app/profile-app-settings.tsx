@@ -145,7 +145,7 @@ export default function ProfileAppSettingsScreen() {
   return (
     <SafeAreaView
       style={[styles.root, { backgroundColor: colors.background }]}
-      edges={['top', 'left', 'right']}
+      edges={['left', 'right', 'bottom']}
     >
       <ProfileSubScreenHeader title="Uygulama & izinler" onBack={() => router.replace('/profile')} />
       <ScrollView

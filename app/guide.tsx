@@ -10,7 +10,7 @@ import {
   Platform,
   BackHandler,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../components/ThemeProvider';
 import {
@@ -124,6 +124,7 @@ const STEPS = [
 export default function GuideScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [currentStep, setCurrentStep] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -168,9 +169,22 @@ export default function GuideScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.background }]}
+      edges={['left', 'right', 'bottom']}
+    >
       {/* ─── Üst Bar ─── */}
-      <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.topBar,
+          {
+            backgroundColor: colors.surface,
+            borderBottomColor: colors.border,
+            marginTop: -insets.top,
+            paddingTop: insets.top + 14,
+          },
+        ]}
+      >
         <Text style={[styles.topBarTitle, { color: colors.text }]}>Uygulama Rehberi</Text>
         <TouchableOpacity style={styles.closeBtn} onPress={() => router.replace('/profile')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <X size={22} color={colors.textSecondary} />
@@ -468,11 +482,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topBar: {
+    width: '100%',
+    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingTop: 14,
+    paddingBottom: 14,
     borderBottomWidth: 1,
   },
   topBarTitle: {

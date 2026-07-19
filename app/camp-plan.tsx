@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Linking, Dimensions, Modal } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebView } from 'react-native-webview';
@@ -101,6 +101,7 @@ const makeMapHTML = (lat: number, lng: number) => `<!DOCTYPE html><html><head><m
 
 export default function CampPlanPage() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<CampPlan>(emptyPlan());
   const [savedPlans, setSavedPlans] = useState<CampPlan[]>([]);
@@ -111,6 +112,7 @@ export default function CampPlanPage() {
   const [isEndDatePickerOpen, setIsEndDatePickerOpen] = useState(false);
   const [isDateRangePickerOpen, setIsDateRangePickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isFilteringCampAreas, setIsFilteringCampAreas] = useState(false);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weathermap, setWeatherMap] = useState<any>(null);
   const [announcementList, setAnnouncementList] = useState<any[]>([]);
@@ -627,9 +629,11 @@ export default function CampPlanPage() {
         return true;
       });
       setAvailableCampAreas(filtered);
+      return filtered;
     } catch (err) {
       console.warn('camp-plan nearby area hata', err);
       setAvailableCampAreas([]);
+      return [];
     }
   };
 
@@ -1424,8 +1428,11 @@ export default function CampPlanPage() {
       return;
     }
     const nextStep = Math.min(steps.length - 1, stepIndex + 1);
-    // Eğer 1. adımdan (Kamp Türü) ilerleniyorsa, harita açılmadan önce cihazın mevcut konumunu alıp MapScreen'e gönder
+    // Eğer 1. adımdan (Kamp Türü) ilerleniyorsa, harita açılmadan önce
+    // mevcut konuma göre kamp alanlarını DB'den filtrele. Filtre bitene kadar
+    // İleri butonunda yükleniyor göstergesi kalır; bitince 3. adıma geçilir.
     if (stepIndex === 1) {
+      setIsFilteringCampAreas(true);
       try {
         let currentLoc = draft.location ?? null;
         try {
@@ -1450,7 +1457,11 @@ export default function CampPlanPage() {
           }
         }
 
-        // Saveden önce adımı güncelle
+        if (currentLoc?.latitude && currentLoc?.longitude) {
+          await loadNearbyAreas(currentLoc.latitude, currentLoc.longitude, draft.campType);
+        }
+
+        // Filtre tamamlandıktan sonra adımı güncelle
         setStepIndex(nextStep);
         saveDraft(draft, nextStep);
 
@@ -1467,6 +1478,8 @@ export default function CampPlanPage() {
         return;
       } catch (e) {
         console.warn('[camp-plan] open map with current location hata', e);
+      } finally {
+        setIsFilteringCampAreas(false);
       }
     }
 
@@ -1800,8 +1813,8 @@ export default function CampPlanPage() {
   };
 
   return (
-    <SafeAreaView style={themedStyles.container}>
-      <View style={themedStyles.topBar}>
+    <SafeAreaView style={themedStyles.container} edges={['left', 'right', 'bottom']}>
+      <View style={[themedStyles.topBar, { marginTop: -insets.top, paddingTop: insets.top + 8 }]}>
         <Text style={themedStyles.title}>Kamp Planla</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity style={styles.plusIcon} onPress={() => {
@@ -2238,9 +2251,22 @@ export default function CampPlanPage() {
           </TouchableOpacity>
 
           {stepIndex < steps.length - 1 ? (
-            <TouchableOpacity style={themedStyles.navBtn} onPress={handleStepNext}>
-              <Text style={styles.navBtnText}>İleri</Text>
-              <Icon name="ArrowRight" size={18} color="#fff" />
+            <TouchableOpacity
+              style={[themedStyles.navBtn, isFilteringCampAreas && themedStyles.navBtnDisabled]}
+              onPress={handleStepNext}
+              disabled={isFilteringCampAreas}
+            >
+              {isFilteringCampAreas ? (
+                <>
+                  <ActivityIndicator color="#fff" />
+                  <Text style={styles.navBtnText}>Yükleniyor...</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.navBtnText}>İleri</Text>
+                  <Icon name="ArrowRight" size={18} color="#fff" />
+                </>
+              )}
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -2322,11 +2348,11 @@ export default function CampPlanPage() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#fff' },
+  topBar: { width: '100%', alignSelf: 'stretch', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10, borderBottomWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#fff' },
   title: { fontSize: 20, fontWeight: 'bold', color: '#0f172a' },
   plusIcon: { padding: 6, marginRight: 8 },
   closeIcon: { padding: 6 },
-  content: { flex: 1, padding: 16 },
+  content: { flex: 1, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8, color: '#1f2937' },
   fieldLabel: { fontSize: 15, fontWeight: '600', color: '#0f172a', marginTop: 12, marginBottom: 6 },
   selectButton: { backgroundColor: '#059669', padding: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 },
@@ -2336,7 +2362,7 @@ const styles = StyleSheet.create({
   listItemText: { color: '#0f172a' },
   statusText: { color: '#475569', marginTop: 8 },
   helpText: { color: '#64748b', fontSize: 13, marginTop: 6 },
-  stepIndicator: { marginTop: 10, marginBottom: 8, paddingVertical: 8, alignItems: 'center', backgroundColor: '#e2e8f0', borderRadius: 10 },
+  stepIndicator: { marginTop: 0, marginBottom: 8, paddingVertical: 8, alignItems: 'center', backgroundColor: '#e2e8f0', borderRadius: 10 },
   stepIndicatorText: { color: '#334155', fontWeight: '600' },
   bottomBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderTopWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#fff' },
   navBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#059669', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, minWidth: 120 },

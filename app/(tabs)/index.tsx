@@ -104,6 +104,7 @@ const KAMPFIRE_READ_ANNOUNCEMENT_IDS_KEY = 'kampfireReadAnnouncementIds';
 const KAMPFIRE_READ_ANNOUNCEMENT_BOOTSTRAP_KEY =
   'kampfireAnnouncementBadgeBootstrapped';
 const KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS = 10000;
+const KAMPFIRE_SHEET_COMPASS_IDLE_HIDE_DELAY_MS = 30000;
 const KAMPFIRE_USER_ACTIVITY_MESSAGE_TYPES = new Set([
   'kampfireUserActivity',
   'locationSelected',
@@ -348,8 +349,23 @@ export default function MapScreen() {
         if (location && location.latitude && location.longitude) {
           setMapMoveQuery({ latitude: location.latitude, longitude: location.longitude });
         }
-        // Harita plan görüntüleme için location picker banner kapat, fakat seçme modu aktif et
+        // Harita plan görüntüleme için location picker banner kapat, seçme modu aktif et
+        // ve kullanıcı 3. adıma temiz haritayla başlasın diye bottom sheet'i kapalı başlat.
         setIsLocationPickerMode(false);
+        setShowMapPopup(false);
+        setShowDetailModal(false);
+        setSelectedCampingArea(null);
+        setKampfireFocusedArea(null);
+        setKampfireSheetExpanded(false);
+        setKampfireSheetVisible(false);
+        try { kampfireSheetDragY.setValue(350); } catch (e) {}
+        suppressAutoOpenRef.current = true;
+        if (suppressAutoOpenTimerRef.current) {
+          clearTimeout(suppressAutoOpenTimerRef.current);
+        }
+        suppressAutoOpenTimerRef.current = setTimeout(() => {
+          suppressAutoOpenRef.current = false;
+        }, 1500) as any;
         setSelectForPlanMode(true);
         try { eventBus.emit('camp-plan:modeActive', { active: true, campType }); } catch {}
         setViewMode('map');
@@ -4578,7 +4594,7 @@ export default function MapScreen() {
       // Animasyon başlamadan önce görünürlüğü aç ve pozisyonu en alta çek
       setKampfireSheetVisible(true);
       setKampfireSheetExpanded(expanded);
-      // Bottom sheet her açıldığında 10 sn. boşta kalma takibini yeniden başlat.
+      // Bottom sheet her açıldığında boşta kalma takibini yeniden başlat.
       setKampfireSheetIdleWatchNonce((nonce) => nonce + 1);
       kampfireSheetDragY.setValue(350); 
       
@@ -4615,6 +4631,10 @@ export default function MapScreen() {
 
     if (!shouldWatchSheetIdle()) return;
 
+    const idleHideDelayMs = sunDialCompassActive
+      ? KAMPFIRE_SHEET_COMPASS_IDLE_HIDE_DELAY_MS
+      : KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS;
+
     const armIdleTimer = (delay: number) => {
       kampfireSheetIdleHideTimerRef.current = setTimeout(() => {
         if (!shouldWatchSheetIdle()) return;
@@ -4625,22 +4645,23 @@ export default function MapScreen() {
         }
 
         const idleFor = Date.now() - lastKampfireMapActivityAtRef.current;
-        if (idleFor >= KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS) {
+        if (idleFor >= idleHideDelayMs) {
           closeKampfireSheet();
           return;
         }
 
-        armIdleTimer(Math.max(KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS - idleFor, 250));
+        armIdleTimer(Math.max(idleHideDelayMs - idleFor, 250));
       }, delay) as any;
     };
 
-    armIdleTimer(KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS);
+    armIdleTimer(idleHideDelayMs);
   }, [
     clearKampfireSheetIdleHideTimer,
     isKampfireTheme,
     viewMode,
     isWebViewReady,
     kampfireSheetVisible,
+    sunDialCompassActive,
     isLocationPickerMode,
     selectForPlanMode,
     showFilters,
@@ -5728,6 +5749,93 @@ export default function MapScreen() {
                 </View>
               </View>
             )}
+
+            {isKampfireMapView && !isLocationPickerMode && selectForPlanMode && (
+              <View style={[styles.kampfireTopOverlay, { zIndex: 1320 }]} pointerEvents="box-none">
+                <View style={styles.kampfireMapActionStack}>
+                  <View style={styles.kampfireActionItem}>
+                    <Animated.View style={[styles.kampfireActionLabel, { backgroundColor: kampfireActionLabelBg, borderColor: kampfireUiBorder, opacity: kampfireLabelOpacity }]}> 
+                      <Text style={[styles.kampfireActionLabelText, { color: kampfireUiPrimary }]}>Liste Görünümü</Text>
+                    </Animated.View>
+                    <TouchableOpacity
+                      style={[
+                        styles.kampfireMapActionButton,
+                        {
+                          backgroundColor: kampfireUiSurface,
+                          borderColor: kampfireUiBorder,
+                        },
+                        offlineLocked && { opacity: 0.45 },
+                      ]}
+                      onPress={() => {
+                        registerKampfireMapActivity();
+                        handleToggleViewMode();
+                      }}
+                      accessibilityLabel="Liste görünümünü aç"
+                    >
+                      <List size={20} color={kampfireUiPrimary} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.kampfireActionItem}>
+                    <Animated.View style={[styles.kampfireActionLabel, { backgroundColor: kampfireActionLabelBg, borderColor: kampfireUiBorder, opacity: kampfireLabelOpacity }]}> 
+                      <Text style={[styles.kampfireActionLabelText, { color: kampfireUiPrimary }]}>Filtre</Text>
+                    </Animated.View>
+                    <TouchableOpacity
+                      style={[
+                        styles.kampfireMapActionButton,
+                        {
+                          backgroundColor: kampfireUiSurface,
+                          borderColor: kampfireUiBorder,
+                        },
+                        isFilterActive && { backgroundColor: colors.primaryLight },
+                        offlineLocked && { opacity: 0.45 },
+                      ]}
+                      onPress={() => {
+                        registerKampfireMapActivity();
+                        handleToggleFilters();
+                      }}
+                      accessibilityLabel="Filtreleri aç"
+                    >
+                      <Filter size={20} color={isFilterActive ? colors.primary : kampfireUiPrimary} />
+                      {isFilterActive && (
+                        <View
+                          style={[
+                            styles.kampfireFilterDot,
+                            {
+                              backgroundColor: colors.warning,
+                              borderColor: kampfireUiSurface,
+                            },
+                          ]}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.kampfireActionItem}>
+                    <Animated.View style={[styles.kampfireActionLabel, { backgroundColor: kampfireActionLabelBg, borderColor: kampfireUiBorder, opacity: kampfireLabelOpacity }]}> 
+                      <Text style={[styles.kampfireActionLabelText, { color: kampfireUiPrimary }]}>Arama</Text>
+                    </Animated.View>
+                    <TouchableOpacity
+                      style={[
+                        styles.kampfireMapActionButton,
+                        {
+                          backgroundColor: kampfireUiSurface,
+                          borderColor: kampfireUiBorder,
+                        },
+                        offlineLocked && { opacity: 0.45 },
+                      ]}
+                      onPress={async () => {
+                        registerKampfireMapActivity();
+                        await handleOpenSearch();
+                      }}
+                      accessibilityLabel="Aramayı aç"
+                    >
+                      <Feather name="search" size={20} color={kampfireUiPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
             {/* Harita kaydırıldığında çıkan buton */}
             {!isKampfireMapView && showMapMoveButton && mapCenter && !isLocationPickerMode && !showMapPopup && (
               <View
@@ -5989,7 +6097,18 @@ export default function MapScreen() {
 
             {/* Camp Plan compact overlay: small back/next/close and step title under header */}
             {selectForPlanMode && (
-              <View style={[styles.planOverlayCompact, { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.primary }]} pointerEvents="box-none">
+              <View
+                style={[
+                  styles.planOverlayCompact,
+                  isKampfireMapView && styles.kampfirePlanOverlayCompact,
+                  {
+                    backgroundColor: colors.surface,
+                    borderWidth: 1.5,
+                    borderColor: colors.primary,
+                  },
+                ]}
+                pointerEvents="box-none"
+              >
                 <TouchableOpacity
                   style={styles.compactBtn}
                   onPress={() => {
@@ -6004,7 +6123,7 @@ export default function MapScreen() {
                   <ArrowLeft size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
 
-                <Text style={[styles.compactTitle, { color: colors.text }]}>Adım 3 / 5 — Kamp Alanı Seçimi</Text>
+                <Text style={[styles.compactTitle, { color: colors.text }]} numberOfLines={1}>Adım 3 / 5 — Kamp Alanı Seçimi</Text>
 
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <TouchableOpacity
@@ -6765,7 +6884,7 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
   planOverlayCompact: {
     position: 'absolute',
     left: 12,
-    right: 12,
+    right: 10,
     top: 85,
     zIndex: 1300,
     height: 48,
@@ -6780,6 +6899,9 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     shadowOpacity: 0.12,
     shadowRadius: 6,
   },
+  kampfirePlanOverlayCompact: {
+    top: 30,
+  },
   compactBtn: {
     width: 36,
     height: 36,
@@ -6789,8 +6911,11 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
     backgroundColor: 'transparent',
   },
   compactTitle: {
-    fontSize: 14,
+    flex: 1,
+    marginHorizontal: 8,
+    fontSize: 13,
     fontWeight: '700',
+    textAlign: 'center',
   },
   fabBinoculars: {
     width: 56,
@@ -6979,7 +7104,7 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
   kampfireMapActionStack: {
     position: 'absolute',
     top: 82,
-    right: 12,
+    right: 7,
     gap: 8,
     alignItems: 'center',
   },
