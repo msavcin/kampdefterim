@@ -83,6 +83,7 @@ import * as SecureStore from 'expo-secure-store';
 import { updateCampingAreaOnServer, sanitizeCampingAreaData } from '@/lib/campingAreaApi';
 import { getMe } from '@/lib/userCommunityApi';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+import AmenitySvgIcon from './AmenitySvgIcon';
 
 interface EditCampingAreaModalProps {
   visible: boolean;
@@ -1035,7 +1036,13 @@ useEffect(() => {
                   ]}
                   onPress={() => toggleAmenity(amenity.id)}
                 >
-                  <Text style={styles.amenityIcon}>{amenity.icon}</Text>
+                  <AmenitySvgIcon
+                    amenity={amenity.id}
+                    size={30}
+                    color={formData.amenities.includes(amenity.id) ? colors.primary : colors.textSecondary}
+                    backgroundColor={formData.amenities.includes(amenity.id) ? colors.surface : colors.surfaceVariant}
+                    strokeWidth={2.4}
+                  />
                   <Text style={[
                     styles.amenityLabel,
                     { color: colors.muted },

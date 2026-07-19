@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, MapPin, Star, Navigation, Heart, Trash2, Phone, Globe, Clock, Users, DollarSign, AlertTriangle, Share2, Sparkles } from 'lucide-react-native';
 import ThemedButton from './ThemedButton';
 import AIEvalButton from './AIEvalButton';
+import AmenitySvgIcon, { getAmenityLabel } from './AmenitySvgIcon';
 import { getCachedImagePath } from '@/lib/imageCache';
 import { CampingArea, getDatabase } from '@/lib/database';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
@@ -269,22 +270,6 @@ import { postRatingForCampground, getRatingsSummary, getMyRating } from '@/lib/r
 
 
 
-const getAmenityIcon = (amenity: string) => {
-  switch (amenity) {
-    case 'tuvalet': return '🚻';
-    case 'duş': return '🚿';
-    case 'içme_suyu': return '💧';
-    case 'elektrik': return '⚡';
-    case 'wifi': return '📶';
-    case 'market': return '🏪';
-    case 'restoran': return '🍽️';
-    case 'otopark': return '🅿️';
-    case 'piknik_masası': return '🪑';
-    case 'barbekü': return '🔥';
-    case 'ateş_yeri': return '🔥';
-    default: return '📍';
-  }
-};
 
 const getPriceRangeLabel = (priceRange: string) => {
   switch (priceRange) {
@@ -841,8 +826,8 @@ export default function CampingAreaDetailModal({
     // Olanaklar
     if (Array.isArray(campingArea.amenities) && campingArea.amenities.length > 0) {
       lines.push('');
-      const amenityEmojis = campingArea.amenities.map(a => `${getAmenityIcon(String(a))} ${String(a)}`);
-      lines.push(`✅ Olanaklar: ${amenityEmojis.join(' · ')}`);
+      const amenityLabels = campingArea.amenities.map(a => getAmenityLabel(String(a)));
+      lines.push(`✅ Olanaklar: ${amenityLabels.join(' · ')}`);
     }
 
     // Konum (il/ilçe)
@@ -1315,8 +1300,14 @@ export default function CampingAreaDetailModal({
               <View style={styles.amenitiesGrid}>
                 {campingArea.amenities.map((amenity, index) => (
                   <View key={index} style={[styles.amenityChip, { backgroundColor: colors.surfaceVariant }]}>
-                    <Text style={styles.amenityIcon}>{getAmenityIcon(String(amenity))}</Text>
-                    <Text style={[styles.amenityText, { color: colors.textSecondary }]}>{amenity ? String(amenity) : ''}</Text>
+                    <AmenitySvgIcon
+                      amenity={String(amenity)}
+                      size={30}
+                      color={colors.textSecondary}
+                      backgroundColor={colors.surface}
+                      strokeWidth={2.4}
+                    />
+                    <Text style={[styles.amenityText, { color: colors.textSecondary }]}>{amenity ? getAmenityLabel(String(amenity)) : ''}</Text>
                   </View>
                 ))}
               </View>

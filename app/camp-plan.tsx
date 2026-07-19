@@ -1831,7 +1831,7 @@ export default function CampPlanPage() {
           }}>
               <Icon name="Plus" size={20} color={theme.colors.primary} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => { router.back(); }} style={styles.closeIcon}>
+          <TouchableOpacity onPress={() => { router.replace('/(tabs)' as any); }} style={styles.closeIcon}>
               <Icon name="X" size={22} color={theme.colors.muted} />
           </TouchableOpacity>
         </View>

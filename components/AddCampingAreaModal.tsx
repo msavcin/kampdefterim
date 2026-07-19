@@ -10,6 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { optimizeImageForWeb } from '@/lib/imageOptimizer';
 import { uploadCampgroundImage } from '@/lib/campgroundImageApi';
 import { useTheme } from './ThemeProvider';
+import AmenitySvgIcon from './AmenitySvgIcon';
 
 // React Native ortamı için basit id üretici
 function generateImageId() {
@@ -1287,7 +1288,13 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                   ]}
                   onPress={() => toggleAmenity(amenity.id)}
                 >
-                  <Text style={styles.amenityIcon}>{amenity.icon}</Text>
+                  <AmenitySvgIcon
+                    amenity={amenity.id}
+                    size={30}
+                    color={formData.amenities.includes(amenity.id) ? colors.primary : colors.textSecondary}
+                    backgroundColor={formData.amenities.includes(amenity.id) ? colors.surface : colors.surfaceVariant}
+                    strokeWidth={2.4}
+                  />
                   <Text style={[
                     styles.amenityLabel,
                     { color: colors.muted },
