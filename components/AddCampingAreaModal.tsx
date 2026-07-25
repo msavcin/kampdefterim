@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    minWidth: 80,
+    minWidth: 100,
   },
   typeCardSelected: {
   },
@@ -187,6 +187,10 @@ const styles = StyleSheet.create({
   typeLabel: {
     fontSize: 12,
     textAlign: 'center',
+    flexShrink: 0,
+    includeFontPadding: true,
+    paddingHorizontal: 4,
+    minWidth: 72,
   },
   typeLabelSelected: {
     fontWeight: '600',
@@ -199,10 +203,12 @@ const styles = StyleSheet.create({
   amenityChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
     borderRadius: 20,
     borderWidth: 1,
+    minWidth: 96,
   },
   amenityChipSelected: {
   },
@@ -212,6 +218,10 @@ const styles = StyleSheet.create({
   },
   amenityLabel: {
     fontSize: 12,
+    flexShrink: 0,
+    includeFontPadding: true,
+    paddingRight: 6,
+    minWidth: 32,
   },
   amenityLabelSelected: {
     fontWeight: '600',
@@ -1262,7 +1272,9 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                   onPress={() => setFormData(prev => ({ ...prev, type: type.id as any }))}
                 >
                   <SvgXml xml={getCampingTypeIcon(type.id, { color: colors.text })} width={24} height={24} style={styles.typeIcon} />
-                  <Text style={[
+                  <Text
+                    numberOfLines={1}
+                    style={[
                     styles.typeLabel,
                     { color: colors.muted },
                     formData.type === type.id && { color: colors.primary, fontWeight: '600' }
@@ -1290,12 +1302,14 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
                 >
                   <AmenitySvgIcon
                     amenity={amenity.id}
-                    size={30}
+                    size={26}
                     color={formData.amenities.includes(amenity.id) ? colors.primary : colors.textSecondary}
                     backgroundColor={formData.amenities.includes(amenity.id) ? colors.surface : colors.surfaceVariant}
-                    strokeWidth={2.4}
+                    strokeWidth={2.2}
                   />
-                  <Text style={[
+                  <Text
+                    numberOfLines={1}
+                    style={[
                     styles.amenityLabel,
                     { color: colors.muted },
                     formData.amenities.includes(amenity.id) && { color: colors.primary, fontWeight: '600' }

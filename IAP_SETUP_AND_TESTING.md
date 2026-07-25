@@ -3,7 +3,7 @@
 ## 📦 Gerekli Paket
 
 ```bash
-npm install react-native-iap@^12.15.6
+npm install react-native-iap@^15.6.0 react-native-nitro-modules@^0.36.1
 ```
 
 ## 🍎 iOS Konfigürasyonu
@@ -107,7 +107,7 @@ Country: Turkey
 ```gradle
 dependencies {
     // ... existing dependencies
-    implementation 'com.android.billingclient:billing:6.0.1'
+    react-native-iap 15.x → OpenIAP / Google Play Billing 9.x (native dependency autolinking)
 }
 ```
 

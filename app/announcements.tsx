@@ -75,6 +75,7 @@ import Svg, { SvgXml } from 'react-native-svg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../components/ThemeProvider';
+import { getLargeItemAsync, setLargeItemAsync } from '../lib/largeStorage';
 
 function capitalizeTurkish(str: string) {
   if (!str) return '';
@@ -98,9 +99,53 @@ const keywordIcon = (keyword: string, colors?: any) => {
   }
 };
 
+const isRoadWorkAnnouncement = (announcement: any) =>
+  typeof announcement?.source_url === 'string' &&
+  announcement.source_url.toLocaleLowerCase('tr-TR').includes('kgm.gov.tr');
+
 export default function AnnouncementsScreen() {
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  const [announcementTabUnreadCounts, setAnnouncementTabUnreadCounts] = useState({
+    duyurular: 0,
+    yol_calismalari: 0,
+  });
+
+  async function loadAnnouncementTabUnreadCounts() {
+    try {
+      const raw = await getLargeItemAsync('announcementTabUnreadIds');
+      const parsed = raw ? JSON.parse(raw) : {};
+      setAnnouncementTabUnreadCounts({
+        duyurular: Array.isArray(parsed?.duyurular) ? parsed.duyurular.length : 0,
+        yol_calismalari: Array.isArray(parsed?.yol_calismalari) ? parsed.yol_calismalari.length : 0,
+      });
+    } catch {
+      setAnnouncementTabUnreadCounts({ duyurular: 0, yol_calismalari: 0 });
+    }
+  }
+
+  const clearAnnouncementTabUnreadCount = React.useCallback(
+    async (tab: 'duyurular' | 'yol_calismalari') => {
+      try {
+        const raw = await getLargeItemAsync('announcementTabUnreadIds');
+        const parsed = raw ? JSON.parse(raw) : {};
+        const next = {
+          duyurular: Array.isArray(parsed?.duyurular) ? parsed.duyurular : [],
+          yol_calismalari: Array.isArray(parsed?.yol_calismalari) ? parsed.yol_calismalari : [],
+          [tab]: [],
+        };
+        await setLargeItemAsync('announcementTabUnreadIds', JSON.stringify(next));
+        setAnnouncementTabUnreadCounts({
+          duyurular: next.duyurular.length,
+          yol_calismalari: next.yol_calismalari.length,
+        });
+      } catch {
+        // ignore
+      }
+    },
+    [],
+  );
 
   // Swipe-back gesture ve geri tuşunu devre dışı bırak
   useFocusEffect(
@@ -138,6 +183,27 @@ export default function AnnouncementsScreen() {
 
   const isConnected = useNetworkStatus(); // log kaldırıldı
 
+  useFocusEffect(
+    React.useCallback(() => {
+      loadAnnouncementTabUnreadCounts();
+      return undefined;
+    }, []),
+  );
+
+  useEffect(() => {
+    const { eventBus } = require('@/lib/eventBus');
+    const refreshBadgeCounts = () => {
+      loadAnnouncementTabUnreadCounts();
+    };
+    eventBus.on('announcements:new', refreshBadgeCounts);
+    eventBus.on('announcements:updated', refreshBadgeCounts);
+    eventBus.on('announcements:tabUnreadUpdated', refreshBadgeCounts);
+    return () => {
+      eventBus.off('announcements:new', refreshBadgeCounts);
+      eventBus.off('announcements:updated', refreshBadgeCounts);
+      eventBus.off('announcements:tabUnreadUpdated', refreshBadgeCounts);
+    };
+  }, []);
 
   // Konum değişikliği index.tsx'te hallediliyor
   // valilikIdChanged event'ini dinle ve refresh tetikle
@@ -182,6 +248,9 @@ export default function AnnouncementsScreen() {
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<'duyurular' | 'yol_calismalari'>('duyurular');
   const router = useRouter();
+
+  const duyurularBadgeCount = announcementTabUnreadCounts.duyurular;
+  const yolCalismalariBadgeCount = announcementTabUnreadCounts.yol_calismalari;
 
   // Detay linki için WebView modal state'i
   const [webModalVisible, setWebModalVisible] = useState(false);
@@ -584,17 +653,41 @@ export default function AnnouncementsScreen() {
           <View style={{ flexDirection: 'row', marginBottom: 18, borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: colors.primaryLight }}>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => setActiveTab('duyurular')}
+              onPress={() => {
+                setActiveTab('duyurular');
+                clearAnnouncementTabUnreadCount('duyurular');
+              }}
               style={{ flex: 1, paddingVertical: 9, alignItems: 'center', backgroundColor: activeTab === 'duyurular' ? colors.primary : colors.surface }}
             >
-              <Text style={{ fontWeight: 'bold', fontSize: 14, color: activeTab === 'duyurular' ? '#fff' : colors.primary }}>Duyurular</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <Text style={{ fontWeight: 'bold', fontSize: 14, color: activeTab === 'duyurular' ? '#fff' : colors.primary }}>Duyurular</Text>
+                {duyurularBadgeCount > 0 && (
+                  <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: activeTab === 'duyurular' ? '#fff' : colors.primary }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: activeTab === 'duyurular' ? colors.primary : '#fff' }}>
+                      {duyurularBadgeCount > 99 ? '99+' : duyurularBadgeCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
             </TouchableOpacity>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => setActiveTab('yol_calismalari')}
+              onPress={() => {
+                setActiveTab('yol_calismalari');
+                clearAnnouncementTabUnreadCount('yol_calismalari');
+              }}
               style={{ flex: 1, paddingVertical: 9, alignItems: 'center', backgroundColor: activeTab === 'yol_calismalari' ? colors.primary : colors.surface }}
             >
-              <Text style={{ fontWeight: 'bold', fontSize: 14, color: activeTab === 'yol_calismalari' ? '#fff' : colors.primary }}>Yol Çalışmaları</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <Text style={{ fontWeight: 'bold', fontSize: 14, color: activeTab === 'yol_calismalari' ? '#fff' : colors.primary }}>Yol Çalışmaları</Text>
+                {yolCalismalariBadgeCount > 0 && (
+                  <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: activeTab === 'yol_calismalari' ? '#fff' : colors.primary }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: activeTab === 'yol_calismalari' ? colors.primary : '#fff' }}>
+                      {yolCalismalariBadgeCount > 99 ? '99+' : yolCalismalariBadgeCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
             </TouchableOpacity>
           </View>
 
@@ -665,7 +758,7 @@ export default function AnnouncementsScreen() {
               <Text style={{ color: colors.primary, fontSize: 16, marginTop: 12, fontStyle: 'italic' }}>Duyurular yükleniyor...</Text>
             </View>
           ) : announcements.filter(a => {
-              const isKgm = typeof a.source_url === 'string' && a.source_url.includes('kgm.gov.tr');
+              const isKgm = isRoadWorkAnnouncement(a);
               return activeTab === 'yol_calismalari' ? isKgm : !isKgm;
             }).length === 0 ? (
             <Text style={{ color: colors.muted, fontSize: 16, textAlign: 'center', marginTop: 32, fontStyle: 'italic' }}>
@@ -674,7 +767,7 @@ export default function AnnouncementsScreen() {
           ) : (
             // Filtreleme motoru: önce tab'a göre filtrele, sonra superadmin için ek filtre uygula
             (user?.role === 'superadmin' ? announcements.filter(a => {
-              const isKgm = typeof a.source_url === 'string' && a.source_url.includes('kgm.gov.tr');
+              const isKgm = isRoadWorkAnnouncement(a);
               if (activeTab === 'yol_calismalari') return isKgm;
               return !isKgm;
             }).filter(a => {
@@ -725,7 +818,7 @@ export default function AnnouncementsScreen() {
               }
               return matches;
             }) : announcements.filter(a => {
-              const isKgm = typeof a.source_url === 'string' && a.source_url.includes('kgm.gov.tr');
+              const isKgm = isRoadWorkAnnouncement(a);
               return activeTab === 'yol_calismalari' ? isKgm : !isKgm;
             })).map((a, i) => {
               // Etkinlik aktiflik kontrolü

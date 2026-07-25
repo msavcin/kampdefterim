@@ -81,6 +81,7 @@ import type { MarkerType } from '../icons/svgIcons';
 import CampingAreaDetailModal from '@/components/CampingAreaDetailModal';
 import EditCampingAreaModal from '@/components/EditCampingAreaModal';
 import SunPathDial from '@/components/SunPathDial';
+import AmenitySvgIcon from '@/components/AmenitySvgIcon';
 import { getDatabase } from '@/lib/database';
 import { getToken } from '@/lib/auth';
 import type { CampingArea } from '@/lib/database';
@@ -103,6 +104,39 @@ const { width, height } = Dimensions.get('window');
 const KAMPFIRE_READ_ANNOUNCEMENT_IDS_KEY = 'kampfireReadAnnouncementIds';
 const KAMPFIRE_READ_ANNOUNCEMENT_BOOTSTRAP_KEY =
   'kampfireAnnouncementBadgeBootstrapped';
+const ANNOUNCEMENT_TAB_UNREAD_IDS_KEY = 'announcementTabUnreadIds';
+
+const isRoadWorkAnnouncement = (announcement: any) =>
+  typeof announcement?.source_url === 'string' &&
+  announcement.source_url.toLocaleLowerCase('tr-TR').includes('kgm.gov.tr');
+
+const rememberAnnouncementTabUnreadIds = async (announcements: any[]) => {
+  if (!Array.isArray(announcements) || announcements.length === 0) return;
+
+  try {
+    const next = {
+      duyurular: [] as Array<number | string>,
+      yol_calismalari: [] as Array<number | string>,
+    };
+
+    announcements.forEach((announcement) => {
+      if (announcement?.id == null) return;
+      const bucket = isRoadWorkAnnouncement(announcement) ? 'yol_calismalari' : 'duyurular';
+      next[bucket].push(announcement.id);
+    });
+
+    await setLargeItemAsync(ANNOUNCEMENT_TAB_UNREAD_IDS_KEY, JSON.stringify(next));
+
+    try {
+      eventBus.emit('announcements:tabUnreadUpdated', {
+        duyurular: next.duyurular.length,
+        yol_calismalari: next.yol_calismalari.length,
+      });
+    } catch {}
+  } catch (error) {
+    if (__DEV__) console.warn('[ANNOUNCEMENT] Tab unread kayıt hatası:', error);
+  }
+};
 const KAMPFIRE_SHEET_IDLE_HIDE_DELAY_MS = 10000;
 const KAMPFIRE_SHEET_COMPASS_IDLE_HIDE_DELAY_MS = 30000;
 const KAMPFIRE_USER_ACTIVITY_MESSAGE_TYPES = new Set([
@@ -723,6 +757,7 @@ export default function MapScreen() {
 
       if (Array.isArray(newAnnouncementsLocal) && newAnnouncementsLocal.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
         if (__DEV__) console.log('[ANNOUNCEMENT] Lokal yeni duyuru bulundu, gösteriliyor (hızlı yol):', newAnnouncementsLocal.length);
+        await rememberAnnouncementTabUnreadIds(newAnnouncementsLocal);
         const updatedIds = [...shownAnnouncementIds, ...newAnnouncementsLocal.map(a => a.id)];
         await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
         addToNotificationQueue([{
@@ -788,6 +823,7 @@ export default function MapScreen() {
       if (!isConnected && !(user?.offline_enabled)) {
         // Bildirim göster (full sync sırasında değil)
         if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
+          await rememberAnnouncementTabUnreadIds(newAnnouncements);
           const updatedIds = [...shownAnnouncementIds, ...newAnnouncements.map(a => a.id)];
           await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
           addToNotificationQueue([{
@@ -855,6 +891,8 @@ export default function MapScreen() {
           : [];
       }
       if (Array.isArray(newAnnouncements) && newAnnouncements.length > 0 && !skipNotification && !isFullSyncInProgressRef.current) {
+        // Yeni duyuru id'lerini tab bazlı rozette göstermek için kaydet
+        await rememberAnnouncementTabUnreadIds(newAnnouncements);
         // Yeni duyuru id'lerini hemen kaydet
         const updatedIds = [...shownAnnouncementIds, ...newAnnouncements.map(a => a.id)];
         await setLargeItemAsync('shownAnnouncementIds', JSON.stringify(updatedIds));
@@ -6364,13 +6402,12 @@ export default function MapScreen() {
                             </View>
                           </View>
 
-                          {kampfireSheetExpanded &&
-                          Array.isArray((kampfireSheetArea as any)?.amenities) &&
+                          {Array.isArray((kampfireSheetArea as any)?.amenities) &&
                           (kampfireSheetArea as any).amenities.length > 0 ? (
                             <View style={styles.kampfireAmenityRow}>
-                              {(kampfireSheetArea as any).amenities.slice(0, 5).map((amenity: string) => (
+                              {(kampfireSheetArea as any).amenities.slice(0, 5).map((amenity: string, index: number) => (
                                 <View
-                                  key={amenity}
+                                  key={`${amenity}-${index}`}
                                   style={[
                                     styles.kampfireAmenityChip,
                                     {
@@ -6379,11 +6416,26 @@ export default function MapScreen() {
                                     },
                                   ]}
                                 >
-                                  <Text style={[styles.kampfireAmenityChipText, { color: kampfireUiPrimary }]}>
-                                    {getAmenityEmoji(amenity)}
-                                  </Text>
+                                  <AmenitySvgIcon
+                                    amenity={amenity}
+                                    size={21}
+                                    color={kampfireUiPrimary}
+                                  />
                                 </View>
                               ))}
+                              {(kampfireSheetArea as any).amenities.length > 5 && (
+                                <View
+                                  style={[
+                                    styles.kampfireAmenityChip,
+                                    {
+                                      backgroundColor: kampfireUiSurface,
+                                      borderColor: kampfireUiBorder,
+                                    },
+                                  ]}
+                                >
+                                  <Text style={[styles.kampfireAmenityMoreText, { color: kampfireUiPrimary }]}>+{(kampfireSheetArea as any).amenities.length - 5}</Text>
+                                </View>
+                              )}
                             </View>
                           ) : null}
                         </View>
@@ -7534,6 +7586,10 @@ function createStyles(kampfireUiBorder: string, kampfireUiSurface: string, kampf
   },
   kampfireAmenityChipText: {
     fontSize: 14,
+  },
+  kampfireAmenityMoreText: {
+    fontSize: 10,
+    fontWeight: '800',
   },
   kampfireSelectedActionRow: {
     flexDirection: 'row',

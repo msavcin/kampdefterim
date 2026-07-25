@@ -123,6 +123,8 @@ const STORAGE_KEY_MODE = '@theme_color_mode';
 const STORAGE_KEY_LIGHT = '@theme_light_palette_id';
 const STORAGE_KEY_DARK = '@theme_dark_palette_id';
 const STORAGE_KEY_VARIANT = '@theme_variant_id';
+const STORAGE_KEY_KAMPFIRE_AUTO_APPLIED = '@theme_kampfire_auto_applied';
+const STORAGE_KEY_VARIANT_MANUAL = '@theme_variant_manual';
 /** Eski tek-palet key (migration) */
 const STORAGE_KEY_PALETTE_LEGACY = '@theme_palette_id';
 
@@ -220,16 +222,32 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     const handler = (subStatus: any) => {
       try {
-        const prem = !!(subStatus?.offlineEnabled || subStatus?.isActive || subStatus?.is_premium);
+        const prem = !!(subStatus?.offlineEnabled || subStatus?.isActive || subStatus?.is_premium || subStatus?.isPremium);
         setIsPremiumState(prem);
         AsyncStorage.setItem('@cached_is_premium', prem ? '1' : '0').catch(() => {});
         if (!prem) {
           // Premium olmayan kullanıcıyı klasik arayüze zorla
           setThemeVariantIdState(defaultThemeVariantId);
           AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
+          AsyncStorage.removeItem(STORAGE_KEY_KAMPFIRE_AUTO_APPLIED).catch(() => {});
+          return;
         }
-        // Not: premium kullanıcıların tema tercihini otomatik değiştirmiyoruz;
-        // kullanıcı el ile Kampfire'ı seçmedikçe tercihleri korunur.
+
+        // İlk kurulum / ilk premium login: kullanıcı daha önce tema seçmediyse Kampfire'a otomatik geç.
+        Promise.all([
+          AsyncStorage.getItem(STORAGE_KEY_VARIANT_MANUAL),
+        ]).then(([manualVariant]) => {
+          if (manualVariant === '1') return;
+          setThemeVariantIdState('kampfireGold');
+          setLightPaletteIdState('L4');
+          setDarkPaletteIdState('D4');
+          AsyncStorage.multiSet([
+            [STORAGE_KEY_VARIANT, 'kampfireGold'],
+            [STORAGE_KEY_LIGHT, 'L4'],
+            [STORAGE_KEY_DARK, 'D4'],
+            [STORAGE_KEY_KAMPFIRE_AUTO_APPLIED, '1'],
+          ]).catch(() => {});
+        }).catch(() => {});
       } catch (e) {
         /* ignore */
       }
@@ -258,6 +276,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
           savedVariant,
           savedLegacy,
           savedCachedPremium,
+          savedManualVariant,
         ] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEY_MODE),
           AsyncStorage.getItem(STORAGE_KEY_LIGHT),
@@ -265,6 +284,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
           AsyncStorage.getItem(STORAGE_KEY_VARIANT),
           AsyncStorage.getItem(STORAGE_KEY_PALETTE_LEGACY),
           AsyncStorage.getItem('@cached_is_premium'),
+          AsyncStorage.getItem(STORAGE_KEY_VARIANT_MANUAL),
         ]);
 
         if (savedMode && ['light', 'dark', 'system'].includes(savedMode)) {
@@ -287,9 +307,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
         if (dark && isDarkPaletteId(dark)) {
           setDarkPaletteIdState(dark);
         }
+        let resolvedPremium = savedCachedPremium === '1';
         // Eğer önbelleğe alınmış premium bilgisi varsa, uygula
         if (savedCachedPremium) {
-          setIsPremiumState(savedCachedPremium === '1');
+          resolvedPremium = savedCachedPremium === '1';
+          setIsPremiumState(resolvedPremium);
         } else {
           // Eğer AsyncStorage'da yoksa, SecureStore'daki localUser'dan dene
           try {
@@ -297,6 +319,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
             if (localUserRaw) {
               const parsed = JSON.parse(localUserRaw);
               const localPrem = !!(parsed?.is_premium || parsed?.isPremium || parsed?.offline_enabled);
+              resolvedPremium = localPrem;
               if (localPrem) {
                 setIsPremiumState(true);
                 AsyncStorage.setItem('@cached_is_premium', '1').catch(() => {});
@@ -309,13 +332,35 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
 
         // Tema varyantı yüklenirken premium kısıtlarını uygula
         if (savedVariant && isThemeVariantId(savedVariant)) {
-          if (savedVariant === 'kampfireGold' && savedCachedPremium !== '1') {
+          if (savedVariant === 'kampfireGold' && !resolvedPremium) {
             // Non-premium kullanıcı için Kampfire önbellekliyse zorla klasik'e çek
             setThemeVariantIdState(defaultThemeVariantId);
             AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
+          } else if (resolvedPremium && savedManualVariant !== '1') {
+            // İlk kurulum / ilk premium login: manuel tercih yoksa Kampfire'a otomatik geç.
+            setThemeVariantIdState('kampfireGold');
+            setLightPaletteIdState('L4');
+            setDarkPaletteIdState('D4');
+            AsyncStorage.multiSet([
+              [STORAGE_KEY_VARIANT, 'kampfireGold'],
+              [STORAGE_KEY_LIGHT, 'L4'],
+              [STORAGE_KEY_DARK, 'D4'],
+              [STORAGE_KEY_KAMPFIRE_AUTO_APPLIED, '1'],
+            ]).catch(() => {});
           } else {
             setThemeVariantIdState(savedVariant);
           }
+        } else if (resolvedPremium) {
+          // İlk kurulum / ilk premium login cache'i: tema seçimi yoksa otomatik Kampfire.
+          setThemeVariantIdState('kampfireGold');
+          setLightPaletteIdState('L4');
+          setDarkPaletteIdState('D4');
+          AsyncStorage.multiSet([
+            [STORAGE_KEY_VARIANT, 'kampfireGold'],
+            [STORAGE_KEY_LIGHT, 'L4'],
+            [STORAGE_KEY_DARK, 'D4'],
+            [STORAGE_KEY_KAMPFIRE_AUTO_APPLIED, '1'],
+          ]).catch(() => {});
         }
       } catch {
         // varsayılanlar
@@ -352,6 +397,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     }
     setThemeVariantIdState(id);
     AsyncStorage.setItem(STORAGE_KEY_VARIANT, id).catch(() => {});
+    AsyncStorage.setItem(STORAGE_KEY_VARIANT_MANUAL, '1').catch(() => {});
+    AsyncStorage.removeItem(STORAGE_KEY_KAMPFIRE_AUTO_APPLIED).catch(() => {});
   }, [isPremium]);
 
   /** Eski API: birleşik id veya legacy id */

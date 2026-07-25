@@ -423,28 +423,15 @@ export default function SunPathDial({
   return (
     <View style={[styles.root, containerStyle]}>
       <View style={styles.bodyRow}>
-        {/* Sol Taraf Metin Sütunu (Soldaysa -> SAĞA YASLI) */}
-        {sun.valid && (riseSide === 'left' || setSide === 'left') && (
+        {/* Sol Taraf Metin Sütunu (Batı/Gün Batımı -> SAĞA YASLI) */}
+        {sun.valid && (
           <View style={styles.sideColLeft}>
-            {riseSide === 'left' ? (
-              <>
-                <Text style={[styles.sideLabel, styles.textRight, { color: muted }]} numberOfLines={1}>
-                  GÜN DOĞUMU
-                </Text>
-                <Text style={[styles.sideValue, styles.textRight, { color: primary }]}>
-                  {timeStr(sun.sunrise)}
-                </Text>
-              </>
-            ) : (
-              <>
-                <Text style={[styles.sideLabel, styles.textRight, { color: muted }]} numberOfLines={1}>
-                  GÜN BATIMI
-                </Text>
-                <Text style={[styles.sideValue, styles.textRight, { color: primary }]}>
-                  {timeStr(sun.sunset)}
-                </Text>
-              </>
-            )}
+            <Text style={[styles.sideLabel, styles.textRight, { color: muted }]} numberOfLines={1}>
+              GÜN BATIMI
+            </Text>
+            <Text style={[styles.sideValue, styles.textRight, { color: primary }]}>
+              {timeStr(sun.sunset)}
+            </Text>
           </View>
         )}
 
@@ -639,28 +626,15 @@ export default function SunPathDial({
           </Svg>
         </View>
 
-        {/* Sağ Taraf Metin Sütunu (Sağdaysa -> SOLA YASLI) */}
-        {sun.valid && (riseSide === 'right' || setSide === 'right') && (
+        {/* Sağ Taraf Metin Sütunu (Doğu/Gün Doğumu -> SOLA YASLI) */}
+        {sun.valid && (
           <View style={styles.sideColRight}>
-            {riseSide === 'right' ? (
-              <>
-                <Text style={[styles.sideLabel, styles.textLeft, { color: muted }]} numberOfLines={1}>
-                  GÜN DOĞUMU
-                </Text>
-                <Text style={[styles.sideValue, styles.textLeft, { color: primary }]}>
-                  {timeStr(sun.sunrise)}
-                </Text>
-              </>
-            ) : (
-              <>
-                <Text style={[styles.sideLabel, styles.textLeft, { color: muted }]} numberOfLines={1}>
-                  GÜN BATIMI
-                </Text>
-                <Text style={[styles.sideValue, styles.textLeft, { color: primary }]}>
-                  {timeStr(sun.sunset)}
-                </Text>
-              </>
-            )}
+            <Text style={[styles.sideLabel, styles.textLeft, { color: muted }]} numberOfLines={1}>
+              GÜN DOĞUMU
+            </Text>
+            <Text style={[styles.sideValue, styles.textLeft, { color: primary }]}>
+              {timeStr(sun.sunrise)}
+            </Text>
           </View>
         )}
       </View>

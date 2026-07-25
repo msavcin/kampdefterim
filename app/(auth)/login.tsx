@@ -29,6 +29,8 @@ import { saveToken } from '../../lib/auth';
 import { API_URL } from '../../lib/config';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { eventBus } from '../../lib/eventBus';
 import { useTheme } from '../../components/ThemeProvider';
 import type { ThemeColors } from '../../constants/theme/colors';
 
@@ -81,9 +83,24 @@ export default function LoginScreen() {
         await saveToken(result.token);
         const me = await getMe();
         const userToStore =
-          me && me.user ? { ...me.user, role: me.user.role ?? me.role } : me;
+          me && me.user
+            ? {
+                ...me.user,
+                role: me.user.role ?? me.role,
+                offline_enabled: !!(me.offline_enabled || me.user.offline_enabled),
+                isPremium: !!(me.isPremium || me.is_premium || me.offline_enabled || me.user.isPremium || me.user.is_premium || me.user.offline_enabled),
+              }
+            : me;
         try {
           await SecureStore.setItemAsync('localUser', JSON.stringify(userToStore));
+          const premium = !!(userToStore?.is_premium || userToStore?.isPremium || userToStore?.offline_enabled);
+          await AsyncStorage.setItem('@cached_is_premium', premium ? '1' : '0');
+          eventBus.emit('subscription:statusUpdated', {
+            isActive: premium,
+            offlineEnabled: premium,
+            is_premium: premium,
+            source: 'login',
+          });
         } catch {}
         guestLoginPendingRedirect.current = true;
         setGuestModalVisible(true);
@@ -155,8 +172,15 @@ export default function LoginScreen() {
         console.log('[LOGIN] getMe sonucu:', me);
         const accountUser = me?.member?.user ?? me?.user ?? null;
         const userToStore = accountUser
-          ? { ...me, ...accountUser, role: accountUser.role ?? me.role }
+          ? {
+              ...me,
+              ...accountUser,
+              role: accountUser.role ?? me.role,
+              offline_enabled: !!(me.offline_enabled || accountUser.offline_enabled),
+              isPremium: !!(me.isPremium || me.is_premium || me.offline_enabled || accountUser.isPremium || accountUser.is_premium || accountUser.offline_enabled),
+            }
           : { ...me, role: me.role };
+        const loginPremium = !!(userToStore?.is_premium || userToStore?.isPremium || userToStore?.offline_enabled);
         try {
           await SecureStore.setItemAsync('localUser', JSON.stringify(userToStore));
           console.log('[LOGIN] localUser kaydedildi:', userToStore);
@@ -184,6 +208,14 @@ export default function LoginScreen() {
           }
         }
         if (canLogin) {
+          await AsyncStorage.setItem('@cached_is_premium', loginPremium ? '1' : '0');
+          eventBus.emit('subscription:statusUpdated', {
+            isActive: loginPremium,
+            offlineEnabled: loginPremium,
+            is_premium: loginPremium,
+            isPremium: loginPremium,
+            source: 'login',
+          });
           if (isGuest && typeof onGuestLoginSuccess === 'function') {
             onGuestLoginSuccess();
           }

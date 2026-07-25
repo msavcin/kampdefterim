@@ -85,6 +85,99 @@ let cachedApiPrices: Record<'ios' | 'android', Record<'monthly' | 'yearly', stri
 // API'den çekilen kampanya önbelleği
 let cachedApiCampaigns: Record<'ios' | 'android', Record<'monthly' | 'yearly', CampaignInfo>> | null = null;
 
+
+function normalizeSubscriptionProduct(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  const normalized: any = { ...item };
+  normalized.productId = normalized.productId ?? normalized.id ?? normalized.sku;
+  normalized.localizedPrice = normalized.localizedPrice ?? normalized.displayPrice;
+  normalized.subscriptionOfferDetails =
+    normalized.subscriptionOfferDetails ??
+    normalized.subscriptionOfferDetailsAndroid ??
+    (Array.isArray(normalized.subscriptionOffers)
+      ? normalized.subscriptionOffers.map((offer: any) => ({
+          basePlanId: offer.basePlanId ?? offer.basePlanIdAndroid,
+          offerId: offer.offerId ?? offer.id ?? null,
+          offerToken: offer.offerToken ?? offer.offerTokenAndroid,
+          offerTags: offer.offerTags ?? offer.offerTagsAndroid ?? [],
+          pricingPhases: offer.pricingPhases ?? offer.pricingPhasesAndroid,
+        }))
+      : undefined);
+  return normalized;
+}
+
+function normalizePurchaseObject(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  return {
+    ...item,
+    productId: item.productId ?? item.id ?? item.sku ?? item.productIds?.[0],
+    purchaseToken: item.purchaseToken ?? item.purchaseTokenAndroid,
+    transactionReceipt: item.transactionReceipt ?? item.transactionReceiptIOS ?? item.originalJson ?? item.dataAndroid,
+  };
+}
+
+async function fetchStoreSubscriptions(productIds: string[]): Promise<any[]> {
+  if (typeof RNIap.fetchProducts === 'function') {
+    const result = await RNIap.fetchProducts({ skus: productIds, type: 'subs' });
+    return Array.isArray(result) ? result.map(normalizeSubscriptionProduct) : [];
+  }
+
+  if (typeof RNIap.getSubscriptions === 'function') {
+    try {
+      const result = await RNIap.getSubscriptions({ skus: productIds });
+      return Array.isArray(result) ? result.map(normalizeSubscriptionProduct) : [];
+    } catch (e) {
+      console.warn('[IAP] getSubscriptions({ skus }) failed, trying legacy signature', e);
+      const result = await RNIap.getSubscriptions(productIds);
+      return Array.isArray(result) ? result.map(normalizeSubscriptionProduct) : [];
+    }
+  }
+
+  throw new Error('IAP subscription fetch API bulunamadı');
+}
+
+async function requestStoreSubscription(productId: string, offerToken?: string | null) {
+  if (typeof RNIap.requestSubscription === 'function') {
+    if (Platform.OS === 'android') {
+      return RNIap.requestSubscription({
+        sku: productId,
+        subscriptionOffers: offerToken ? [{ sku: productId, offerToken }] : undefined,
+      });
+    }
+    return RNIap.requestSubscription({ sku: productId });
+  }
+
+  if (typeof RNIap.requestPurchase === 'function') {
+    if (Platform.OS === 'android') {
+      return RNIap.requestPurchase({
+        type: 'subs',
+        request: {
+          google: {
+            skus: [productId],
+            subscriptionOffers: offerToken ? [{ sku: productId, offerToken }] : undefined,
+          },
+        },
+      });
+    }
+    return RNIap.requestPurchase({
+      type: 'subs',
+      request: {
+        apple: { sku: productId },
+      },
+    });
+  }
+
+  throw new Error('IAP purchase API bulunamadı');
+}
+
+async function finishStoreTransaction(purchase: any, isConsumable = false) {
+  try {
+    return await RNIap.finishTransaction({ purchase, isConsumable });
+  } catch (objectSignatureError) {
+    return RNIap.finishTransaction(purchase, isConsumable);
+  }
+}
+
 /**
  * Plan için geçerli promo offerId'ı döndürür.
  * Önce sunucu kampanya verisine (cachedApiCampaigns → FALLBACK_CAMPAIGNS) bakar;
@@ -230,7 +323,8 @@ export async function initIAP(): Promise<boolean> {
 
     // Purchase update listener
     purchaseUpdateSubscription = RNIap.purchaseUpdatedListener(async (purchase) => {
-      const raw = purchase as any;
+      const normalizedPurchase = normalizePurchaseObject(purchase);
+      const raw = normalizedPurchase as any;
 
       // Tüm alan adlarını logla — hangi versiyonda hangi key geliyor tespit et
       console.log('[IAP] Purchase update (raw keys):', Object.keys(raw));
@@ -251,7 +345,7 @@ export async function initIAP(): Promise<boolean> {
       if (receipt) {
         try {
           // Backend'e receipt gönder ve doğrulat
-          await verifyPurchase(purchase);
+          await verifyPurchase(normalizedPurchase);
 
           // Doğrulama başarılı — navigasyon ve sync için event gönder
           emitEvent('premium:subscribed');
@@ -271,7 +365,7 @@ export async function initIAP(): Promise<boolean> {
         // Acknowledge / finish işlemi doğrulamadan bağımsız — hata olursa sessizce geç
         try {
           if (Platform.OS === 'ios') {
-            await RNIap.finishTransaction(purchase, false);
+            await finishStoreTransaction(normalizedPurchase, false);
           } else if (Platform.OS === 'android' && !raw.isAcknowledgedAndroid) {
             await RNIap.acknowledgePurchaseAndroid(purchaseToken!);
           }
@@ -326,18 +420,7 @@ export async function getSubscriptions(): Promise<Subscription[]> {
     // Android'de her iki plan ayni subscription ID'yi paylasir — tekillestirilmesi gerekir
     const productIds = [...new Set(Object.values(PRODUCT_IDS))];
     console.log('[IAP] getSubscriptions skus:', productIds);
-    let subscriptions: any = null;
-    try {
-      subscriptions = await RNIap.getSubscriptions({ skus: productIds });
-    } catch (e) {
-      console.warn('[IAP] getSubscriptions({ skus }) failed, trying legacy signature', e);
-      try {
-        subscriptions = await RNIap.getSubscriptions(productIds);
-      } catch (e2) {
-        console.error('[IAP] getSubscriptions fallback failed', e2);
-        throw e2;
-      }
-    }
+    const subscriptions: any = await fetchStoreSubscriptions(productIds);
     // Kapsamlı debug log: subscriptionOfferDetails var mı, içinde ne var?
     (subscriptions || []).forEach((s: any) => {
       const details = s.subscriptionOfferDetails;
@@ -481,14 +564,10 @@ export async function purchaseSubscription(plan: SubscriptionPlan): Promise<void
         );
       }
 
-      // react-native-iap v12 Android: subscriptionOffers ile requestSubscription
-      await RNIap.requestSubscription({
-        sku: productId,
-        subscriptionOffers: [{ sku: productId, offerToken }],
-      });
+      await requestStoreSubscription(productId, offerToken);
     } else {
       // iOS
-      await RNIap.requestSubscription({ sku: productId });
+      await requestStoreSubscription(productId);
     }
   } catch (error: any) {
     console.error('[IAP] Purchase error code:', error?.code, 'message:', error?.message);
@@ -500,7 +579,7 @@ export async function purchaseSubscription(plan: SubscriptionPlan): Promise<void
     if (error?.code === 'E_ALREADY_OWNED') {
       console.log('[IAP] E_ALREADY_OWNED alındı — mevcut purchase restore ediliyor...');
       try {
-        const existing = await RNIap.getAvailablePurchases();
+        const existing = (await RNIap.getAvailablePurchases()).map(normalizePurchaseObject);
         const productId = PRODUCT_IDS[plan];
         const match = existing.find((p) => p.productId === productId) || existing[0];
         if (match) {
@@ -634,7 +713,7 @@ async function verifyPurchase(purchase: Purchase): Promise<void> {
  */
 export async function getAvailablePurchases(): Promise<Purchase[]> {
   try {
-    const purchases = await RNIap.getAvailablePurchases();
+    const purchases = (await RNIap.getAvailablePurchases()).map(normalizePurchaseObject);
     console.log('[IAP] Available purchases:', purchases);
     return purchases;
   } catch (error) {
