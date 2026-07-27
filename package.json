@@ -9,7 +9,8 @@
     "build:web": "npx expo export --platform web",
     "lint": "npx expo lint",
     "android": "expo run:android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "android:api36": "node scripts/patch-android-api36.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
@@ -58,9 +59,9 @@
     "react-dom": "19.0.0",
     "react-native": "0.79.6",
     "react-native-gesture-handler": "~2.24.0",
-    "react-native-iap": "^15.6.0",
+    "react-native-iap": "14.4.30",
     "react-native-markdown-display": "^7.0.2",
-    "react-native-nitro-modules": "^0.36.1",
+    "react-native-nitro-modules": "0.31.1",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "react-native-svg": "15.11.2",

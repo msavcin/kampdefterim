@@ -160,7 +160,11 @@ import { getDatabase } from './database';
 import { uploadCampgroundImage } from './campgroundImageApi';
 import { updateCampingAreaOnServer, createCampingAreaOnServer, sanitizeCampingAreaData } from './campingAreaApi';
 import { getRatingsSummary, postRatingForCampground, deleteMyRating, patchRating } from './ratingApi';
-import { evaluateCampingAreaReviews } from './aiReviewApi';
+import {
+  buildReviewEvaluationFallbackForCampground,
+  evaluateCampingAreaReviews,
+  isGenericAIReviewText,
+} from './aiReviewApi';
 
 // Yorum değerlendirmesi senkronizasyonu
 export async function syncRatings(): Promise<boolean> {
@@ -250,7 +254,6 @@ export async function syncRatings(): Promise<boolean> {
       if (__DEV__) console.log(`[syncRatings] 🤖 AI review tetikleniyor: ${campgroundsToEvaluate.size} kamp alanı`);
 
       const MIN_REVIEWS_THRESHOLD = 3;
-      const genericPattern = /google\s*places|detaylı bilgi|kullan[ıi]cı yorumu|detayl[ıi] bilgi/i;
 
       for (const campgroundId of campgroundsToEvaluate) {
         try {
@@ -290,7 +293,7 @@ export async function syncRatings(): Promise<boolean> {
             let reviewCount: number | undefined = aiResult.evaluation.updated_fields?.review_count;
             if (reviewCount === undefined && area) reviewCount = area.review_count;
 
-            const looksGeneric = typeof evalText === 'string' && genericPattern.test(evalText);
+            const looksGeneric = isGenericAIReviewText(evalText);
             const isFew = typeof reviewCount === 'number' && reviewCount < MIN_REVIEWS_THRESHOLD;
 
             // Eğer sunucu generic mesaj döndüyse veya yorum sayısı azsa, force ile yeniden dene
@@ -298,7 +301,7 @@ export async function syncRatings(): Promise<boolean> {
               try {
                 if (__DEV__) console.log(`[syncRatings] ⚙️ Az yorum algılandı veya generic mesaj var, force=true denenecek: ${campgroundId}`);
                 const forced = await evaluateCampingAreaReviews(campgroundId, true);
-                if (forced && forced.success && forced.evaluation && !(forced.evaluation.ai_review_evaluation && genericPattern.test(forced.evaluation.ai_review_evaluation))) {
+                if (forced && forced.success && forced.evaluation && !isGenericAIReviewText(forced.evaluation.ai_review_evaluation)) {
                   // Force ile daha anlamlı bir değerlendirme geldiyse bunu kullan
                   await applyEvaluationToDb(forced.evaluation);
                   if (__DEV__) console.log(`[syncRatings] 🤖 AI (forced) review güncellendi: ${campgroundId}`);
@@ -318,9 +321,15 @@ export async function syncRatings(): Promise<boolean> {
                   } catch {}
                 }
 
-                const countLabel = typeof reviewCount === 'number' ? String(reviewCount) : 'az sayıda';
-                const note = `\n\nNot: Bu kamp alanı için yalnızca ${countLabel} kullanıcı yorumu bulunduğu için değerlendirme sınırlı olabilir.`;
-                const finalText = (evalText || `Bu kamp alanı hakkında ${countLabel} kullanıcı yorumu bulunmaktadır. Detaylı bilgi için Google Places'i ziyaret edebilirsiniz.`) + note;
+                const finalText = await buildReviewEvaluationFallbackForCampground(campgroundId, {
+                  campgroundName: (area as any)?.name,
+                  reviewCount: typeof reviewCount === 'number' ? reviewCount : null,
+                  averageRating: typeof (area as any)?.rating === 'number' ? (area as any).rating : null,
+                  googlePlaceId:
+                    aiResult.evaluation.google_place_id ||
+                    (area as any)?.google_place_id ||
+                    null,
+                });
 
                 const genAt = (aiResult && aiResult.evaluation && aiResult.evaluation.ai_review_generated_at) ? aiResult.evaluation.ai_review_generated_at : new Date().toISOString();
                 await db.insertOrUpdateCampingArea({
@@ -356,8 +365,12 @@ export async function syncRatings(): Promise<boolean> {
               if (reviewCount === undefined) {
                 try { const summary = await getRatingsSummary(campgroundId); reviewCount = summary?.total_count ?? summary?.count ?? reviewCount; } catch {}
               }
-              const countLabel = typeof reviewCount === 'number' ? String(reviewCount) : 'az sayıda';
-              const fallbackText = `Bu kamp alanı hakkında ${countLabel} kullanıcı yorumu bulunmaktadır. Detaylı bilgi için Google Places'i ziyaret edebilirsiniz.\n\nNot: Yorum sayısı az olduğu için değerlendirme sınırlı olabilir.`;
+              const fallbackText = await buildReviewEvaluationFallbackForCampground(campgroundId, {
+                campgroundName: (area as any)?.name,
+                reviewCount: typeof reviewCount === 'number' ? reviewCount : null,
+                averageRating: typeof (area as any)?.rating === 'number' ? (area as any).rating : null,
+                googlePlaceId: (area as any)?.google_place_id || null,
+              });
               await db.insertOrUpdateCampingArea({ ...(area || {}), ai_review_evaluation: fallbackText, ai_review_generated_at: new Date().toISOString() } as any);
               if (__DEV__) console.log(`[syncRatings] 🤖 AI review (error fallback) kaydedildi: ${campgroundId}`);
             } catch (saveErr) {

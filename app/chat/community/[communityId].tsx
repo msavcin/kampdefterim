@@ -610,8 +610,13 @@ export default function CommunityChatScreen() {
     }
   };
 
+  const composerKeyboardOffset =
+    Platform.OS === 'android' && keyboardVisible
+      ? Math.max(0, keyboardHeight - insets.bottom)
+      : 0;
+
   if (loading) return (
-    <KeyboardAvoidingView style={{ flex:1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView style={{ flex:1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
       <SafeAreaView style={{flex:1, backgroundColor: colors.background, justifyContent:'center', alignItems:'center'}}>
         <ActivityIndicator />
       </SafeAreaView>
@@ -619,7 +624,7 @@ export default function CommunityChatScreen() {
   );
 
   return (
-    <KeyboardAvoidingView style={{ flex:1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView style={{ flex:1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
       <SafeAreaView edges={keyboardVisible ? ['left','right'] : ['left','right','bottom']} style={themed.screenContainer}>
         <View style={{...themed.screenHeader, flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
           <View>
@@ -682,7 +687,7 @@ export default function CommunityChatScreen() {
           )}
         />
 
-        <View style={{flexDirection:'row', paddingHorizontal:8, paddingVertical:8, paddingBottom: keyboardVisible ? 8 : 8 + insets.bottom, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border}}>
+        <View style={{flexDirection:'row', paddingHorizontal:8, paddingVertical:8, paddingBottom: keyboardVisible ? 8 : 8 + insets.bottom, marginBottom: composerKeyboardOffset, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border}}>
           <TextInput
             style={{flex:1, borderWidth:1, borderColor:colors.border, borderRadius:8, padding:8, backgroundColor: colors.background, color: colors.text}}
             placeholderTextColor={colors.muted}

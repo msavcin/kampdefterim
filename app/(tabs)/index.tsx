@@ -4288,6 +4288,9 @@ export default function MapScreen() {
     : 0;
   const kampfireSheetArea =
     kampfireFocusedArea ?? (showDetailModal ? selectedCampingArea : null) ?? null;
+  const kampfireSelectedCoverImage = kampfireSheetArea
+    ? getAreaCoverImage(kampfireSheetArea)
+    : '';
   const isFilterActive =
     turkeyWideKeys.length > 0 ||
     selectedTags.length < campingTypes.length ||
@@ -6356,13 +6359,22 @@ export default function MapScreen() {
                             { backgroundColor: colors.primaryLight },
                           ]}
                         >
-                          {getAreaCoverImage(kampfireSheetArea) ? (
+                          {kampfireSelectedCoverImage ? (
                             <Image
-                              source={{ uri: getAreaCoverImage(kampfireSheetArea) }}
+                              source={{ uri: kampfireSelectedCoverImage }}
                               style={styles.kampfireSelectedImage}
+                              resizeMode="cover"
                             />
                           ) : (
-                            <Image source={require('../../assets/images/image-placeholder.png')} style={styles.kampfireSelectedImage} />
+                            <Image
+                              source={
+                                scheme === 'dark'
+                                  ? require('../../assets/images/image-placeholder_B.png')
+                                  : require('../../assets/images/image-placeholder.png')
+                              }
+                              style={styles.kampfireSelectedImage}
+                              resizeMode="contain"
+                            />
                           )}
                         </View>
 

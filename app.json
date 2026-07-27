@@ -43,7 +43,10 @@
         "com.android.vending.BILLING"
       ],
       "package": "com.spondylus.boltexponativewind",
-      "versionCode": 60
+      "versionCode": 60,
+      "blockedPermissions": [
+        "android.permission.ACTIVITY_RECOGNITION"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -64,7 +67,7 @@
         "expo-build-properties",
         {
           "android": {
-            "kotlinVersion": "2.2.0",
+            "kotlinVersion": "2.0.21",
             "compileSdkVersion": 36,
             "targetSdkVersion": 36,
             "buildToolsVersion": "36.0.0"
@@ -80,7 +83,6 @@
           "preferSystemPhotoPicker": true
         }
       ],
-      "react-native-iap",
       "./plugins/withIapDimensionStrategy",
       "./plugins/withNetworkIfIOS",
       "./plugins/withRemoveMediaPermissions"

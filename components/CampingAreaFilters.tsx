@@ -1,5 +1,14 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Check, CheckSquare, Square, Map, Crown } from 'lucide-react-native';
 import { campingTypes } from '../lib/categories';
@@ -72,6 +81,19 @@ export default function CampingAreaFilters({
   const [provinceQuery, setProvinceQuery] = React.useState('');
   const themed = createThemedStyles(colors);
   const router = useRouter();
+  const filterScrollRef = React.useRef<ScrollView>(null);
+  const provinceSectionYRef = React.useRef(0);
+  const provinceSearchActive = provinceQuery.trim().length > 0;
+
+  const scrollProvinceSearchIntoView = React.useCallback(() => {
+    const delay = Platform.OS === 'ios' ? 260 : 120;
+    setTimeout(() => {
+      filterScrollRef.current?.scrollTo({
+        y: Math.max(0, provinceSectionYRef.current - 14),
+        animated: true,
+      });
+    }, delay);
+  }, []);
   // Türkiye geneli checkbox gösterilecek filtre anahtarları
   const TURKEY_WIDE_KEYS = ['own', 'community', 'friend'];
   // Her kamp türü için alan sayısını hesapla
@@ -107,8 +129,22 @@ export default function CampingAreaFilters({
     }).length;
   };
   return (
-    <View style={styles.wrapper}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
+    <KeyboardAvoidingView
+      style={styles.wrapper}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 72 : 0}
+    >
+      <ScrollView
+        ref={filterScrollRef}
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        contentContainerStyle={[
+          styles.scrollContent,
+          provinceSearchActive && styles.scrollContentProvinceSearchActive,
+        ]}
+      >
       {/* Kullanıcı Filtresi Bölümü */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -202,13 +238,24 @@ export default function CampingAreaFilters({
         </View>
       </View>
 
-      <View style={styles.section}>
+      <View
+        style={styles.section}
+        onLayout={(event) => {
+          provinceSectionYRef.current = event.nativeEvent.layout.y;
+        }}
+      >
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>İl Filtresi</Text>
         </View>
         <TextInput
           value={provinceQuery}
-          onChangeText={setProvinceQuery}
+          onChangeText={(text) => {
+            setProvinceQuery(text);
+            if (text.trim().length > 0) {
+              scrollProvinceSearchIntoView();
+            }
+          }}
+          onFocus={scrollProvinceSearchIntoView}
           placeholder="İl ara..."
           placeholderTextColor={colors.muted}
           style={[styles.provinceSearchInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
@@ -344,7 +391,7 @@ export default function CampingAreaFilters({
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -354,6 +401,12 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 8,
+  },
+  scrollContentProvinceSearchActive: {
+    paddingBottom: 320,
   },
   section: {
     marginBottom: 24,

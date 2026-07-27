@@ -20,7 +20,11 @@ import { getCachedImagePath } from '@/lib/imageCache';
 import { CampingArea, getDatabase } from '@/lib/database';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { deleteCampingAreaSmart } from '@/lib/syncManager';
-import { parseAIReviewText } from '@/lib/aiReviewApi';
+import {
+  buildReviewEvaluationFallbackForCampground,
+  isGenericAIReviewText,
+  parseAIReviewText,
+} from '@/lib/aiReviewApi';
 // Arkadaş tipini tanımla
 // API /friends?user_id=X endpoint'i { id, name, email, avatar_url } formatında döner
 // (types/friend.ts ile uyumlu). user_id de olabilir — her iki alanı destekliyoruz.
@@ -500,9 +504,61 @@ export default function CampingAreaDetailModal({
   const [ratingFormLoading, setRatingFormLoading] = useState(false);
   const [ratingFormDefaults, setRatingFormDefaults] = useState<{ rating?: number; comment?: string; anon_name?: string } | null>(null);
 
-  // AI review metnini parse et (summary, pros, cons)
+  // AI review metnini parse et (summary, pros, cons).
+  // Backend bazen sadece "Google Places üzerinde X yorum var" metni döndürebiliyor;
+  // bu durumda gösterimde yorum metinlerinden artı/eksi üreten fallback kullanılır.
   const rawAIText = (campingArea as any)?.ai_review_evaluation;
-  const parsedAIReview = parseAIReviewText(rawAIText);
+  const [displayAIReviewText, setDisplayAIReviewText] = useState<string | null>(
+    typeof rawAIText === 'string' ? rawAIText : null,
+  );
+  const effectiveAIReviewText =
+    typeof displayAIReviewText === 'string' ? displayAIReviewText : rawAIText;
+  const parsedAIReview = parseAIReviewText(effectiveAIReviewText);
+
+  useEffect(() => {
+    let cancelled = false;
+    const initialText = typeof rawAIText === 'string' ? rawAIText : null;
+    setDisplayAIReviewText(initialText);
+
+    if (!visible || !campgroundApiId || !initialText || !isGenericAIReviewText(initialText)) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    buildReviewEvaluationFallbackForCampground(campgroundApiId, {
+      campgroundName: (campingArea as any)?.name,
+      reviewCount:
+        typeof (campingArea as any)?.review_count === 'number'
+          ? (campingArea as any).review_count
+          : null,
+      averageRating:
+        typeof (campingArea as any)?.rating === 'number'
+          ? (campingArea as any).rating
+          : null,
+      googlePlaceId: (campingArea as any)?.google_place_id || null,
+    })
+      .then((fallbackText) => {
+        if (!cancelled && fallbackText) {
+          setDisplayAIReviewText(fallbackText);
+        }
+      })
+      .catch((error) => {
+        if (__DEV__) console.warn('[AIReview] Gösterim fallback üretilemedi:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    visible,
+    campgroundApiId,
+    rawAIText,
+    (campingArea as any)?.name,
+    (campingArea as any)?.review_count,
+    (campingArea as any)?.rating,
+    (campingArea as any)?.google_place_id,
+  ]);
 
   
 
@@ -1221,7 +1277,7 @@ export default function CampingAreaDetailModal({
           )}
 
           {/* AI Review Evaluation - Sadece owner_id boş olanlar için gösterilir */}
-          {!(campingArea as any).owner_id && (campingArea as any).ai_review_evaluation && typeof (campingArea as any).ai_review_evaluation === 'string' && (
+          {!(campingArea as any).owner_id && effectiveAIReviewText && typeof effectiveAIReviewText === 'string' && (
             <View style={[styles.section, { backgroundColor: colors.surface }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
                 <View style={{
@@ -1287,7 +1343,7 @@ export default function CampingAreaDetailModal({
               }}>
                 <AlertTriangle size={12} color={colors.muted} />
                 <Text style={{ fontSize: 11, color: colors.muted, fontStyle: 'italic' }}>
-                  Bu değerlendirme Google Places yorumlarından AI tarafından oluşturulmuştur
+                  Bu değerlendirme kullanıcı yorumlarından otomatik olarak oluşturulmuştur
                 </Text>
               </View>
             </View>
