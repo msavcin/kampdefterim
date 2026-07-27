@@ -77,10 +77,12 @@ function ProfileThemeSectionComponent() {
     if (id === 'kampfireGold') {
       if (darkPaletteId !== 'D4') setDarkPaletteId('D4');
       if (lightPaletteId !== 'L4') setLightPaletteId('L4');
-    } else if (id === 'classic' && isPremium) {
-      // Premium kullanıcılar klasik arayüzü seçtiğinde makul bir varsayılan ata
+    } else if (id === 'classic') {
+      // Klasik arayüz varsayılanı:
+      // Premium olmayan kullanıcılar L2/D2; premium kullanıcılar mevcut klasik öneri L2/D3.
       if (lightPaletteId !== 'L2') setLightPaletteId('L2');
-      if (darkPaletteId !== 'D3') setDarkPaletteId('D3');
+      const nextDark: DarkPaletteId = isPremium ? 'D3' : 'D2';
+      if (darkPaletteId !== nextDark) setDarkPaletteId(nextDark);
     }
   };
 

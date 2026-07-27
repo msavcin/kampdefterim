@@ -220,15 +220,24 @@ export function buildMapPopupTheme(
           .location-picker-cursor {
             cursor: crosshair !important;
           }
+          .leaflet-popup {
+            max-width: calc(100vw - 32px) !important;
+          }
           .leaflet-popup-content-wrapper {
             background: ${t.surface};
             color: ${t.text};
             border-radius: ${t.isKampfire ? '16px' : '12px'};
             border: 1px solid ${t.border};
             box-shadow: 0 12px 36px ${t.isKampfire ? (isDark ? 'rgba(0,0,0,0.5)' : 'rgba(139,106,47,0.14)') : isDark ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.12)'};
+            max-width: calc(100vw - 40px) !important;
+            overflow: hidden;
           }
           .leaflet-popup-content {
             margin: ${t.isKampfire ? '10px 12px' : '13px 12px'};
+            width: auto !important;
+            max-width: calc(100vw - 64px) !important;
+            overflow: hidden;
+            box-sizing: border-box;
           }
           .leaflet-popup-tip {
             background: ${t.surface};
@@ -316,7 +325,7 @@ export function popupInlineStyles(t: MapPopupTheme) {
   return {
     imageBoxBg: t.imagePlaceholderBg,
     imagePlaceholderFg: t.imagePlaceholderFg,
-    popupCard: `display:flex;flex-direction:row;gap:0;min-width:320px;max-width:380px;align-items:stretch;background:${t.surface};border:1px solid ${t.border};border-radius:16px;overflow:hidden;`,
+    popupCard: `display:flex;flex-direction:row;gap:0;width:min(320px, calc(100vw - 64px));min-width:0;max-width:calc(100vw - 64px);box-sizing:border-box;align-items:stretch;background:${t.surface};border:1px solid ${t.border};border-radius:16px;overflow:hidden;`,
     favoriteBtn: (isFavorite: boolean) =>
       `font-size:0;color:${t.danger};width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:${
         isFavorite ? t.favoriteBgActive : t.favoriteBg

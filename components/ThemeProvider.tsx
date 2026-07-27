@@ -125,6 +125,8 @@ const STORAGE_KEY_DARK = '@theme_dark_palette_id';
 const STORAGE_KEY_VARIANT = '@theme_variant_id';
 const STORAGE_KEY_KAMPFIRE_AUTO_APPLIED = '@theme_kampfire_auto_applied';
 const STORAGE_KEY_VARIANT_MANUAL = '@theme_variant_manual';
+const CLASSIC_NON_PREMIUM_LIGHT: LightPaletteId = 'L2';
+const CLASSIC_NON_PREMIUM_DARK: DarkPaletteId = 'D2';
 /** Eski tek-palet key (migration) */
 const STORAGE_KEY_PALETTE_LEGACY = '@theme_palette_id';
 
@@ -226,9 +228,15 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
         setIsPremiumState(prem);
         AsyncStorage.setItem('@cached_is_premium', prem ? '1' : '0').catch(() => {});
         if (!prem) {
-          // Premium olmayan kullanıcıyı klasik arayüze zorla
+          // Premium olmayan kullanıcıyı klasik arayüze ve klasik default L2/D2 paletine zorla
           setThemeVariantIdState(defaultThemeVariantId);
-          AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
+          setLightPaletteIdState(CLASSIC_NON_PREMIUM_LIGHT);
+          setDarkPaletteIdState(CLASSIC_NON_PREMIUM_DARK);
+          AsyncStorage.multiSet([
+            [STORAGE_KEY_VARIANT, defaultThemeVariantId],
+            [STORAGE_KEY_LIGHT, CLASSIC_NON_PREMIUM_LIGHT],
+            [STORAGE_KEY_DARK, CLASSIC_NON_PREMIUM_DARK],
+          ]).catch(() => {});
           AsyncStorage.removeItem(STORAGE_KEY_KAMPFIRE_AUTO_APPLIED).catch(() => {});
           return;
         }
@@ -330,12 +338,28 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         }
 
+        // Non-premium + klasik ilk açılış default paletleri: L2 / D2.
+        // Kullanıcının daha önce manuel kaydettiği L1/L3/D1/D3 seçimleri varsa korunur;
+        // ancak hiç seçim yoksa eski L3/D3 yerine L2/D2 ile açılır.
+        if (!resolvedPremium && !light) {
+          setLightPaletteIdState(CLASSIC_NON_PREMIUM_LIGHT);
+        }
+        if (!resolvedPremium && !dark) {
+          setDarkPaletteIdState(CLASSIC_NON_PREMIUM_DARK);
+        }
+
         // Tema varyantı yüklenirken premium kısıtlarını uygula
         if (savedVariant && isThemeVariantId(savedVariant)) {
           if (savedVariant === 'kampfireGold' && !resolvedPremium) {
-            // Non-premium kullanıcı için Kampfire önbellekliyse zorla klasik'e çek
+            // Non-premium kullanıcı için Kampfire önbellekliyse zorla klasik + L2/D2'ye çek
             setThemeVariantIdState(defaultThemeVariantId);
-            AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
+            setLightPaletteIdState(CLASSIC_NON_PREMIUM_LIGHT);
+            setDarkPaletteIdState(CLASSIC_NON_PREMIUM_DARK);
+            AsyncStorage.multiSet([
+              [STORAGE_KEY_VARIANT, defaultThemeVariantId],
+              [STORAGE_KEY_LIGHT, CLASSIC_NON_PREMIUM_LIGHT],
+              [STORAGE_KEY_DARK, CLASSIC_NON_PREMIUM_DARK],
+            ]).catch(() => {});
           } else if (resolvedPremium && savedManualVariant !== '1') {
             // İlk kurulum / ilk premium login: manuel tercih yoksa Kampfire'a otomatik geç.
             setThemeVariantIdState('kampfireGold');
@@ -392,7 +416,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     // Non-premium kullanıcıların Kampfire Gold'u seçmesine izin verme
     if (id === 'kampfireGold' && !isPremium) {
       setThemeVariantIdState(defaultThemeVariantId);
-      AsyncStorage.setItem(STORAGE_KEY_VARIANT, defaultThemeVariantId).catch(() => {});
+      setLightPaletteIdState(CLASSIC_NON_PREMIUM_LIGHT);
+      setDarkPaletteIdState(CLASSIC_NON_PREMIUM_DARK);
+      AsyncStorage.multiSet([
+        [STORAGE_KEY_VARIANT, defaultThemeVariantId],
+        [STORAGE_KEY_LIGHT, CLASSIC_NON_PREMIUM_LIGHT],
+        [STORAGE_KEY_DARK, CLASSIC_NON_PREMIUM_DARK],
+      ]).catch(() => {});
       return;
     }
     setThemeVariantIdState(id);
@@ -430,6 +460,25 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
       AsyncStorage.setItem(STORAGE_KEY_DARK, 'D4').catch(() => {});
     }
   }, [themeVariantId, lightPaletteId, darkPaletteId]);
+
+  useEffect(() => {
+    if (isPremium || themeVariantId !== defaultThemeVariantId) return;
+    let changed = false;
+    const updates: [string, string][] = [];
+    if (lightPaletteId === 'L4') {
+      setLightPaletteIdState(CLASSIC_NON_PREMIUM_LIGHT);
+      updates.push([STORAGE_KEY_LIGHT, CLASSIC_NON_PREMIUM_LIGHT]);
+      changed = true;
+    }
+    if (darkPaletteId === 'D4') {
+      setDarkPaletteIdState(CLASSIC_NON_PREMIUM_DARK);
+      updates.push([STORAGE_KEY_DARK, CLASSIC_NON_PREMIUM_DARK]);
+      changed = true;
+    }
+    if (changed) {
+      AsyncStorage.multiSet(updates).catch(() => {});
+    }
+  }, [isPremium, themeVariantId, lightPaletteId, darkPaletteId]);
 
   const colors: ThemeColors =
     scheme === 'dark'

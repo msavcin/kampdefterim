@@ -5938,7 +5938,7 @@ export default function MapScreen() {
                     >
                       <Binoculars size={24} color="#fff" />
                     </TouchableOpacity>
-                    <Text style={{ marginTop: 6, fontSize: 12, color: colors.primary, fontWeight: '700' }}>Yakındaki Alanları Göster</Text>
+                    <Text style={{ marginTop: 6, fontSize: 12, color: colors.primary, fontWeight: '700' }}></Text>
                   </View>
                 </View>
             )}
