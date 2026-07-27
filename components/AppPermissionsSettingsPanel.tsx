@@ -6,8 +6,9 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from 'react-native';
-import { Crown, Save, ShieldCheck } from 'lucide-react-native';
+import { Bell, Crown, Save, ShieldCheck, Smartphone } from 'lucide-react-native';
 import { useTheme } from './ThemeProvider';
 import {
   getAppPermissionsSettings,
@@ -19,12 +20,24 @@ export default function AppPermissionsSettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [limitText, setLimitText] = useState('10');
+  const [latestVersion, setLatestVersion] = useState('');
+  const [minSupportedVersion, setMinSupportedVersion] = useState('');
+  const [updateRequired, setUpdateRequired] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState('');
+  const [androidUrl, setAndroidUrl] = useState('');
+  const [iosUrl, setIosUrl] = useState('');
 
   const load = async () => {
     try {
       setLoading(true);
       const settings = await getAppPermissionsSettings();
       setLimitText(String(settings.nonPremiumCampingAreaLimit));
+      setLatestVersion(settings.appLatestVersion || '');
+      setMinSupportedVersion(settings.appMinSupportedVersion || '');
+      setUpdateRequired(!!settings.appUpdateRequired);
+      setUpdateMessage(settings.appUpdateMessage || '');
+      setAndroidUrl(settings.appUpdateAndroidUrl || '');
+      setIosUrl(settings.appUpdateIosUrl || '');
     } catch (error) {
       console.warn('[AppPermissionsSettingsPanel] yükleme hatası:', error);
     } finally {
@@ -47,9 +60,15 @@ export default function AppPermissionsSettingsPanel() {
       setSaving(true);
       const ok = await updateAppPermissionsSettings({
         nonPremiumCampingAreaLimit: parsed,
+        appLatestVersion: latestVersion.trim(),
+        appMinSupportedVersion: minSupportedVersion.trim(),
+        appUpdateRequired: updateRequired,
+        appUpdateMessage: updateMessage.trim(),
+        appUpdateAndroidUrl: androidUrl.trim(),
+        appUpdateIosUrl: iosUrl.trim(),
       });
       if (!ok) throw new Error('Ayar kaydedilemedi');
-      Alert.alert('Başarılı', 'Premium olmayan kullanıcı kamp alanı limiti güncellendi.');
+      Alert.alert('Başarılı', 'Uygulama ve izin ayarları güncellendi.');
       await load();
     } catch (error: any) {
       Alert.alert('Hata', error?.message || 'Ayar kaydedilemedi.');
@@ -156,6 +175,177 @@ export default function AppPermissionsSettingsPanel() {
               sınırsız
             </Text>
           </View>
+        </View>
+
+        <View
+          style={{
+            marginTop: 4,
+            paddingTop: 14,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            gap: 10,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: colors.primaryLight,
+              }}
+            >
+              <Bell size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }}>
+                Sürüm güncelleme bildirimi
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 3, lineHeight: 17 }}>
+                Uygulama açılışında daha yeni sürüm varsa kullanıcıya bildirim gösterilir.
+              </Text>
+            </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', marginBottom: 6 }}>
+                Son sürüm
+              </Text>
+              <TextInput
+                value={latestVersion}
+                onChangeText={setLatestVersion}
+                placeholder="örn. 1.3.28"
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 12,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  color: colors.text,
+                  backgroundColor: colors.background,
+                  fontSize: 14,
+                  fontWeight: '700',
+                }}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', marginBottom: 6 }}>
+                Minimum sürüm
+              </Text>
+              <TextInput
+                value={minSupportedVersion}
+                onChangeText={setMinSupportedVersion}
+                placeholder="opsiyonel"
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 12,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  color: colors.text,
+                  backgroundColor: colors.background,
+                  fontSize: 14,
+                  fontWeight: '700',
+                }}
+              />
+            </View>
+          </View>
+
+          <View
+            style={{
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.background,
+              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+              <Smartphone size={16} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>
+                  Zorunlu güncelleme
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                  Açıkken “Daha sonra” seçeneği gösterilmez.
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={updateRequired}
+              onValueChange={setUpdateRequired}
+              trackColor={{ false: colors.border, true: colors.primaryLight }}
+              thumbColor={updateRequired ? colors.primary : colors.muted}
+            />
+          </View>
+
+          <TextInput
+            value={updateMessage}
+            onChangeText={setUpdateMessage}
+            placeholder="Güncelleme mesajı"
+            placeholderTextColor={colors.muted}
+            multiline
+            style={{
+              minHeight: 78,
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              color: colors.text,
+              backgroundColor: colors.background,
+              fontSize: 13,
+              textAlignVertical: 'top',
+            }}
+          />
+
+          <TextInput
+            value={androidUrl}
+            onChangeText={setAndroidUrl}
+            placeholder="Android güncelleme linki"
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            style={{
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              color: colors.text,
+              backgroundColor: colors.background,
+              fontSize: 12,
+            }}
+          />
+
+          <TextInput
+            value={iosUrl}
+            onChangeText={setIosUrl}
+            placeholder="iOS güncelleme linki"
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            style={{
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              color: colors.text,
+              backgroundColor: colors.background,
+              fontSize: 12,
+            }}
+          />
         </View>
 
         <TouchableOpacity

@@ -25,11 +25,15 @@ export interface AIReviewSettings {
 
 export interface AppRuntimeSettings {
   nonPremiumCampingAreaLimit: number;
+  appLatestVersion: string;
+  appMinSupportedVersion: string;
+  appUpdateRequired: boolean;
+  appUpdateMessage: string;
+  appUpdateAndroidUrl: string;
+  appUpdateIosUrl: string;
 }
 
-export interface AppPermissionsSettings {
-  nonPremiumCampingAreaLimit: number;
-}
+export interface AppPermissionsSettings extends AppRuntimeSettings {}
 
 /**
  * Tüm admin ayarlarını getirir (sadece superadmin)
@@ -135,28 +139,45 @@ export async function createAdminSetting(
  * Mobil uygulama runtime ayarlarını getirir.
  * Bu endpoint superadmin olmayan kullanıcılar tarafından da okunabilir güvenli değerler döndürür.
  */
+const DEFAULT_APP_RUNTIME_SETTINGS: AppRuntimeSettings = {
+  nonPremiumCampingAreaLimit: 10,
+  appLatestVersion: '',
+  appMinSupportedVersion: '',
+  appUpdateRequired: false,
+  appUpdateMessage: "Kamp Defterim'in yeni bir sürümü hazır. Daha iyi performans ve yeni özellikler için güncelleyin.",
+  appUpdateAndroidUrl: 'https://play.google.com/store/apps/details?id=com.spondylus.boltexponativewind',
+  appUpdateIosUrl: 'https://apps.apple.com/tr/app/kamp-defterim/id6759046939?l=tr',
+};
+
+function parseBooleanSetting(value: unknown): boolean {
+  return String(value ?? '').toLowerCase() === 'true' || String(value ?? '') === '1';
+}
+
 export async function getAppRuntimeSettings(): Promise<AppRuntimeSettings> {
   try {
     const response = await apiFetch('/admin/app-config', { method: 'GET' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    const rawLimit = data?.settings?.non_premium_camping_area_limit;
-    const parsedLimit = Number.parseInt(String(rawLimit ?? '10'), 10);
+    const raw = data?.settings || {};
+    const parsedLimit = Number.parseInt(String(raw.non_premium_camping_area_limit ?? DEFAULT_APP_RUNTIME_SETTINGS.nonPremiumCampingAreaLimit), 10);
     return {
       nonPremiumCampingAreaLimit:
-        Number.isFinite(parsedLimit) && parsedLimit >= 0 ? parsedLimit : 10,
+        Number.isFinite(parsedLimit) && parsedLimit >= 0 ? parsedLimit : DEFAULT_APP_RUNTIME_SETTINGS.nonPremiumCampingAreaLimit,
+      appLatestVersion: String(raw.app_latest_version ?? DEFAULT_APP_RUNTIME_SETTINGS.appLatestVersion).trim(),
+      appMinSupportedVersion: String(raw.app_min_supported_version ?? DEFAULT_APP_RUNTIME_SETTINGS.appMinSupportedVersion).trim(),
+      appUpdateRequired: parseBooleanSetting(raw.app_update_required ?? DEFAULT_APP_RUNTIME_SETTINGS.appUpdateRequired),
+      appUpdateMessage: String(raw.app_update_message ?? DEFAULT_APP_RUNTIME_SETTINGS.appUpdateMessage),
+      appUpdateAndroidUrl: String(raw.app_update_android_url ?? DEFAULT_APP_RUNTIME_SETTINGS.appUpdateAndroidUrl),
+      appUpdateIosUrl: String(raw.app_update_ios_url ?? DEFAULT_APP_RUNTIME_SETTINGS.appUpdateIosUrl),
     };
   } catch (error) {
     console.warn('[AdminSettings] getAppRuntimeSettings fallback kullanıyor:', error);
-    return { nonPremiumCampingAreaLimit: 10 };
+    return DEFAULT_APP_RUNTIME_SETTINGS;
   }
 }
 
 export async function getAppPermissionsSettings(): Promise<AppPermissionsSettings> {
-  const runtime = await getAppRuntimeSettings();
-  return {
-    nonPremiumCampingAreaLimit: runtime.nonPremiumCampingAreaLimit,
-  };
+  return getAppRuntimeSettings();
 }
 
 export async function updateAppPermissionsSettings(
@@ -165,19 +186,40 @@ export async function updateAppPermissionsSettings(
   try {
     const updates: Promise<boolean>[] = [];
 
-    if (settings.nonPremiumCampingAreaLimit !== undefined) {
-      const key = 'non_premium_camping_area_limit';
-      const value = String(settings.nonPremiumCampingAreaLimit);
+    const queueSettingUpdate = (key: string, value: string, description: string) => {
       updates.push(
         updateAdminSetting(key, value).then(async (ok) => {
           if (ok) return true;
-          return createAdminSetting(
-            key,
-            value,
-            'Premium olmayan kullanıcıların ekleyebileceği maksimum kamp alanı sayısı'
-          );
+          return createAdminSetting(key, value, description);
         })
       );
+    };
+
+    if (settings.nonPremiumCampingAreaLimit !== undefined) {
+      queueSettingUpdate(
+        'non_premium_camping_area_limit',
+        String(settings.nonPremiumCampingAreaLimit),
+        'Premium olmayan kullanıcıların ekleyebileceği maksimum kamp alanı sayısı'
+      );
+    }
+
+    if (settings.appLatestVersion !== undefined) {
+      queueSettingUpdate('app_latest_version', settings.appLatestVersion, 'Mobil uygulama için yayınlanan son sürüm');
+    }
+    if (settings.appMinSupportedVersion !== undefined) {
+      queueSettingUpdate('app_min_supported_version', settings.appMinSupportedVersion, 'Zorunlu güncelleme için minimum desteklenen sürüm');
+    }
+    if (settings.appUpdateRequired !== undefined) {
+      queueSettingUpdate('app_update_required', String(settings.appUpdateRequired), 'Yeni sürüm güncellemesi zorunlu mu');
+    }
+    if (settings.appUpdateMessage !== undefined) {
+      queueSettingUpdate('app_update_message', settings.appUpdateMessage, 'Yeni sürüm bildirimi mesajı');
+    }
+    if (settings.appUpdateAndroidUrl !== undefined) {
+      queueSettingUpdate('app_update_android_url', settings.appUpdateAndroidUrl, 'Android güncelleme mağaza bağlantısı');
+    }
+    if (settings.appUpdateIosUrl !== undefined) {
+      queueSettingUpdate('app_update_ios_url', settings.appUpdateIosUrl, 'iOS güncelleme mağaza bağlantısı');
     }
 
     const results = await Promise.all(updates);

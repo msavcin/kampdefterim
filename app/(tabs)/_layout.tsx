@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Tabs, useRouter } from 'expo-router';
 import { getMe } from '../../lib/userCommunityApi';
-import { checkAndHandleAppVersion } from '../../lib/appVersion';
+import { checkAndHandleAppVersion, compareVersions, getCurrentAppVersion } from '../../lib/appVersion';
 import { getDatabase } from '../../lib/database';
 import {
   Map,
@@ -14,9 +14,10 @@ import {
   Compass,
   Plus,
 } from 'lucide-react-native';
-import { View, TouchableOpacity, Text, AppState, Modal, Dimensions } from 'react-native';
+import { View, TouchableOpacity, Text, AppState, Modal, Dimensions, Alert, Linking, Platform } from 'react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const APP_UPDATE_DISMISSED_VERSION_KEY = '@app_update_dismissed_version';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -27,6 +28,7 @@ import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { offlineTransportManager } from '../../lib/offlineTransport';
 import { incrementOfflineUnread, clearAllOfflineUnread } from '../../lib/offlineUnread';
 import { emitChatEvent } from '../../lib/chatEvents';
+import { getAppRuntimeSettings } from '../../lib/adminSettingsApi';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -42,6 +44,121 @@ export default function TabLayout() {
   const tabBarBorderColor = colors.tabBarBorder;
   const tabBarActiveTint = colors.tabBarActive;
   const tabBarInactiveTint = colors.tabBarInactive;
+
+  const checkRemoteAppUpdateNotice = async () => {
+    try {
+      if (__DEV__) console.log('[APP_UPDATE] Kontrol başladı');
+
+      const settings = await getAppRuntimeSettings();
+      const latestVersion = settings.appLatestVersion?.trim();
+      const currentVersion = getCurrentAppVersion();
+      const minimumVersion = settings.appMinSupportedVersion?.trim();
+      const targetVersion = (() => {
+        if (latestVersion && minimumVersion) {
+          return compareVersions(latestVersion, minimumVersion) >= 0
+            ? latestVersion
+            : minimumVersion;
+        }
+        return latestVersion || minimumVersion || '';
+      })();
+
+      if (__DEV__) {
+        console.log('[APP_UPDATE] Runtime settings:', JSON.stringify({
+          currentVersion,
+          latestVersion,
+          minimumVersion,
+          targetVersion,
+          required: settings.appUpdateRequired,
+          androidUrl: settings.appUpdateAndroidUrl,
+          iosUrl: settings.appUpdateIosUrl,
+        }));
+      }
+
+      if (!targetVersion) {
+        if (__DEV__) console.log('[APP_UPDATE] app_latest_version/app_min_supported_version boş, bildirim gösterilmeyecek');
+        return;
+      }
+
+      const versionCompare = compareVersions(targetVersion, currentVersion);
+      const latestCompare = latestVersion ? compareVersions(latestVersion, currentVersion) : -1;
+      const belowMinimum = !!minimumVersion && compareVersions(currentVersion, minimumVersion) < 0;
+      // `Daha Sonra` seçeneğini yalnızca superadmin'in Zorunlu güncelleme ayarı belirler.
+      // Minimum sürüm bilgi/karşılaştırma için kullanılır; required=false iken opsiyonel bildirim kalır.
+      const forceUpdate = !!settings.appUpdateRequired;
+
+      if (__DEV__) {
+        console.log('[APP_UPDATE] Version compare:', JSON.stringify({
+          latestMinusCurrent: latestCompare,
+          targetMinusCurrent: versionCompare,
+          belowMinimum,
+          forceUpdate,
+        }));
+      }
+
+      if (versionCompare <= 0 && !belowMinimum) {
+        if (__DEV__) console.log('[APP_UPDATE] Yeni sürüm yok, bildirim gösterilmeyecek');
+        return;
+      }
+
+      const dismissedVersion = await AsyncStorage.getItem(APP_UPDATE_DISMISSED_VERSION_KEY);
+      if (__DEV__) console.log('[APP_UPDATE] dismissedVersion:', dismissedVersion, 'forceUpdate:', forceUpdate);
+      if (!forceUpdate && dismissedVersion === targetVersion) {
+        if (__DEV__) console.log('[APP_UPDATE] Bu sürüm daha önce ertelenmiş, bildirim gösterilmeyecek');
+        return;
+      }
+
+      const normalizeStoreUrl = (value: string) => {
+        const match = String(value || '').match(/https?:\/\/[^\s\]\)"']+/);
+        return match ? match[0] : '';
+      };
+      const storeUrl = normalizeStoreUrl(
+        Platform.OS === 'ios'
+          ? settings.appUpdateIosUrl
+          : settings.appUpdateAndroidUrl,
+      );
+      const message = settings.appUpdateMessage?.trim() ||
+        `Kamp Defterim'in ${targetVersion} sürümü hazır. Daha iyi performans ve yeni özellikler için güncelleyin.`;
+
+      const openStore = () => {
+        if (storeUrl) {
+          Linking.openURL(storeUrl).catch(() => {
+            Alert.alert('Bağlantı açılamadı', 'Mağaza bağlantısı açılamadı. Lütfen daha sonra tekrar deneyin.');
+          });
+        }
+      };
+
+      const buttons = forceUpdate
+        ? [
+            {
+              text: 'Güncelle',
+              onPress: openStore,
+              style: 'default' as const,
+            },
+          ]
+        : [
+            {
+              text: 'Daha Sonra',
+              style: 'cancel' as const,
+              onPress: () => AsyncStorage.setItem(APP_UPDATE_DISMISSED_VERSION_KEY, targetVersion).catch(() => {}),
+            },
+            {
+              text: 'Güncelle',
+              onPress: openStore,
+              style: 'default' as const,
+            },
+          ];
+
+      if (__DEV__) console.log('[APP_UPDATE] Alert gösteriliyor');
+      Alert.alert(
+        forceUpdate ? 'Güncelleme gerekli' : 'Yeni sürüm mevcut',
+        `${message}\n\nMevcut sürüm: ${currentVersion}\nYeni sürüm: ${targetVersion}`,
+        buttons,
+        { cancelable: !forceUpdate },
+      );
+    } catch (error) {
+      if (__DEV__) console.warn('[APP_UPDATE] Sürüm kontrolü yapılamadı:', error);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -60,6 +177,10 @@ export default function TabLayout() {
         );
         emit('version_updated');
       }
+      if (__DEV__) console.log('[APP_UPDATE] Kontrol zamanlayıcıya alındı');
+      setTimeout(() => {
+        checkRemoteAppUpdateNotice();
+      }, 800);
       try {
         await getDatabase().init();
       } catch (e) {
