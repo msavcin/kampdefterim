@@ -98,6 +98,7 @@ import {
   buildMapPopupTheme,
   popupInlineStyles,
 } from '@/lib/mapPopupTheme';
+import { getAppRuntimeSettings } from '@/lib/adminSettingsApi';
 
 
 const { width, height } = Dimensions.get('window');
@@ -196,6 +197,7 @@ export default function MapScreen() {
   // Sync progress tracking
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, isLoading: false });
   const isFullSyncInProgressRef = useRef(false); // Ref kullan, state closure problemi için
+  const [nonPremiumCampingAreaLimit, setNonPremiumCampingAreaLimit] = useState(10);
   
   useEffect(() => {
     isMounted.current = true;
@@ -204,6 +206,23 @@ export default function MapScreen() {
       // Tüm timeout'ları temizle
       timeoutRefs.current.forEach(timeout => clearTimeout(timeout));
       timeoutRefs.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const settings = await getAppRuntimeSettings();
+        if (!cancelled && Number.isFinite(settings.nonPremiumCampingAreaLimit)) {
+          setNonPremiumCampingAreaLimit(settings.nonPremiumCampingAreaLimit);
+        }
+      } catch (error) {
+        if (__DEV__) console.warn('[AppSettings] Kamp alanı limiti alınamadı, varsayılan kullanılacak:', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
   // WebView ref
@@ -2384,16 +2403,19 @@ export default function MapScreen() {
 
   // Guest kullanıcılar sadece kendi oluşturduğu kamp alanlarını görebilsin
   const isGuest = user?.role === 'guest';
+  const isPremiumUser = !!(user?.isPremium || user?.offline_enabled);
+  const isSuperAdminUser = user?.role === 'superadmin';
+  const isCampingAreaLimitedUser = !!user?.id && !isPremiumUser && !isSuperAdminUser;
   
-  // Guest kullanıcının oluşturduğu kamp alanı sayısını hesapla
+  // Kullanıcının oluşturduğu kamp alanı sayısını hesapla
   const userCreatedAreasCount = useMemo(() => {
     if (!user?.id) return 0;
     return campingAreas.filter(area => String(area.owner_id) === String(user.id)).length;
   }, [campingAreas, user?.id]);
   
-  const GUEST_LIMIT = 10;
-  const remainingAreas = isGuest ? Math.max(0, GUEST_LIMIT - userCreatedAreasCount) : Infinity;
-  const canAddMoreAreas = isGuest ? userCreatedAreasCount < GUEST_LIMIT : true;
+  const GUEST_LIMIT = nonPremiumCampingAreaLimit;
+  const remainingAreas = isCampingAreaLimitedUser ? Math.max(0, GUEST_LIMIT - userCreatedAreasCount) : Infinity;
+  const canAddMoreAreas = isCampingAreaLimitedUser ? userCreatedAreasCount < GUEST_LIMIT : true;
   
   // filteredCampingAreas'ı memoize et - gereksiz re-render'ları önle
   const filteredCampingAreas = useMemo(() => {
@@ -3753,10 +3775,10 @@ export default function MapScreen() {
       }
       if (data.type === 'locationSelected') {
         // Guest kullanıcı için limit kontrolü
-        if (isGuest && !canAddMoreAreas) {
+        if (isCampingAreaLimitedUser && !canAddMoreAreas) {
           Alert.alert(
             'Kamp Alanı Limiti',
-            `Guest kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+            `Premium olmayan kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
             [
               { text: 'Tamam', style: 'cancel' },
               { 
@@ -3778,10 +3800,10 @@ export default function MapScreen() {
         if (isMounted.current) setShowAddModal(true);
       } else if (data.type === 'addCampingAreaAtCurrentLocation') {
         // Guest kullanıcı için limit kontrolü
-        if (isGuest && !canAddMoreAreas) {
+        if (isCampingAreaLimitedUser && !canAddMoreAreas) {
           Alert.alert(
             'Kamp Alanı Limiti',
-            `Guest kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+            `Premium olmayan kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
             [
               { text: 'Tamam', style: 'cancel' },
               { 
@@ -3906,10 +3928,10 @@ export default function MapScreen() {
     if (!isMounted.current) return;
     
     // Guest kullanıcı için limit kontrolü
-    if (isGuest && !canAddMoreAreas) {
+    if (isCampingAreaLimitedUser && !canAddMoreAreas) {
       Alert.alert(
         'Kamp Alanı Limiti',
-        `Guest kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+        `Premium olmayan kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
         [
           { text: 'Tamam', style: 'cancel' },
           { 
@@ -3938,10 +3960,10 @@ export default function MapScreen() {
     if (!isMounted.current) return;
     
     // Guest kullanıcı için limit kontrolü
-    if (isGuest && !canAddMoreAreas) {
+    if (isCampingAreaLimitedUser && !canAddMoreAreas) {
       Alert.alert(
         'Kamp Alanı Limiti',
-        `Guest kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+        `Premium olmayan kullanıcılar en fazla ${GUEST_LIMIT} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
         [
           { text: 'Tamam', style: 'cancel' },
           { 
@@ -5411,13 +5433,13 @@ export default function MapScreen() {
         <View style={[styles.locationPickerBanner, { backgroundColor: colors.warning + '20', borderBottomColor: colors.warning }]} pointerEvents={isBusy ? 'none' : 'auto'}>
           <View style={{ flex: 1, flexDirection: 'column' }}>
             <Text style={[styles.locationPickerText, { color: colors.warning }]}>📍 Haritada konum seçmek için tıklayın</Text>
-            {isGuest && (
+            {isCampingAreaLimitedUser && (
               <Text style={{ fontSize: 12, color: remainingAreas <= 3 ? colors.danger : colors.muted, marginTop: 6 }}>
                 Kalan kamp alanı hakkı: {remainingAreas}/{GUEST_LIMIT}
               </Text>
             )}
           </View>
-          {isGuest && (
+          {isCampingAreaLimitedUser && (
             <TouchableOpacity
               style={{
                 backgroundColor: colors.primary,
@@ -5483,7 +5505,7 @@ export default function MapScreen() {
               }
             }}
             user={user}
-            isGuest={isGuest}
+            isGuest={isCampingAreaLimitedUser}
             isConnected={isConnected}
           />
           <TouchableOpacity onPress={() => {
@@ -6632,7 +6654,7 @@ export default function MapScreen() {
             favorites={favorites}
             onToggleFavorite={handleToggleFavorite}
             disabled={false}
-            isGuest={isGuest}
+            isGuest={isCampingAreaLimitedUser}
             isConnected={isConnected}
           />
         </View>
@@ -6649,7 +6671,7 @@ export default function MapScreen() {
         }}
         initialLocation={selectedLocation ?? undefined}
         user={user}
-        isGuest={isGuest}
+        isGuest={isCampingAreaLimitedUser}
         remainingAreas={remainingAreas}
         guestLimit={GUEST_LIMIT}
         onSuccess={async () => {

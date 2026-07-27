@@ -23,6 +23,14 @@ export interface AIReviewSettings {
   showInUI: boolean;
 }
 
+export interface AppRuntimeSettings {
+  nonPremiumCampingAreaLimit: number;
+}
+
+export interface AppPermissionsSettings {
+  nonPremiumCampingAreaLimit: number;
+}
+
 /**
  * Tüm admin ayarlarını getirir (sadece superadmin)
  */
@@ -96,6 +104,86 @@ export async function updateAdminSetting(
   } catch (error) {
     console.error(`[AdminSettings] updateAdminSetting(${key}) hatası:`, error);
     console.warn('[AdminSettings] Backend endpoint bulunamadı, güncelleme atlanıyor');
+    return false;
+  }
+}
+
+
+/**
+ * Yeni bir ayar oluşturur (sadece superadmin)
+ */
+export async function createAdminSetting(
+  key: string,
+  value: string,
+  description?: string
+): Promise<boolean> {
+  try {
+    const response = await apiFetch('/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value, description })
+    });
+
+    return response.ok || response.status === 409;
+  } catch (error) {
+    console.error(`[AdminSettings] createAdminSetting(${key}) hatası:`, error);
+    return false;
+  }
+}
+
+/**
+ * Mobil uygulama runtime ayarlarını getirir.
+ * Bu endpoint superadmin olmayan kullanıcılar tarafından da okunabilir güvenli değerler döndürür.
+ */
+export async function getAppRuntimeSettings(): Promise<AppRuntimeSettings> {
+  try {
+    const response = await apiFetch('/admin/app-config', { method: 'GET' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const rawLimit = data?.settings?.non_premium_camping_area_limit;
+    const parsedLimit = Number.parseInt(String(rawLimit ?? '10'), 10);
+    return {
+      nonPremiumCampingAreaLimit:
+        Number.isFinite(parsedLimit) && parsedLimit >= 0 ? parsedLimit : 10,
+    };
+  } catch (error) {
+    console.warn('[AdminSettings] getAppRuntimeSettings fallback kullanıyor:', error);
+    return { nonPremiumCampingAreaLimit: 10 };
+  }
+}
+
+export async function getAppPermissionsSettings(): Promise<AppPermissionsSettings> {
+  const runtime = await getAppRuntimeSettings();
+  return {
+    nonPremiumCampingAreaLimit: runtime.nonPremiumCampingAreaLimit,
+  };
+}
+
+export async function updateAppPermissionsSettings(
+  settings: Partial<AppPermissionsSettings>
+): Promise<boolean> {
+  try {
+    const updates: Promise<boolean>[] = [];
+
+    if (settings.nonPremiumCampingAreaLimit !== undefined) {
+      const key = 'non_premium_camping_area_limit';
+      const value = String(settings.nonPremiumCampingAreaLimit);
+      updates.push(
+        updateAdminSetting(key, value).then(async (ok) => {
+          if (ok) return true;
+          return createAdminSetting(
+            key,
+            value,
+            'Premium olmayan kullanıcıların ekleyebileceği maksimum kamp alanı sayısı'
+          );
+        })
+      );
+    }
+
+    const results = await Promise.all(updates);
+    return results.every(Boolean);
+  } catch (error) {
+    console.error('[AdminSettings] updateAppPermissionsSettings hatası:', error);
     return false;
   }
 }

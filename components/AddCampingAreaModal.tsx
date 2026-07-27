@@ -586,7 +586,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     if (isGuest && remainingAreas !== Infinity && remainingAreas <= 0) {
       Alert.alert(
         'Kamp Alanı Limiti',
-        `Guest kullanıcılar en fazla ${guestLimit} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
+        `Premium olmayan kullanıcılar en fazla ${guestLimit} kamp alanı oluşturabilir. Premium abonelik ile sınırsız kamp alanı oluşturabilirsiniz.`,
         [
           { text: 'Tamam', style: 'cancel' },
           { 
