@@ -1064,10 +1064,10 @@ export default function ChatScreen() {
       Alert.alert('Başarılı', 'Mesaj silindi.');
     };
 
-  const composerKeyboardOffset =
-    Platform.OS === 'android' && keyboardVisible
-      ? Math.max(0, keyboardHeight - insets.bottom)
-      : 0;
+  // Android'de pencere çoğu cihazda zaten adjustResize ile küçülür.
+  // Ek marginBottom vermek özellikle Android 12 ve eski cihazlarda klavye ile composer
+  // arasında büyük boşluk oluşturuyor; bu yüzden Android offset'i 0 tutulur.
+  const composerKeyboardOffset = 0;
 
   if (loading) return (
     <KeyboardAvoidingView style={{ flex:1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>

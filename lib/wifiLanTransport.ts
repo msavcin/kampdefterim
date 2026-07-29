@@ -129,22 +129,28 @@ type PeerChangeHandler = (peers: PeerInfo[]) => void;
 
 const KAMP_TCP_PORT = 5678;
 /** Hotspot alt ağ taraması: her IP için TCP bağlantı zaman aşımı (ms) */
-const SCAN_TIMEOUT_MS = 250;
+const SCAN_TIMEOUT_MS = 350;
 /** Hotspot alt ağ taraması: periyodik tekrar aralığı (ms) */
-const SUBNET_SCAN_MS = 8_000;
+const SUBNET_SCAN_MS = 12_000;
 /** Hotspot alt ağ taraması: taranacak son octet aralığı (.1 – .254, tüm /24) */
 const SUBNET_SCAN_RANGE = 254;
 /** İlk öncelikli tarama aralığı — Android hotspot istemcileri genellikle bu aralıkta atanır */
-const SCAN_PRIORITY_END = 30;
+const SCAN_PRIORITY_END = 40;
 /** Bir tarama turunda aynı anda açılan maksimum TCP soket sayısı */
-const MAX_CONCURRENT_SCANS = 30;
+const MAX_CONCURRENT_SCANS = 40;
+/** Hotspot istemcileri farklı üreticilerde .2, .100 veya .200+ aralıklarından IP alabiliyor. */
+const SCAN_PRIORITY_RANGES: Array<[number, number]> = [
+  [1, SCAN_PRIORITY_END],
+  [100, 130],
+  [200, 254],
+];
 const SERVICE_TYPE = 'kampdefterim';
 const SERVICE_PROTO = 'tcp';
 const SERVICE_DOMAIN = 'local.';
 const HANDSHAKE_CONV = '__handshake__';
 const CONNECT_TIMEOUT_MS = 6000;
 /** Uygulama seviyesi kalp atışı: ping gönderme aralığı (ms) */
-const HEARTBEAT_INTERVAL_MS = 15_000;
+const HEARTBEAT_INTERVAL_MS = 8_000;
 /** Heartbeat mesajı için özel conversationId */
 const HEARTBEAT_CONV = '__heartbeat__';
 /** Bilinen peer cache geçerlilik süresi (ms) — 10 dakika */
@@ -343,6 +349,7 @@ export class WifiLanTransport {
       this._server = TcpSocket.createServer((socket: any) => {
         let buffer = '';
         let resolvedUserId: string | null = null;
+        let registeredThisSocket = false;
         const remoteAddr: string = socket.remoteAddress ?? '';
 
         // Gelen TCP bağlantısını logla (handshake öncesi)
@@ -381,6 +388,7 @@ export class WifiLanTransport {
                     socket,
                     buffer: '',
                   });
+                  registeredThisSocket = true;
                   // Başarılı bağlantıyı cache'e yaz
                   this._cacheKnownPeer(uid, remoteAddr, KAMP_TCP_PORT, msg.senderName);
                   this._reconnectCounts.delete(uid);
@@ -389,6 +397,11 @@ export class WifiLanTransport {
                   // Bu peer'ın subnet'ini öğrendik — aynı ağdaki diğer cihazları tara
                   // remoteAddr peer'ın IP'sidir, kendi IP'miz değil → -1 (no self-skip)
                   this._doSubnetScanOnBase(remoteAddr, -1);
+                } else {
+                  // Aynı peer için ikinci/duplicate bağlantı geldi. Mevcut aktif soketi
+                  // koru; bu soketin kapanması mevcut peer'ı listeden silmemeli.
+                  console.log('[WifiLanTransport] duplicate gelen peer bağlantısı kapatılıyor:', uid, remoteAddr);
+                  try { socket.destroy(); } catch { /* ignore */ }
                 }
               } else if (msg.conversationId === HEARTBEAT_CONV) {
                 // Kalp atışı — sessizce yoksay
@@ -400,10 +413,18 @@ export class WifiLanTransport {
         });
         socket.on('error', (err: any) => {
           console.warn('[WifiLanTransport] incoming socket error', err?.message);
-          if (resolvedUserId) { this._peers.delete(resolvedUserId); this._scheduleReconnect(resolvedUserId); this._notifyPeerChange(); }
+          if (resolvedUserId && registeredThisSocket && this._peers.get(resolvedUserId)?.socket === socket) {
+            this._peers.delete(resolvedUserId);
+            this._scheduleReconnect(resolvedUserId);
+            this._notifyPeerChange();
+          }
         });
         socket.on('close', () => {
-          if (resolvedUserId) { this._peers.delete(resolvedUserId); this._scheduleReconnect(resolvedUserId); this._notifyPeerChange(); }
+          if (resolvedUserId && registeredThisSocket && this._peers.get(resolvedUserId)?.socket === socket) {
+            this._peers.delete(resolvedUserId);
+            this._scheduleReconnect(resolvedUserId);
+            this._notifyPeerChange();
+          }
         });
       });
 
@@ -653,32 +674,33 @@ export class WifiLanTransport {
 
     console.log('[WifiLanTransport] alt ağ taraması:', base + '0/24', skipLast >= 0 ? `(skip .${skipLast})` : '(no skip)');
 
-    // ── 1. Öncelikli aralık: hemen tara ──────────────────────────────────
+    const orderedLastOctets: number[] = [];
+    const seen = new Set<number>();
+    const addLast = (last: number) => {
+      if (last < 1 || last > SUBNET_SCAN_RANGE) return;
+      if (skipLast >= 0 && last === skipLast) return;
+      if (seen.has(last)) return;
+      seen.add(last);
+      orderedLastOctets.push(last);
+    };
+
+    // ── 1. Öncelikli aralıklar: hotspot gateway ve yaygın DHCP aralıkları ───
+    for (const [start, end] of SCAN_PRIORITY_RANGES) {
+      for (let last = start; last <= end; last++) addLast(last);
+    }
+    // ── 2. Geri kalan tüm /24 aralığı ───────────────────────────────────────
+    for (let last = 1; last <= SUBNET_SCAN_RANGE; last++) addLast(last);
+
     let batchDelay = 0;
-    for (let i = 1; i <= SCAN_PRIORITY_END; i += MAX_CONCURRENT_SCANS) {
-      const batchStart = i;
+    for (let i = 0; i < orderedLastOctets.length; i += MAX_CONCURRENT_SCANS) {
+      const batch = orderedLastOctets.slice(i, i + MAX_CONCURRENT_SCANS);
       setTimeout(() => {
         if (!this._running) return;
-        for (let last = batchStart; last < batchStart + MAX_CONCURRENT_SCANS && last <= SCAN_PRIORITY_END; last++) {
-          if (skipLast >= 0 && last === skipLast) continue;
+        for (const last of batch) {
           this._connectToPeer(base + last, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
         }
       }, batchDelay);
       batchDelay += SCAN_TIMEOUT_MS + 50;
-    }
-
-    // ── 2. Geri kalan aralık: öncelikli tarama bitince başlat ─────────────
-    let delayedBatchDelay = batchDelay;
-    for (let i = SCAN_PRIORITY_END + 1; i <= SUBNET_SCAN_RANGE; i += MAX_CONCURRENT_SCANS) {
-      const batchStart = i;
-      setTimeout(() => {
-        if (!this._running) return;
-        for (let last = batchStart; last < batchStart + MAX_CONCURRENT_SCANS && last <= SUBNET_SCAN_RANGE; last++) {
-          if (skipLast >= 0 && last === skipLast) continue;
-          this._connectToPeer(base + last, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
-        }
-      }, delayedBatchDelay);
-      delayedBatchDelay += SCAN_TIMEOUT_MS + 50;
     }
   }
 
@@ -735,8 +757,8 @@ export class WifiLanTransport {
 
         const host: string = service?.addresses?.[0] ?? service?.host ?? '';
         const port: number = Number(service?.port) || KAMP_TCP_PORT;
-        const remoteUserId: string = service?.txt?.userId ?? serviceName;
-        const remoteUserName: string = service?.txt?.userName ?? serviceName;
+        const remoteUserId: string = String(service?.txt?.userId ?? (serviceName.replace('KampDefterim-', '') || serviceName));
+        const remoteUserName: string = String(service?.txt?.userName ?? serviceName);
 
         if (!host) return;
         if (this._peers.has(remoteUserId)) return; // zaten bağlı
@@ -745,17 +767,14 @@ export class WifiLanTransport {
         this._connectToPeer(host, port, remoteUserId, remoteUserName);
       });
 
-      // Uzak cihaz ağdan ayrıldı
+      // Uzak cihaz ağdan ayrıldı.
+      // Android hotspot üzerinde mDNS "removed" event'i güvenilir değil; cihazlar hâlâ TCP ile
+      // bağlıyken geçici multicast kaybı nedeniyle gelebiliyor. Bu yüzden peer'ı burada silmeyip
+      // gerçek socket close/heartbeat hatasına bırakıyoruz.
       this._zeroconf.on('removed', (service: any) => {
         const serviceName: string = service?.name ?? '';
-        // Service name pattern: KampDefterim-{userId}
         const removedUserId = service?.txt?.userId ?? serviceName.replace('KampDefterim-', '');
-        if (this._peers.has(removedUserId)) {
-          try { this._peers.get(removedUserId)?.socket?.destroy(); } catch { /* ignore */ }
-          this._peers.delete(removedUserId);
-          this._notifyPeerChange();
-          console.log('[WifiLanTransport] peer ayrıldı:', removedUserId);
-        }
+        console.log('[WifiLanTransport] mDNS removed yoksayıldı, TCP durumu korunuyor:', removedUserId);
       });
 
       // Kendi servisimizi yayınla
@@ -799,6 +818,7 @@ export class WifiLanTransport {
 
     // Tarama modunda gerçek userId handshake'ten gelecek
     let realRemoteId = userId;
+    let registeredThisSocket = false;
 
     if (!TcpSocket) {
       console.warn('[WifiLanTransport] TcpSocket modülü yüklenmemiş, bağlantı kurulamıyor');
@@ -818,6 +838,7 @@ export class WifiLanTransport {
           if (userId) {
             // userId biliniyorsa hemen _peers'e ekle (normal mod)
             this._peers.set(userId, { userId, userName, host, port, socket, buffer: '' });
+            registeredThisSocket = true;
             this._notifyPeerChange();
             console.log('[WifiLanTransport] peer bağlantısı kuruldu:', userId);
           } else {
@@ -865,7 +886,8 @@ export class WifiLanTransport {
                 // Tarama modu: handshake'ten gerçek userId geldi
                 realRemoteId = remoteId;
                 if (this._peers.has(remoteId)) {
-                  // Zaten başka yoldan bağlıyız
+                  // Zaten başka yoldan bağlıyız. Bu duplicate soketin kapanması
+                  // mevcut peer'ı listeden silmemeli.
                   socket.destroy();
                   return;
                 }
@@ -874,17 +896,38 @@ export class WifiLanTransport {
                   userName: msg.senderName,
                   host, port, socket, buffer: '',
                 });
+                registeredThisSocket = true;
                 // Başarılı bağlantıyı cache'e yaz
                 this._cacheKnownPeer(remoteId, host, port, msg.senderName);
                 this._reconnectCounts.delete(remoteId);
                 this._notifyPeerChange();
                 console.log('[WifiLanTransport] alt ağ taramasında peer bulundu:', remoteId, host);
               } else {
-                // Normal mod: userName güncelle + cache tazele
-                const p = this._peers.get(userId);
+                // Normal mod: userId mDNS TXT'ten beklenir. Bazı cihazlarda TXT gelmez ve
+                // serviceName (KampDefterim-123) anahtar olarak kullanılır. Handshake gerçek
+                // senderId'yi verince peer kaydını gerçek userId'ye taşırız.
+                const remoteId = msg.senderId;
+                if (remoteId && remoteId !== userId) {
+                  const existing = this._peers.get(userId);
+                  if (existing?.socket === socket) {
+                    this._peers.delete(userId);
+                    if (this._peers.has(remoteId)) {
+                      registeredThisSocket = false;
+                      try { socket.destroy(); } catch { /* ignore */ }
+                      return;
+                    }
+                    existing.userId = remoteId;
+                    existing.userName = msg.senderName;
+                    this._peers.set(remoteId, existing);
+                    realRemoteId = remoteId;
+                    this._notifyPeerChange();
+                  }
+                }
+                const pidForCache = realRemoteId || remoteId || userId;
+                const p = this._peers.get(pidForCache);
                 if (p) p.userName = msg.senderName;
-                this._cacheKnownPeer(userId, host, port, msg.senderName);
-                this._reconnectCounts.delete(userId);
+                this._cacheKnownPeer(pidForCache, host, port, msg.senderName);
+                this._reconnectCounts.delete(pidForCache);
               }
             } else if (msg.conversationId === HEARTBEAT_CONV) {
               // Kalp atışı — sessizce yoksay
@@ -899,7 +942,7 @@ export class WifiLanTransport {
       socket.on('error', (err: any) => {
         this._connecting.delete(connectKey);
         const pid = realRemoteId || userId;
-        if (pid && this._peers.has(pid)) {
+        if (pid && registeredThisSocket && this._peers.get(pid)?.socket === socket) {
           this._peers.delete(pid);
           this._scheduleReconnect(pid);
           this._notifyPeerChange();
@@ -911,7 +954,7 @@ export class WifiLanTransport {
       socket.on('close', () => {
         this._connecting.delete(connectKey);
         const pid = realRemoteId || userId;
-        if (pid && this._peers.has(pid)) {
+        if (pid && registeredThisSocket && this._peers.get(pid)?.socket === socket) {
           this._peers.delete(pid);
           this._scheduleReconnect(pid);
           this._notifyPeerChange();
