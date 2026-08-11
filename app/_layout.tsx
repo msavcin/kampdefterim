@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import useTokenAutoLogout from '@/hooks/useTokenAutoLogout';
-import { View } from 'react-native';
+import { View, Alert } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ThemeProvider from '../components/ThemeProvider';
@@ -70,6 +70,13 @@ export default function RootLayout() {
         const isAuthRoute = segments[0] === '(auth)';
         const isLogoutRoute = (segments as string[])[1] === 'logout';
         if (!logged && !isAuthRoute) {
+          if (!isConnected) {
+            try {
+              Alert.alert('Uyarı', 'Offline modun aktif olabilmesi için giriş yapmış olmanız gerekmektedir.');
+            } catch (e) {
+              console.warn('[Layout] Alert gösterilemedi:', e);
+            }
+          }
           setShouldRedirect('login');
         } else if (logged && isAuthRoute && !isLogoutRoute) {
           setShouldRedirect('tabs');

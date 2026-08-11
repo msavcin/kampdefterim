@@ -99,6 +99,7 @@ import {
   popupInlineStyles,
 } from '@/lib/mapPopupTheme';
 import { getAppRuntimeSettings } from '@/lib/adminSettingsApi';
+import { DEFAULT_FEATURE_ENTITLEMENTS, getMyFeatureEntitlements } from '@/lib/featureEntitlementsApi';
 
 
 const { width, height } = Dimensions.get('window');
@@ -198,6 +199,7 @@ export default function MapScreen() {
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, isLoading: false });
   const isFullSyncInProgressRef = useRef(false); // Ref kullan, state closure problemi için
   const [nonPremiumCampingAreaLimit, setNonPremiumCampingAreaLimit] = useState(10);
+  const [featureEntitlements, setFeatureEntitlements] = useState(DEFAULT_FEATURE_ENTITLEMENTS);
   
   useEffect(() => {
     isMounted.current = true;
@@ -214,8 +216,15 @@ export default function MapScreen() {
     (async () => {
       try {
         const settings = await getAppRuntimeSettings();
-        if (!cancelled && Number.isFinite(settings.nonPremiumCampingAreaLimit)) {
-          setNonPremiumCampingAreaLimit(settings.nonPremiumCampingAreaLimit);
+        const entitlements = await getMyFeatureEntitlements().catch(() => DEFAULT_FEATURE_ENTITLEMENTS);
+        const entitlementLimit = entitlements.camping_area_limit?.limitValue;
+        if (!cancelled) {
+          setFeatureEntitlements(entitlements);
+          if (Number.isFinite(Number(entitlementLimit))) {
+            setNonPremiumCampingAreaLimit(Number(entitlementLimit));
+          } else if (Number.isFinite(settings.nonPremiumCampingAreaLimit)) {
+            setNonPremiumCampingAreaLimit(settings.nonPremiumCampingAreaLimit);
+          }
         }
       } catch (error) {
         if (__DEV__) console.warn('[AppSettings] Kamp alanı limiti alınamadı, varsayılan kullanılacak:', error);
@@ -225,6 +234,28 @@ export default function MapScreen() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const entitlementHandler = (entitlements: any) => {
+      if (!entitlements) return;
+      setFeatureEntitlements(entitlements);
+      const nextLimit = Number(entitlements?.camping_area_limit?.limitValue);
+      if (Number.isFinite(nextLimit) && nextLimit >= 0) {
+        setNonPremiumCampingAreaLimit(nextLimit);
+      }
+    };
+    const userHandler = (updatedUser: any) => {
+      if (!updatedUser) return;
+      setUser((prev: any) => ({ ...(prev ?? {}), ...updatedUser }));
+    };
+    eventBus.on('featureEntitlements:updated', entitlementHandler);
+    eventBus.on('user:updated', userHandler);
+    return () => {
+      eventBus.off('featureEntitlements:updated', entitlementHandler);
+      eventBus.off('user:updated', userHandler);
+    };
+  }, []);
+
   // WebView ref
   const webViewRef = useRef<WebView>(null);
   const [isWebViewReady, setIsWebViewReady] = useState(false);
@@ -469,7 +500,7 @@ export default function MapScreen() {
       console.log('[PERMISSION MODAL CHECK] Başlangıç:', { 
         userDismissedPermissionModal, 
         hasLocationPermission, 
-        isPremium: user?.offline_enabled 
+        isPremium: hasOfflineModeAccess 
       });
       
       // Kullanıcı daha önce modalı kapattıysa tekrar açma
@@ -2405,7 +2436,8 @@ export default function MapScreen() {
   const isGuest = user?.role === 'guest';
   const isPremiumUser = !!(user?.isPremium || user?.offline_enabled);
   const isSuperAdminUser = user?.role === 'superadmin';
-  const isCampingAreaLimitedUser = !!user?.id && !isPremiumUser && !isSuperAdminUser;
+  const hasOfflineModeAccess = isPremiumUser || featureEntitlements.offline_mode.enabled;
+  const isCampingAreaLimitedUser = !!user?.id && !isPremiumUser && !isSuperAdminUser && featureEntitlements.camping_area_limit.enabled;
   
   // Kullanıcının oluşturduğu kamp alanı sayısını hesapla
   const userCreatedAreasCount = useMemo(() => {
@@ -4304,7 +4336,7 @@ export default function MapScreen() {
   };
 
   const isKampfireMapView = isKampfireTheme && viewMode === 'map';
-  const offlineLocked = !user?.offline_enabled && !isConnected;
+  const offlineLocked = !hasOfflineModeAccess && !isConnected;
   const nearbyCount = Array.isArray(filteredCampingAreas)
     ? filteredCampingAreas.length
     : 0;
@@ -5142,9 +5174,9 @@ export default function MapScreen() {
         <View style={styles.headerActions}>
           {/* Görünüm Değiştirme Butonu */}
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!hasOfflineModeAccess && !isConnected) && { opacity: 0.4 }]}
             onPress={() => {
-              if (!isConnected && !user?.offline_enabled) {
+              if (!isConnected && !hasOfflineModeAccess) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
                   'Liste görünümü için Premium aboneliğe ihtiyacınız var.',
@@ -5167,18 +5199,18 @@ export default function MapScreen() {
                 changeViewMode(viewMode === 'map' ? 'list' : 'map');
               }
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
+            disabled={isBusy || (!isConnected && !hasOfflineModeAccess)}
           >
             {viewMode === 'map' ? (
-              <List size={20} color={(!isConnected && !user?.offline_enabled) ? colors.muted : colors.primary} />
+              <List size={20} color={(!isConnected && !hasOfflineModeAccess) ? colors.muted : colors.primary} />
             ) : (
-              <Map size={20} color={(!isConnected && !user?.offline_enabled) ? colors.muted : colors.primary} />
+              <Map size={20} color={(!isConnected && !hasOfflineModeAccess) ? colors.muted : colors.primary} />
             )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }]}
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!hasOfflineModeAccess && !isConnected) && { opacity: 0.4 }]}
             onPress={async () => {
-              if (!isConnected && !user?.offline_enabled) {
+              if (!isConnected && !hasOfflineModeAccess) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
                   'Arama özelliği için Premium aboneliğe ihtiyacınız var.',
@@ -5206,12 +5238,12 @@ export default function MapScreen() {
                 }
               }
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
+            disabled={isBusy || (!isConnected && !hasOfflineModeAccess)}
           >
-            <Feather name="search" size={20} color={(!isConnected && !user?.offline_enabled) ? colors.muted : colors.primary} />
+            <Feather name="search" size={20} color={(!isConnected && !hasOfflineModeAccess) ? colors.muted : colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!user?.offline_enabled && !isConnected) && { opacity: 0.4 },
+            style={[styles.actionButton, { backgroundColor: colors.primaryLight }, (!hasOfflineModeAccess && !isConnected) && { opacity: 0.4 },
               (() => {
                 const isFilterActive =
                   turkeyWideKeys.length > 0 ||
@@ -5222,7 +5254,7 @@ export default function MapScreen() {
               })()
             ]}
             onPress={() => {
-              if (!isConnected && !user?.offline_enabled) {
+              if (!isConnected && !hasOfflineModeAccess) {
                 Alert.alert(
                   'Offline Özellik Gerekli',
                   'Filtre özelliği için Premium aboneliğe ihtiyacınız var.',
@@ -5239,10 +5271,10 @@ export default function MapScreen() {
               }
               if (isMounted.current) setShowFilters(!showFilters);
             }}
-            disabled={isBusy || (!isConnected && !user?.offline_enabled)}
+            disabled={isBusy || (!isConnected && !hasOfflineModeAccess)}
           >
             {(() => {
-              const disabled = !isConnected && !user?.offline_enabled;
+              const disabled = !isConnected && !hasOfflineModeAccess;
               const isFilterActive =
                 turkeyWideKeys.length > 0 ||
                 selectedTags.length < campingTypes.length ||
@@ -5402,17 +5434,17 @@ export default function MapScreen() {
       {!isConnected && (
         <View style={[
           isKampfireTheme ? styles.kampfireOfflineBanner : styles.offlineBanner,
-          !user?.offline_enabled && { paddingVertical: 12 },
+          !hasOfflineModeAccess && { paddingVertical: 12 },
           isKampfireTheme 
             ? { backgroundColor: colors.warning + 'D9', borderColor: kampfireUiBorder } 
             : { backgroundColor: colors.warning + '20', borderBottomColor: colors.warning }
         ]}>
           <Text style={[styles.offlineBannerText, { color: isKampfireTheme ? '#fff' : colors.warning }]}>
-            {user?.offline_enabled 
+            {hasOfflineModeAccess 
               ? '📵 Offline Mod - Cache\'lenmiş harita gösteriliyor' 
               : <>📵 Offline mod için <Text style={{fontWeight: 'bold', fontStyle: 'italic'}}>Premium</Text> aboneliği gerekmektedir.</>}
           </Text>
-          {!user?.offline_enabled && (
+          {!hasOfflineModeAccess && (
             <TouchableOpacity
               style={[
                 isKampfireTheme ? styles.kampfirePremiumButton : styles.premiumButton, 
@@ -5560,10 +5592,10 @@ export default function MapScreen() {
                   }, 100);
                 }
               }}
-              pointerEvents={(!user?.offline_enabled && !isConnected) ? 'none' : 'auto'}
+              pointerEvents={(!hasOfflineModeAccess && !isConnected) ? 'none' : 'auto'}
             />
             {/* BLUR OVERLAY: Premium değilse ve offline ise harita üstüne blur ve dokunmatik engel */}
-            {(!user?.offline_enabled && !isConnected) && (
+            {(!hasOfflineModeAccess && !isConnected) && (
               <BlurOverlay visible onPremiumPress={() => router.push('/premium' as any)} />
             )}
 
@@ -5914,10 +5946,10 @@ export default function MapScreen() {
                         styles.fab, 
                         styles.fabBinoculars,
                         { backgroundColor: colors.primary },
-                        (!user?.offline_enabled && !isConnected) && { opacity: 0.4 }
+                        (!hasOfflineModeAccess && !isConnected) && { opacity: 0.4 }
                       ]} 
                       onPress={() => {
-                        if (!isConnected && !user?.offline_enabled) {
+                        if (!isConnected && !hasOfflineModeAccess) {
                           Alert.alert(
                             'Offline Özellik Gerekli',
                             'Bu arama özelliği için Premium aboneliğe ihtiyacınız var.',
@@ -5934,7 +5966,7 @@ export default function MapScreen() {
                         }
                         handleShowMapMoveResults();
                       }}
-                      disabled={(!isConnected && !user?.offline_enabled)}
+                      disabled={(!isConnected && !hasOfflineModeAccess)}
                     >
                       <Binoculars size={24} color="#fff" />
                     </TouchableOpacity>

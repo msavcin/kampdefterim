@@ -29,10 +29,12 @@ import { offlineTransportManager } from '../../lib/offlineTransport';
 import { incrementOfflineUnread, clearAllOfflineUnread } from '../../lib/offlineUnread';
 import { emitChatEvent } from '../../lib/chatEvents';
 import { getAppRuntimeSettings } from '../../lib/adminSettingsApi';
+import { DEFAULT_FEATURE_ENTITLEMENTS, getMyFeatureEntitlements } from '../../lib/featureEntitlementsApi';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isPremium, setIsPremium] = useState<boolean>(false);
+  const [featureEntitlements, setFeatureEntitlements] = useState(DEFAULT_FEATURE_ENTITLEMENTS);
   const [loading, setLoading] = useState(true);
   const [isInitialSyncComplete, setIsInitialSyncComplete] = useState(true);
   const [showKampfireExploreMenu, setShowKampfireExploreMenu] =
@@ -186,36 +188,89 @@ export default function TabLayout() {
       } catch (e) {
         console.warn('Veritabanı başlatılamadı:', e);
       }
+
+      // Quick cached read to avoid blocking UI when offline
       try {
-        const me = await getMe();
-        const role = me?.role || (me?.user?.role ?? null);
-        const premium = !!(
-          me?.is_premium ||
-          me?.user?.is_premium ||
-          me?.offline_enabled ||
-          me?.user?.offline_enabled
-        );
-        setUserRole(role);
-        setIsPremium(premium);
-        try {
-          await AsyncStorage.setItem('@cached_is_premium', premium ? '1' : '0');
-          await AsyncStorage.setItem('@cached_user_role', role || '');
-        } catch {
-          /* ignore */
+        const cached = await SecureStore.getItemAsync('localUser');
+        if (cached) {
+          try {
+            const u = JSON.parse(cached);
+            const role = u?.role || u?.user?.role || null;
+            const premium = !!(u?.is_premium || u?.isPremium || u?.offline_enabled || u?.user?.offline_enabled);
+            setUserRole(role);
+            setIsPremium(premium);
+            try {
+              await AsyncStorage.setItem('@cached_is_premium', premium ? '1' : '0');
+              await AsyncStorage.setItem('@cached_user_role', role || '');
+            } catch {}
+          } catch (e) {
+            // ignore parse errors
+          }
+        } else {
+          // Fallback to simple cached flags if exist
+          try {
+            const cachedPremium = await AsyncStorage.getItem('@cached_is_premium');
+            const cachedRole = await AsyncStorage.getItem('@cached_user_role');
+            if (cachedPremium !== null || cachedRole !== null) {
+              setIsPremium(cachedPremium === '1');
+              setUserRole(cachedRole || null);
+            }
+          } catch {}
         }
-      } catch {
+      } catch (e) {
+        console.warn('[TabLayout] cached read hata:', e);
+      }
+
+      // Allow UI to render immediately using cached values
+      setLoading(false);
+
+      // Now try to refresh remote data only when online
+      try {
+        const Network = await import('expo-network');
+        const state = await Network.getNetworkStateAsync();
+        const online = !!(state.isConnected && state.isInternetReachable);
+        if (online) {
+          try {
+            const me = await getMe();
+            const role = me?.role || (me?.user?.role ?? null);
+            const premium = !!(
+              me?.is_premium ||
+              me?.user?.is_premium ||
+              me?.offline_enabled ||
+              me?.user?.offline_enabled
+            );
+            setUserRole(role);
+            setIsPremium(premium);
+            try {
+              const entitlements = await getMyFeatureEntitlements();
+              setFeatureEntitlements(entitlements);
+            } catch {
+              setFeatureEntitlements(DEFAULT_FEATURE_ENTITLEMENTS);
+            }
+            try {
+              await AsyncStorage.setItem('@cached_is_premium', premium ? '1' : '0');
+              await AsyncStorage.setItem('@cached_user_role', role || '');
+            } catch {
+              /* ignore */
+            }
+          } catch (e) {
+            // remote fetch failed - keep cached values
+            if (__DEV__) console.warn('[TabLayout] remote getMe hata:', e);
+          }
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[TabLayout] network check hata:', e);
         try {
           const cachedPremium = await AsyncStorage.getItem('@cached_is_premium');
           const cachedRole = await AsyncStorage.getItem('@cached_user_role');
           setIsPremium(cachedPremium === '1');
           setUserRole(cachedRole || null);
-        } catch {
+        } catch (err) {
           setUserRole(null);
           setIsPremium(false);
         }
-      } finally {
-        setLoading(false);
       }
+
       const syncFlag = await SecureStore.getItemAsync('isInitialSyncComplete');
       setIsInitialSyncComplete(syncFlag === 'true');
     })();
@@ -234,8 +289,13 @@ export default function TabLayout() {
 
   const isConnected = useNetworkStatus();
   const prevConnectedRef = useRef<boolean | null>(null);
+  const hasAnnouncementsAccess = isPremium || featureEntitlements.announcements.enabled;
+  const hasChecklistAccess = isPremium || featureEntitlements.checklist.enabled;
+  const hasChatAccess = isPremium || featureEntitlements.chat.enabled;
+  const hasOfflineModeAccess = isPremium || featureEntitlements.offline_mode.enabled;
 
   const startOfflineTransport = async () => {
+    if (!hasOfflineModeAccess) return;
     if (offlineTransportManager.isActive) return;
     try {
       let uid = '';
@@ -272,7 +332,7 @@ export default function TabLayout() {
         /* ignore */
       }
     })();
-  }, []);
+  }, [hasOfflineModeAccess]);
 
   useEffect(() => {
     if (prevConnectedRef.current === null) {
@@ -289,7 +349,7 @@ export default function TabLayout() {
       offlineTransportManager.stop().catch(() => {});
       clearAllOfflineUnread().catch(() => {});
     }
-  }, [isConnected]);
+  }, [isConnected, hasOfflineModeAccess]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
@@ -313,6 +373,37 @@ export default function TabLayout() {
 
   const guestDisabled = userRole === 'guest';
   const { personalUnread, communityUnread } = useChatUnread();
+
+
+  useEffect(() => {
+    const entitlementHandler = (entitlements: any) => {
+      if (entitlements) setFeatureEntitlements(entitlements);
+    };
+    const userHandler = async (updatedUser: any) => {
+      if (!updatedUser) return;
+      const role = updatedUser?.role || updatedUser?.user?.role || null;
+      const premium = !!(
+        updatedUser?.is_premium ||
+        updatedUser?.isPremium ||
+        updatedUser?.offline_enabled ||
+        updatedUser?.user?.is_premium ||
+        updatedUser?.user?.isPremium ||
+        updatedUser?.user?.offline_enabled
+      );
+      setUserRole(role);
+      setIsPremium(premium);
+      try {
+        await AsyncStorage.setItem('@cached_is_premium', premium ? '1' : '0');
+        await AsyncStorage.setItem('@cached_user_role', role || '');
+      } catch {}
+    };
+    eventBus.on('featureEntitlements:updated', entitlementHandler);
+    eventBus.on('user:updated', userHandler);
+    return () => {
+      eventBus.off('featureEntitlements:updated', entitlementHandler);
+      eventBus.off('user:updated', userHandler);
+    };
+  }, []);
 
   const [planCount, setPlanCount] = useState<number>(0);
 
@@ -352,20 +443,20 @@ export default function TabLayout() {
       name: 'announcements',
       label: 'Duyurular',
       icon: Bell,
-      disabled: guestDisabled || !isInitialSyncComplete,
+      disabled: !hasAnnouncementsAccess || !isInitialSyncComplete,
     },
     {
       name: 'checklist',
       label: 'Checklist',
       icon: CheckSquare,
-      disabled: guestDisabled,
+      disabled: !hasChecklistAccess,
     },
     { name: 'favorites', label: 'Favoriler', icon: Heart, disabled: false },
     {
       name: 'new',
       label: 'Sohbet',
       icon: MessageCircle,
-      disabled: guestDisabled || !isPremium,
+      disabled: !hasChatAccess,
     },
     { name: 'profile', label: 'Profil', icon: User, disabled: false },
   ] as const;
@@ -386,7 +477,7 @@ export default function TabLayout() {
       setTimeout(() => emit('kampfire:openTentSetup'), 150);
       return;
     }
-    if (!isPremium) {
+    if (!hasChatAccess) {
       router.push('/premium' as any);
       return;
     }

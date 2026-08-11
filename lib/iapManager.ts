@@ -137,38 +137,59 @@ async function fetchStoreSubscriptions(productIds: string[]): Promise<any[]> {
 }
 
 async function requestStoreSubscription(productId: string, offerToken?: string | null) {
+  if (!productId || typeof productId !== 'string' || productId.trim().length === 0) {
+    throw new Error('Google Play ürün kimliği boş. Satın alma başlatılamadı.');
+  }
+
+  // react-native-iap 14.x Nitro API'de subscription satın alma requestPurchase üzerinden yapılır.
+  // Önemli: 14.5.0 runtime android/google alias'ını değil `request.android.skus` alanını okuyor.
+  // `request.google.skus` gönderilirse "skus property is required" hatası alınır.
+  if (typeof RNIap.requestPurchase === 'function') {
+    if (Platform.OS === 'android') {
+      const androidRequest: any = {
+        skus: [productId],
+      };
+      if (offerToken) {
+        androidRequest.subscriptionOffers = [{ sku: productId, offerToken }];
+      }
+
+      console.log('[IAP] requestPurchase Android payload:', JSON.stringify({
+        type: 'subs',
+        skus: androidRequest.skus,
+        hasOfferToken: !!offerToken,
+      }));
+
+      return RNIap.requestPurchase({
+        type: 'subs',
+        request: {
+          android: androidRequest,
+        },
+      });
+    }
+
+    return RNIap.requestPurchase({
+      type: 'subs',
+      request: {
+        ios: { sku: productId },
+      },
+    });
+  }
+
+  // Eski react-native-iap API fallback'i.
   if (typeof RNIap.requestSubscription === 'function') {
     if (Platform.OS === 'android') {
       return RNIap.requestSubscription({
         sku: productId,
+        skus: [productId],
         subscriptionOffers: offerToken ? [{ sku: productId, offerToken }] : undefined,
       });
     }
     return RNIap.requestSubscription({ sku: productId });
   }
 
-  if (typeof RNIap.requestPurchase === 'function') {
-    if (Platform.OS === 'android') {
-      return RNIap.requestPurchase({
-        type: 'subs',
-        request: {
-          google: {
-            skus: [productId],
-            subscriptionOffers: offerToken ? [{ sku: productId, offerToken }] : undefined,
-          },
-        },
-      });
-    }
-    return RNIap.requestPurchase({
-      type: 'subs',
-      request: {
-        apple: { sku: productId },
-      },
-    });
-  }
-
   throw new Error('IAP purchase API bulunamadı');
 }
+
 
 async function finishStoreTransaction(purchase: any, isConsumable = false) {
   try {

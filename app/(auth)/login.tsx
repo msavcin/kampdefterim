@@ -6,7 +6,7 @@
  * Copy over: app/(auth)/login.tsx
  */
 
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,8 +20,13 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Keyboard,
+  Dimensions,
+  findNodeHandle,
+  UIManager,
   type TextStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Eye, EyeOff } from 'lucide-react-native';
 import GuestInfoModal from '../../components/GuestInfoModal';
 import { loginUser, getMe, listCommunityMembers } from '../../lib/userCommunityApi';
@@ -48,6 +53,7 @@ function primaryOnColor(colors: ThemeColors): string {
 
 export default function LoginScreen() {
   const { colors, scheme } = useTheme();
+  const insets = useSafeAreaInsets();
   const isDarkMode = scheme === 'dark';
   const onPrimary = primaryOnColor(colors);
   // L3 / D3 soft pill CTAs (sage / forest)
@@ -68,12 +74,189 @@ export default function LoginScreen() {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [identifierFocused, setIdentifierFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardScreenY, setKeyboardScreenY] = useState<number | null>(null);
+  const [loginKeyboardOffset, setLoginKeyboardOffsetState] = useState(0);
 
   const passwordRef = useRef<TextInput | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const ctaLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const ctaRef = useRef<any>(null);
+  const ctaScreenLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const keyboardVisibleRef = useRef(false);
+  const keyboardHeightRef = useRef(0);
+  const keyboardScreenYRef = useRef<number | null>(null);
+  const loginKeyboardOffsetRef = useRef(0);
+  // Android 15/16'da bazı klavyeler eventScreenY değerine üst araç/suggestion barını
+  // dahil etmiyor. Login CTA için de yeni Android'lerde daha büyük güvenlik payı bırakıyoruz.
+  const LOGIN_KEYBOARD_MARGIN =
+    Platform.OS === 'android' && (Number(Platform.Version) || 0) >= 35 ? 56 : 12;
 
   const [guestModalVisible, setGuestModalVisible] = useState(false);
   const guestLoginPendingRedirect = useRef(false);
   const router = useRouter();
+
+  const androidApiLevel = Platform.OS === 'android' ? Number(Platform.Version) || 0 : 0;
+
+  const setLoginKeyboardOffset = (nextOffset: number) => {
+    const normalized = Math.max(0, Math.round(Number(nextOffset) || 0));
+    loginKeyboardOffsetRef.current = normalized;
+    setLoginKeyboardOffsetState(normalized);
+  };
+
+  const calculateAdaptiveLoginOffset = (
+    layout = ctaLayoutRef.current,
+    layoutScreen = ctaScreenLayoutRef.current,
+    keyboardTop = keyboardScreenYRef.current,
+  ) => {
+    if (Platform.OS !== 'android' || !keyboardVisibleRef.current || !layout) {
+      return 0;
+    }
+    // Öncelik: ekran koordinatları (measureInWindow) varsa onları kullan.
+    const windowDims = Dimensions.get('window');
+    const resolvedKeyboardTop = keyboardTop != null
+      ? keyboardTop
+      : Math.max(0, windowDims.height - (keyboardHeightRef.current || 0) - (insets.bottom || 0));
+
+    const baselineCtaBottom = layoutScreen
+      ? layoutScreen.y + layoutScreen.height + loginKeyboardOffsetRef.current
+      : layout.y + layout.height + loginKeyboardOffsetRef.current;
+
+    return Math.max(0, Math.ceil(baselineCtaBottom - resolvedKeyboardTop + LOGIN_KEYBOARD_MARGIN));
+  };
+
+  const applyAdaptiveLoginOffset = (phase: string, keyboardTopOverride?: number | null) => {
+    const nextOffset = calculateAdaptiveLoginOffset(
+      ctaLayoutRef.current,
+      ctaScreenLayoutRef.current,
+      keyboardTopOverride ?? keyboardScreenYRef.current,
+    );
+    const currentOffset = loginKeyboardOffsetRef.current;
+    if (Math.abs(nextOffset - currentOffset) > 2) {
+      setLoginKeyboardOffset(nextOffset);
+      logLoginKeyboardDebug(`${phase}:offsetApplied`, undefined, { nextOffset, previousOffset: currentOffset });
+    } else {
+      logLoginKeyboardDebug(`${phase}:offsetStable`, undefined, { nextOffset, previousOffset: currentOffset });
+    }
+  };
+
+  const measureRefInWindow = (ref: any) => {
+    return new Promise<{ x: number; y: number; width: number; height: number } | null>((resolve) => {
+      try {
+        if (!ref || !ref.current) return resolve(null);
+        const node = ref.current as any;
+        if (typeof node.measureInWindow === 'function') {
+          node.measureInWindow((x: number, y: number, width: number, height: number) => {
+            resolve({ x, y, width, height });
+          });
+        } else {
+          const handle = findNodeHandle(node);
+          if (handle && UIManager && typeof UIManager.measureInWindow === 'function') {
+            UIManager.measureInWindow(handle, (x: number, y: number, width: number, height: number) => {
+              resolve({ x, y, width, height });
+            });
+          } else resolve(null);
+        }
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  };
+
+  const scrollLoginActionsIntoView = () => {
+    setTimeout(() => {
+      try {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      } catch {}
+    }, Platform.OS === 'ios' ? 280 : 180);
+  };
+
+  const logLoginKeyboardDebug = (phase: string, event?: any, extra?: Record<string, any>) => {
+    try {
+      const windowDims = Dimensions.get('window');
+      const screenDims = Dimensions.get('screen');
+      const eventHeight = Number(event?.endCoordinates?.height ?? keyboardHeightRef.current ?? 0);
+      const eventScreenY = event?.endCoordinates?.screenY ?? keyboardScreenYRef.current ?? null;
+      const adaptiveOffset = calculateAdaptiveLoginOffset(ctaLayoutRef.current, eventScreenY);
+      const ctaBottom = ctaLayoutRef.current
+        ? ctaLayoutRef.current.y + ctaLayoutRef.current.height
+        : null;
+      const ctaGapToKeyboard = ctaBottom != null && eventScreenY != null
+        ? eventScreenY - ctaBottom
+        : null;
+      console.log('[LOGIN_KEYBOARD_DEBUG]', JSON.stringify({
+        phase,
+        platform: Platform.OS,
+        apiLevel: androidApiLevel,
+        scheme,
+        keyboardVisible: keyboardVisibleRef.current,
+        stateKeyboardHeight: keyboardHeightRef.current,
+        eventHeight,
+        eventScreenY,
+        windowHeight: windowDims.height,
+        windowWidth: windowDims.width,
+        screenHeight: screenDims.height,
+        screenWidth: screenDims.width,
+        insetsTop: insets.top,
+        insetsBottom: insets.bottom,
+        keyboardAvoidingBehavior: Platform.OS === 'ios' ? 'padding' : 'undefined',
+        adaptiveOffset,
+        loginKeyboardOffset: loginKeyboardOffsetRef.current,
+        loginKeyboardMargin: LOGIN_KEYBOARD_MARGIN,
+        identifierFocused,
+        passwordFocused,
+        ctaBottom,
+        ctaGapToKeyboard,
+        ctaLayout: ctaLayoutRef.current,
+        ...(extra || {}),
+      }));
+    } catch (debugError) {
+      console.warn('[LOGIN_KEYBOARD_DEBUG] log error', debugError);
+    }
+  };
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (event: any) => {
+      const nextHeight = Number(event?.endCoordinates?.height || 0);
+      const nextScreenY = event?.endCoordinates?.screenY ?? null;
+      keyboardVisibleRef.current = true;
+      keyboardHeightRef.current = nextHeight;
+      keyboardScreenYRef.current = nextScreenY;
+      setKeyboardVisible(true);
+      setKeyboardHeight(nextHeight);
+      setKeyboardScreenY(nextScreenY);
+      // Önce Android'in doğal resize davranışını ölç; sadece CTA klavyenin altında kalırsa
+      // gerekli kadar offset uygula.
+      setLoginKeyboardOffset(0);
+      logLoginKeyboardDebug('keyboardDidShow', event, { nextKeyboardHeight: nextHeight, nextScreenY });
+      // measure CTA in window coordinates to get reliable comparison with keyboard screenY
+      (async () => {
+        const measured = await measureRefInWindow(ctaRef);
+        if (measured) {
+          ctaScreenLayoutRef.current = measured;
+          logLoginKeyboardDebug('ctaMeasuredOnKeyboardShow', undefined, { measured });
+        }
+        setTimeout(() => applyAdaptiveLoginOffset('keyboardDidShow+250ms', nextScreenY), 250);
+        setTimeout(() => applyAdaptiveLoginOffset('keyboardDidShow+600ms', nextScreenY), 600);
+        scrollLoginActionsIntoView();
+      })();
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      logLoginKeyboardDebug('keyboardDidHide');
+      keyboardVisibleRef.current = false;
+      keyboardHeightRef.current = 0;
+      keyboardScreenYRef.current = null;
+      setKeyboardVisible(false);
+      setKeyboardHeight(0);
+      setKeyboardScreenY(null);
+      setLoginKeyboardOffset(0);
+    });
+    return () => {
+      try { showSub.remove(); } catch {}
+      try { hideSub.remove(); } catch {}
+    };
+  }, []);
 
   const handleGuestLogin = async () => {
     setLoading(true);
@@ -255,10 +438,16 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={0}
     >
       <ScrollView
-        contentContainerStyle={styles.container}
+        ref={scrollRef}
+        contentContainerStyle={[
+          styles.container,
+          keyboardVisible && styles.containerKeyboard,
+          loginKeyboardOffset > 0 && { paddingBottom: loginKeyboardOffset + 24 },
+        ]}
         keyboardShouldPersistTaps="always"
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
@@ -288,7 +477,10 @@ export default function LoginScreen() {
           value={identifier}
           onChangeText={setIdentifier}
           placeholderTextColor={colors.muted}
-          onFocus={() => setIdentifierFocused(true)}
+          onFocus={() => {
+            setIdentifierFocused(true);
+            scrollLoginActionsIntoView();
+          }}
           onBlur={() => setIdentifierFocused(false)}
         />
 
@@ -310,7 +502,10 @@ export default function LoginScreen() {
             onChangeText={setPassword}
             placeholderTextColor={colors.muted}
             autoCapitalize="none"
-            onFocus={() => setPasswordFocused(true)}
+            onFocus={() => {
+              setPasswordFocused(true);
+              scrollLoginActionsIntoView();
+            }}
             onBlur={() => setPasswordFocused(false)}
             autoComplete="password"
             textContentType="password"
@@ -332,6 +527,21 @@ export default function LoginScreen() {
         </View>
 
         <TouchableOpacity
+          ref={ctaRef}
+          onLayout={(event) => {
+            ctaLayoutRef.current = event.nativeEvent.layout;
+            logLoginKeyboardDebug('ctaLayout', undefined, { layout: event.nativeEvent.layout, loginKeyboardOffset });
+            (async () => {
+              try {
+                const measured = await measureRefInWindow(ctaRef);
+                if (measured) {
+                  ctaScreenLayoutRef.current = measured;
+                  logLoginKeyboardDebug('ctaLayoutMeasured', undefined, { measured });
+                }
+              } catch (e) {}
+              applyAdaptiveLoginOffset('ctaLayout');
+            })();
+          }}
           style={[styles.cta, loading && styles.ctaDisabled]}
           onPress={() => handleLogin()}
           disabled={loading}
@@ -452,6 +662,11 @@ function createLoginStyles(
       paddingHorizontal: 24,
       paddingVertical: 32,
       backgroundColor: colors.background,
+    },
+    containerKeyboard: {
+      justifyContent: 'flex-start',
+      paddingTop: Platform.OS === 'ios' ? 24 : 18,
+      paddingBottom: 96,
     },
     logoCard: {
       alignSelf: 'center',

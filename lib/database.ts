@@ -51,6 +51,8 @@ export interface CampingArea {
   ai_review_enabled?: boolean;
   google_place_id?: string;
   last_google_sync_at?: string;
+  google_rating?: number;
+  google_review_count?: number;
 }
 
 export interface Favorite {
@@ -1061,19 +1063,28 @@ export class DatabaseManager {
         // (prepareAsync ile 1×prepare + N×execute + 1×finalize — çok daha hızlı)
         const updateSql = `UPDATE camping_areas SET 
             name = ?, latitude = ?, longitude = ?, type = ?, description = ?, website = ?, phone = ?, opening_hours = ?,
-            capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
+            capacity = ?, fee = ?, status = ?, rating = ?, review_count = ?, google_rating = ?, google_review_count = ?, price_range = ?, facilities = ?, accessibility = ?,
             social_media = ?, booking_url = ?, contact_email = ?, last_verified = ?, visibility = COALESCE(NULLIF(?, ''), visibility), owner_id = ?, updated_at = CURRENT_TIMESTAMP,
             source_id = ?, photo_links = ?, amenities = ?, tags = ?, images = ?, friend_user_ids = COALESCE(?, friend_user_ids), community_id = ?, province = ?,
             ai_review_evaluation = ?, ai_review_generated_at = ?, ai_review_enabled = ?, google_place_id = ?, last_google_sync_at = ?
            WHERE external_id = ?`;
-        const insertSql = `INSERT INTO camping_areas (
-            name, latitude, longitude, type, description, website, phone, opening_hours, capacity, fee, status, rating, review_count, price_range,
-            facilities, accessibility, social_media, booking_url, contact_email, last_verified, visibility, owner_id, owner_username, created_at, updated_at, external_id, source_id, photo_links, amenities, tags, images, province, friend_user_ids, community_id,
-            ai_review_evaluation, ai_review_generated_at, ai_review_enabled, google_place_id, last_google_sync_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+        // Prepare update statement (static)
         const updateStmt = await this._withDbRetry(() => this.db!.prepareAsync(updateSql), 'fetchAndStore:updateStmt');
-        const insertStmt = await this._withDbRetry(() => this.db!.prepareAsync(insertSql), 'fetchAndStore:insertStmt');
+
+        // Build dynamic INSERT statement based on allowed columns and actual DB schema to avoid column/value mismatches after migrations
+        const allowedInsertCols = [
+          'name','latitude','longitude','type','description','website','phone','opening_hours','capacity','fee','status','rating','review_count','google_rating','google_review_count','price_range',
+          'facilities','accessibility','social_media','booking_url','contact_email','last_verified','visibility','owner_id','owner_username','external_id','source_id','photo_links','amenities','tags','images','province','friend_user_ids','community_id',
+          'ai_review_evaluation','ai_review_generated_at','ai_review_enabled','google_place_id','last_google_sync_at'
+        ];
+
+        const tableCols = (await this.db!.getAllAsync(`PRAGMA table_info(camping_areas)`)).map((c: any) => c.name);
+        const insertCols = allowedInsertCols.filter(c => tableCols.includes(c));
+        if (insertCols.length === 0) throw new Error('No insertable columns found for camping_areas');
+
+        const insertSqlDynamic = `INSERT INTO camping_areas (${insertCols.join(', ')}) VALUES (${insertCols.map(() => '?').join(', ')})`;
+        const insertStmt = await this._withDbRetry(() => this.db!.prepareAsync(insertSqlDynamic), 'fetchAndStore:insertStmt');
 
         try {
         for (const item of data) {
@@ -1176,6 +1187,8 @@ export class DatabaseManager {
                 item.status ?? 'active',
                 item.rating ?? 0,
                 item.review_count ?? 0,
+                item.google_rating ?? null,
+                item.google_review_count ?? null,
                 item.price_range ?? '',
                 facilitiesStr,
                 accessibilityStr,
@@ -1237,6 +1250,8 @@ export class DatabaseManager {
                     item.status ?? 'active',
                     item.rating ?? 0,
                     item.review_count ?? 0,
+                    item.google_rating ?? null,
+                    item.google_review_count ?? null,
                     item.price_range ?? '',
                     facilitiesStr,
                     accessibilityStr,
@@ -1292,6 +1307,8 @@ export class DatabaseManager {
                       item.status ?? 'active',
                       item.rating ?? 0,
                       item.review_count ?? 0,
+                      item.google_rating ?? null,
+                      item.google_review_count ?? null,
                       item.price_range ?? '',
                       facilitiesStr,
                       accessibilityStr,
@@ -1322,46 +1339,51 @@ export class DatabaseManager {
             }
           }
           if (!item.external_id || updateResult.changes === 0) {
-            const insertResult = await insertStmt.executeAsync([
-                item.name ?? '',
-                item.latitude ?? 0,
-                item.longitude ?? 0,
-                typeValue,
-                item.description ?? '',
-                item.website ?? '',
-                item.phone ?? '',
-                openingHoursStr,
-                item.capacity ?? 0,
-                item.fee === null || item.fee === undefined ? null : (item.fee ? 1 : 0),
-                item.status ?? 'active',
-                item.rating ?? 0,
-                item.review_count ?? 0,
-                item.price_range ?? '',
-                facilitiesStr,
-                accessibilityStr,
-                socialMediaStr,
-                item.booking_url ?? '',
-                item.contact_email ?? '',
-                item.last_verified ?? '',
-                item.visibility ?? '',
-                ownerIdStr,
-                item.owner_username ?? '',
-                item.external_id ?? '',
-                item.source_id ?? '',
-                photoLinksStr,
-                amenitiesStr,
-                tagsStr,
-                imagesStr,
-                provinceStr,
-                friendUserIdsStr ?? '[]',
-                communityIdVal,
-                item.ai_review_evaluation ?? null,
-                item.ai_review_generated_at ?? null,
-                item.ai_review_enabled !== undefined ? (item.ai_review_enabled ? 1 : 0) : null,
-                item.google_place_id ?? null,
-                item.last_google_sync_at ?? null
-              ]
-            );
+            const insertValues = insertCols.map((col) => {
+              switch (col) {
+                case 'name': return item.name ?? '';
+                case 'latitude': return item.latitude ?? 0;
+                case 'longitude': return item.longitude ?? 0;
+                case 'type': return typeValue;
+                case 'description': return item.description ?? '';
+                case 'website': return item.website ?? '';
+                case 'phone': return item.phone ?? '';
+                case 'opening_hours': return openingHoursStr;
+                case 'capacity': return item.capacity ?? 0;
+                case 'fee': return (item.fee === null || item.fee === undefined) ? null : (item.fee ? 1 : 0);
+                case 'status': return item.status ?? 'active';
+                case 'rating': return item.rating ?? 0;
+                case 'review_count': return item.review_count ?? 0;
+                case 'google_rating': return item.google_rating ?? null;
+                case 'google_review_count': return item.google_review_count ?? null;
+                case 'price_range': return item.price_range ?? '';
+                case 'facilities': return facilitiesStr;
+                case 'accessibility': return accessibilityStr;
+                case 'social_media': return socialMediaStr;
+                case 'booking_url': return item.booking_url ?? '';
+                case 'contact_email': return item.contact_email ?? '';
+                case 'last_verified': return item.last_verified ?? '';
+                case 'visibility': return item.visibility ?? '';
+                case 'owner_id': return ownerIdStr;
+                case 'owner_username': return item.owner_username ?? '';
+                case 'external_id': return item.external_id ?? '';
+                case 'source_id': return item.source_id ?? '';
+                case 'photo_links': return photoLinksStr;
+                case 'amenities': return amenitiesStr;
+                case 'tags': return tagsStr;
+                case 'images': return imagesStr;
+                case 'province': return provinceStr;
+                case 'friend_user_ids': return friendUserIdsStr ?? '[]';
+                case 'community_id': return communityIdVal;
+                case 'ai_review_evaluation': return item.ai_review_evaluation ?? null;
+                case 'ai_review_generated_at': return item.ai_review_generated_at ?? null;
+                case 'ai_review_enabled': return (item.ai_review_enabled !== undefined) ? (item.ai_review_enabled ? 1 : 0) : null;
+                case 'google_place_id': return item.google_place_id ?? null;
+                case 'last_google_sync_at': return item.last_google_sync_at ?? null;
+                default: return null;
+              }
+            });
+            const insertResult = await insertStmt.executeAsync(insertValues);
             if (item.source_id === 0 || item.source_id === '0') {
               // ...existing code...
             }
@@ -1747,6 +1769,8 @@ export class DatabaseManager {
           status TEXT DEFAULT 'active',
           rating REAL DEFAULT 0.0,
           review_count INTEGER DEFAULT 0,
+          google_rating REAL DEFAULT NULL,
+          google_review_count INTEGER DEFAULT NULL,
           price_range TEXT,
           facilities TEXT DEFAULT '[]',
           accessibility TEXT DEFAULT '[]',
@@ -1802,6 +1826,12 @@ export class DatabaseManager {
     }
     if (!tableInfo2.some((col: any) => col.name === 'last_google_sync_at')) {
       await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN last_google_sync_at TEXT;");
+    }
+    if (!tableInfo2.some((col: any) => col.name === 'google_rating')) {
+      await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN google_rating REAL;");
+    }
+    if (!tableInfo2.some((col: any) => col.name === 'google_review_count')) {
+      await this.db!.execAsync("ALTER TABLE camping_areas ADD COLUMN google_review_count INTEGER;");
     }
     await this.db.execAsync(`
       CREATE INDEX IF NOT EXISTS idx_camping_areas_location ON camping_areas(latitude, longitude);

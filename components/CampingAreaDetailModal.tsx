@@ -919,9 +919,23 @@ export default function CampingAreaDetailModal({
     if (campingArea.website) lines.push(`🌐 ${campingArea.website}`);
     if (campingArea.phone) lines.push(`📞 ${campingArea.phone}`);
 
-    // Puanlama
-    if (typeof campingArea.rating === 'number' && campingArea.rating > 0) {
-      lines.push(`⭐ ${campingArea.rating.toFixed(1)}${campingArea.review_count ? ` (${campingArea.review_count} değerlendirme)` : ''}`);
+    // Puanlama - Kamp Defterim ve Google ayrı tutulur
+    // Kamp Defterim puanı: kdAggregate (tercihen) veya local campingArea.rating
+    if (kdAggregate && typeof kdAggregate.rating === 'number' && kdAggregate.rating > 0) {
+      lines.push(`⭐ Kamp Defterim: ${kdAggregate.rating.toFixed(1)}${kdAggregate.review_count ? ` (${kdAggregate.review_count} değerlendirme)` : ''}`);
+    } else if (typeof campingArea.rating === 'number' && campingArea.rating > 0) {
+      lines.push(`⭐ Kamp Defterim: ${campingArea.rating.toFixed(1)}${campingArea.review_count ? ` (${campingArea.review_count} değerlendirme)` : ''}`);
+    }
+
+    // Google Maps puanı (varsa)
+    const gRating = (campingArea as any).google_rating;
+    const gCount = (campingArea as any).google_review_count;
+    if (gRating !== undefined && gRating !== null && Number(gRating) > 0) {
+      try {
+        const gr = Number(gRating);
+        const gc = Number(gCount) || 0;
+        lines.push(`⭐ Google Maps: ${gr.toFixed(1)}${gc ? ` (${gc} değerlendirme)` : ''}`);
+      } catch {}
     }
 
     lines.push('');
@@ -1232,23 +1246,24 @@ export default function CampingAreaDetailModal({
               </View>
             </View>
 
-            {(typeof campingArea.rating === 'number' && campingArea.rating > 0) ? (
-              <View style={styles.ratingRow}>
-                <Star size={16} color="#fbbf24" fill="#fbbf24" />
-                <Text style={[styles.ratingText, { color: colors.textSecondary }]}>
-                  {campingArea.rating.toFixed(1)} ({campingArea.review_count ? String(campingArea.review_count) : '0'} değerlendirme | Google Maps)
-                </Text>
-              </View>
-            ) : null}
-
             {(kdAggregate || kdAggregate === null) && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
                 <Star size={16} color="#fbbf24" fill="#fbbf24" />
-                <Text style={[styles.ratingText, { color: colors.textSecondary }]}>
+                <Text style={[styles.ratingText, { color: colors.textSecondary }]}> 
                   {kdAggregate ? `${kdAggregate.rating.toFixed(1)} (${kdAggregate.review_count} değerlendirme | Kamp Defterim)` : 'Henüz Kamp Defterim oyu yok'}
                 </Text>
               </View>
             )}
+
+            {/* Google Maps puanı ayrı göster */}
+            {((campingArea as any).google_rating !== undefined && (campingArea as any).google_rating !== null) ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                <Star size={16} color="#fbbf24" fill="#fbbf24" />
+                <Text style={[styles.ratingText, { color: colors.textSecondary }]}> 
+                  {(campingArea as any).google_rating ? `${Number((campingArea as any).google_rating).toFixed(1)} (${(campingArea as any).google_review_count || 0} değerlendirme | Google Maps)` : 'Google puanı yok'}
+                </Text>
+              </View>
+            ) : null}
 
           </View>
 

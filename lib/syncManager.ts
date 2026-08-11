@@ -165,6 +165,8 @@ import {
   evaluateCampingAreaReviews,
   isGenericAIReviewText,
 } from './aiReviewApi';
+import { getMyFeatureEntitlements } from './featureEntitlementsApi';
+import { getMe } from './userCommunityApi';
 
 // Yorum değerlendirmesi senkronizasyonu
 export async function syncRatings(): Promise<boolean> {
@@ -271,8 +273,8 @@ export async function syncRatings(): Promise<boolean> {
               ...(area || {}),
               ai_review_evaluation: evalText,
               ai_review_generated_at: genAt,
-              rating: updatedFields.rating || (area ? area.rating : undefined),
-              review_count: updatedFields.review_count || (area ? area.review_count : undefined),
+              google_rating: updatedFields.rating !== undefined ? updatedFields.rating : (area ? (area as any).google_rating : undefined),
+              google_review_count: updatedFields.review_count !== undefined ? updatedFields.review_count : (area ? (area as any).google_review_count : undefined),
               facilities: updatedFields.facilities || (area ? area.facilities : undefined),
               price_range: updatedFields.price_range || (area ? area.price_range : undefined),
               website: updatedFields.website || (area ? area.website : undefined),
@@ -527,6 +529,29 @@ async function syncPendingImages(userId) {
 
 
 
+
+// Kullanıcı hakları / feature entitlement senkronizasyonu
+export async function syncFeatureEntitlements(): Promise<boolean> {
+  try {
+    const entitlements = await getMyFeatureEntitlements();
+    emit('featureEntitlements:updated', entitlements);
+
+    // Deneme kapatma / role değişikliği gibi durumlar feature sync ile birlikte yansısın.
+    try {
+      const me = await getMe();
+      if (me) emit('user:updated', me);
+    } catch (userErr) {
+      if (__DEV__) console.warn('[syncFeatureEntitlements] kullanıcı bilgisi yenilenemedi:', userErr);
+    }
+
+    if (__DEV__) console.log('[syncFeatureEntitlements] ✅ Haklar senkronize edildi');
+    return true;
+  } catch (error) {
+    console.warn('[syncFeatureEntitlements] Haklar senkronize edilemedi:', error);
+    return false;
+  }
+}
+
 // Kamp alanı delta senkronizasyonu
 export async function syncCampingAreas(userId?: string): Promise<boolean> {
   const db = getDatabase();
@@ -566,9 +591,11 @@ export async function syncAll({ userId, onProgress }: { userId?: number; onProgr
   await syncPendingChanges(userId, onProgress);
   // 4. Yorum değerlendirmeleri
   await syncRatings();
-  // 5. Duyuru delta sync
+  // 5. Kullanıcı hakları / feature entitlement sync
+  await syncFeatureEntitlements();
+  // 6. Duyuru delta sync
   await syncAnnouncements();
-  // 6. Kamp alanı delta sync (userId ile birlikte arkadaş erişim temizliği)
+  // 7. Kamp alanı delta sync (userId ile birlikte arkadaş erişim temizliği)
   await syncCampingAreas(userId !== undefined ? String(userId) : undefined);
 }
 

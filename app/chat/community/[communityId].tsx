@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, FlatList, TextInput, Text, KeyboardAvoidingView, Platform, ActivityIndicator, TouchableOpacity, Alert, Keyboard } from 'react-native';
+import { View, FlatList, TextInput, Text, KeyboardAvoidingView, Platform, ActivityIndicator, TouchableOpacity, Alert, Keyboard, Dimensions, findNodeHandle, UIManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { apiFetch } from '@/lib/apiFetch';
@@ -11,8 +11,8 @@ import MessageBubble from '@/components/MessageBubble';
 import NearbyPeersBar from '@/components/NearbyPeersBar';
 import ThemedIcon from '@/components/ThemedIcon';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTheme } from '../../../components/ThemeProvider';
-import { createThemedStyles } from '../../../constants/theme/sharedStyles';
+import { useTheme } from '@/components/ThemeProvider';
+import { createThemedStyles } from '@/constants/theme/sharedStyles';
 import { emitChatEvent } from '@/lib/chatEvents';
 import { markRead } from '@/lib/readMap';
 import { getMe } from '@/lib/userCommunityApi';
@@ -85,19 +85,167 @@ export default function CommunityChatScreen() {
   const convIdRef = useRef<string | null>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardScreenY, setKeyboardScreenY] = useState<number | null>(null);
+  const [composerKeyboardOffset, setComposerKeyboardOffsetState] = useState(0);
+  const composerLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const composerRef = useRef<any>(null);
+  const composerScreenLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const keyboardVisibleRef = useRef(false);
+  const keyboardHeightRef = useRef(0);
+  const keyboardScreenYRef = useRef<number | null>(null);
+  const composerKeyboardOffsetRef = useRef(0);
+  // Android 15/16'da bazı klavyeler eventScreenY değerine üst araç/suggestion barını
+  // dahil etmiyor. Bu yüzden yeni Android'lerde daha büyük güvenlik payı bırakıyoruz.
+  const COMPOSER_KEYBOARD_MARGIN =
+    Platform.OS === 'android' && (Number(Platform.Version) || 0) >= 35 ? 56 : 8;
   const [isOffline, setIsOffline] = useState(false);
   const [hasWifiPeers, setHasWifiPeers] = useState(false);
   const isConnected = useNetworkStatus();
   const prevConnectedRef = useRef<boolean | null>(null);
 
+  const setComposerKeyboardOffset = (nextOffset: number) => {
+    const normalized = Math.max(0, Math.round(Number(nextOffset) || 0));
+    composerKeyboardOffsetRef.current = normalized;
+    setComposerKeyboardOffsetState(normalized);
+  };
+
+  const calculateAdaptiveComposerOffset = (
+    layout = composerLayoutRef.current,
+    layoutScreen = composerScreenLayoutRef.current,
+    keyboardTop = keyboardScreenYRef.current,
+  ) => {
+    if (Platform.OS !== 'android' || !keyboardVisibleRef.current || !layout) {
+      return 0;
+    }
+    const windowDims = Dimensions.get('window');
+    const resolvedKeyboardTop = keyboardTop != null
+      ? keyboardTop
+      : Math.max(0, windowDims.height - (keyboardHeightRef.current || 0) - (insets.bottom || 0));
+
+    const baselineComposerBottom = layoutScreen
+      ? layoutScreen.y + layoutScreen.height + composerKeyboardOffsetRef.current
+      : layout.y + layout.height + composerKeyboardOffsetRef.current;
+
+    return Math.max(0, Math.ceil(baselineComposerBottom - resolvedKeyboardTop + COMPOSER_KEYBOARD_MARGIN));
+  };
+
+  const applyAdaptiveComposerOffset = (phase: string, keyboardTopOverride?: number | null) => {
+    const nextOffset = calculateAdaptiveComposerOffset(
+      composerLayoutRef.current,
+      composerScreenLayoutRef.current,
+      keyboardTopOverride ?? keyboardScreenYRef.current,
+    );
+    const currentOffset = composerKeyboardOffsetRef.current;
+    if (Math.abs(nextOffset - currentOffset) > 2) {
+      setComposerKeyboardOffset(nextOffset);
+      logKeyboardDebug(`${phase}:offsetApplied`, undefined, { nextOffset, previousOffset: currentOffset });
+    } else {
+      logKeyboardDebug(`${phase}:offsetStable`, undefined, { nextOffset, previousOffset: currentOffset });
+    }
+  };
+
+  const measureRefInWindow = (ref: any) => {
+    return new Promise<{ x: number; y: number; width: number; height: number } | null>((resolve) => {
+      try {
+        if (!ref || !ref.current) return resolve(null);
+        const node = ref.current as any;
+        if (typeof node.measureInWindow === 'function') {
+          node.measureInWindow((x: number, y: number, width: number, height: number) => {
+            resolve({ x, y, width, height });
+          });
+        } else {
+          const handle = findNodeHandle(node);
+          if (handle && UIManager && typeof UIManager.measureInWindow === 'function') {
+            UIManager.measureInWindow(handle, (x: number, y: number, width: number, height: number) => {
+              resolve({ x, y, width, height });
+            });
+          } else resolve(null);
+        }
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  };
+
+  const logKeyboardDebug = (phase: string, event?: any, extra?: Record<string, any>) => {
+    try {
+      const windowDims = Dimensions.get('window');
+      const screenDims = Dimensions.get('screen');
+      const eventHeight = Number(event?.endCoordinates?.height ?? keyboardHeightRef.current ?? 0);
+      const eventScreenY = event?.endCoordinates?.screenY ?? keyboardScreenYRef.current ?? null;
+      const apiLevel = Platform.OS === 'android' ? Number(Platform.Version) || 0 : 0;
+      const adaptiveOffset = calculateAdaptiveComposerOffset(composerLayoutRef.current, eventScreenY);
+      const composerBottom = composerLayoutRef.current
+        ? composerLayoutRef.current.y + composerLayoutRef.current.height
+        : null;
+      const composerGapToKeyboard = composerBottom != null && eventScreenY != null
+        ? eventScreenY - composerBottom
+        : null;
+      console.log('[CHAT_KEYBOARD_DEBUG][community]', JSON.stringify({
+        phase,
+        platform: Platform.OS,
+        apiLevel,
+        keyboardVisible: keyboardVisibleRef.current,
+        stateKeyboardHeight: keyboardHeightRef.current,
+        eventHeight,
+        eventScreenY,
+        windowHeight: windowDims.height,
+        windowWidth: windowDims.width,
+        screenHeight: screenDims.height,
+        screenWidth: screenDims.width,
+        insetsTop: insets.top,
+        insetsBottom: insets.bottom,
+        keyboardAvoidingBehavior: Platform.OS === 'ios' ? 'padding' : 'undefined',
+        adaptiveOffset,
+        composerKeyboardOffset: composerKeyboardOffsetRef.current,
+        composerKeyboardMargin: COMPOSER_KEYBOARD_MARGIN,
+        composerBottom,
+        composerGapToKeyboard,
+        composerLayout: composerLayoutRef.current,
+        ...(extra || {}),
+      }));
+    } catch (debugError) {
+      console.warn('[CHAT_KEYBOARD_DEBUG][community] log error', debugError);
+    }
+  };
+
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e:any) => {
+      const nextHeight = Number(e?.endCoordinates?.height || 0);
+      const nextScreenY = e?.endCoordinates?.screenY ?? null;
+      keyboardVisibleRef.current = true;
+      keyboardHeightRef.current = nextHeight;
+      keyboardScreenYRef.current = nextScreenY;
       setKeyboardVisible(true);
-      try { setKeyboardHeight(e?.endCoordinates?.height || 0); } catch (er) { setKeyboardHeight(0); }
+      setKeyboardHeight(nextHeight);
+      setKeyboardScreenY(nextScreenY);
+      // Önce sistemin adjustResize yapmasına izin ver. Gerekiyorsa layout ölçümünden
+      // sonra sadece eksik kalan kadar manuel offset uygulayacağız.
+      setComposerKeyboardOffset(0);
+      logKeyboardDebug('keyboardDidShow', e, { nextKeyboardHeight: nextHeight, nextScreenY });
+      // measure composer in window coordinates to get reliable comparison with keyboard screenY
+      (async () => {
+        const measured = await measureRefInWindow(composerRef);
+        if (measured) {
+          composerScreenLayoutRef.current = measured;
+          logKeyboardDebug('composerMeasuredOnKeyboardShow', undefined, { measured });
+        }
+        requestAnimationFrame(() => applyAdaptiveComposerOffset('keyboardDidShow+raf', nextScreenY));
+        setTimeout(() => applyAdaptiveComposerOffset('keyboardDidShow+80ms', nextScreenY), 80);
+        setTimeout(() => applyAdaptiveComposerOffset('keyboardDidShow+180ms', nextScreenY), 180);
+        setTimeout(() => applyAdaptiveComposerOffset('keyboardDidShow+350ms', nextScreenY), 350);
+        setTimeout(() => applyAdaptiveComposerOffset('keyboardDidShow+700ms', nextScreenY), 700);
+      })();
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      logKeyboardDebug('keyboardDidHide');
+      keyboardVisibleRef.current = false;
+      keyboardHeightRef.current = 0;
+      keyboardScreenYRef.current = null;
       setKeyboardVisible(false);
       setKeyboardHeight(0);
+      setKeyboardScreenY(null);
+      setComposerKeyboardOffset(0);
     });
     return () => {
       try { showSub.remove(); } catch {}
@@ -609,11 +757,7 @@ export default function CommunityChatScreen() {
       }
     }
   };
-
-  // Android'de pencere çoğu cihazda zaten adjustResize ile küçülür.
-  // Ek marginBottom vermek özellikle Android 12 ve eski cihazlarda klavye ile composer
-  // arasında büyük boşluk oluşturuyor; bu yüzden Android offset'i 0 tutulur.
-  const composerKeyboardOffset = 0;
+  // composerKeyboardOffset state'i runtime layout ölçümüne göre yukarıdaki helper'lar tarafından güncellenir.
 
   if (loading) return (
     <KeyboardAvoidingView style={{ flex:1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
@@ -687,7 +831,24 @@ export default function CommunityChatScreen() {
           )}
         />
 
-        <View style={{flexDirection:'row', paddingHorizontal:8, paddingVertical:8, paddingBottom: keyboardVisible ? 8 : 8 + insets.bottom, marginBottom: composerKeyboardOffset, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border}}>
+        <View
+          ref={composerRef}
+          onLayout={(event) => {
+            composerLayoutRef.current = event.nativeEvent.layout;
+            logKeyboardDebug('composerLayout', undefined, { layout: event.nativeEvent.layout, composerKeyboardOffset });
+            (async () => {
+              try {
+                const measured = await measureRefInWindow(composerRef);
+                if (measured) {
+                  composerScreenLayoutRef.current = measured;
+                  logKeyboardDebug('composerLayoutMeasured', undefined, { measured });
+                }
+              } catch (e) {}
+              applyAdaptiveComposerOffset('composerLayout');
+            })();
+          }}
+          style={{flexDirection:'row', paddingHorizontal:8, paddingVertical:8, paddingBottom: keyboardVisible ? 8 : 8 + insets.bottom, marginBottom: composerKeyboardOffset, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border}}
+        >
           <TextInput
             style={{flex:1, borderWidth:1, borderColor:colors.border, borderRadius:8, padding:8, backgroundColor: colors.background, color: colors.text}}
             placeholderTextColor={colors.muted}
@@ -696,6 +857,10 @@ export default function CommunityChatScreen() {
             placeholder="Mesaj yazın..."
             returnKeyType="send"
             onSubmitEditing={handleSend}
+            onFocus={() => {
+              setTimeout(() => applyAdaptiveComposerOffset('inputFocus+120ms'), 120);
+              setTimeout(() => applyAdaptiveComposerOffset('inputFocus+300ms'), 300);
+            }}
           />
           <TouchableOpacity onPress={handleSend} style={{marginLeft:8, alignSelf:'center', paddingHorizontal:12, paddingVertical:8, backgroundColor:colors.primary, borderRadius:8}}>
             <Text style={{color:'#fff'}}>Gönder</Text>

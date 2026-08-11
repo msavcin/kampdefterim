@@ -44,6 +44,7 @@ import ProfileHubRow from '../components/ProfileHubRow';
 import OfflineRegionSelector from '../components/OfflineRegionSelector';
 import AIReviewSettingsPanel from '../components/AIReviewSettingsPanel';
 import AppPermissionsSettingsPanel from '../components/AppPermissionsSettingsPanel';
+import FeatureEntitlementsAdminPanel from '../components/FeatureEntitlementsAdminPanel';
 import { clearTileCache, getTileCacheStats } from '@/lib/mapTileCache';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { eventBus } from '@/lib/eventBus';
@@ -403,6 +404,18 @@ export default function ProfileAppSettingsScreen() {
                   Uygulama ve İzinler
                 </Text>
                 <AppPermissionsSettingsPanel />
+              </View>
+              <View style={{ padding: 12, paddingTop: 0 }}>
+                <Text
+                  style={{
+                    color: colors.text,
+                    fontWeight: '600',
+                    marginBottom: 8,
+                  }}
+                >
+                  Premium & Guest Hakları
+                </Text>
+                <FeatureEntitlementsAdminPanel />
               </View>
               <View style={{ padding: 12, paddingTop: 0 }}>
                 <Text
