@@ -95,6 +95,8 @@ export interface PeerInfo {
   host: string;
   /** TCP port numarası */
   port: number;
+  /** WiFi MAC adresi (opsiyonel - ARP tablosundan veya handshake'ten) */
+  macAddress?: string;
 }
 
 export interface PeerMessage {
@@ -120,6 +122,11 @@ export interface PeerMessage {
    * Döngü tespiti ve debug için kullanılır.
    */
   relayPath?: string[];
+  /**
+   * Gönderen cihazın WiFi MAC adresi (opsiyonel).
+   * IP değişikliklerinde cihazı tanımak için kullanılır.
+   */
+  macAddress?: string;
 }
 
 type MessageHandler = (msg: PeerMessage, peerId: string) => void;
@@ -138,6 +145,10 @@ const SUBNET_SCAN_RANGE = 254;
 const SCAN_PRIORITY_END = 40;
 /** Bir tarama turunda aynı anda açılan maksimum TCP soket sayısı */
 const MAX_CONCURRENT_SCANS = 40;
+/** ARP tablosu sürekli izleme aralığı (ms) — IP değişikliklerini yakalamak için */
+const ARP_MONITOR_INTERVAL_MS = 5_000;
+/** ARP cache geçerlilik süresi (ms) — eski cache'i temizlemek için */
+const ARP_CACHE_TTL_MS = 30_000;
 /** Hotspot istemcileri farklı üreticilerde .2, .100 veya .200+ aralıklarından IP alabiliyor. */
 const SCAN_PRIORITY_RANGES: Array<[number, number]> = [
   [1, SCAN_PRIORITY_END],
@@ -165,6 +176,8 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 interface ConnectedPeer extends PeerInfo {
   socket: any;
   buffer: string;
+  /** Son görülme zamanı (ms) - IP değişikliği tespiti için */
+  lastSeen?: number;
 }
 
 // ─── Ana sınıf ───────────────────────────────────────────────────────────────
@@ -172,10 +185,15 @@ interface ConnectedPeer extends PeerInfo {
 export class WifiLanTransport {
   private _userId = '';
   private _userName = '';
+  private _ownMacAddress = '';
+  /** Önceki MAC adresi — MAC randomization tespiti için */
+  private _previousMacAddress = '';
   private _server: any = null;
   private _zeroconf: any = null;
   /** Hotspot alt ağ taraması zamanlayıcısı (mDNS'e ek fallback) */
   private _subnetScanTimer: ReturnType<typeof setInterval> | null = null;
+  /** ARP tablosu sürekli izleme zamanlayıcısı — IP değişikliklerini yakalamak için */
+  private _arpMonitorTimer: ReturnType<typeof setInterval> | null = null;
   /** Her subnet base'in en son tarandığı zaman (ms). Tekrar taramayı önler. */
   private _lastSubnetScanAt = new Map<string, number>();
   /** Uygulama seviyesi kalp atışı zamanlayıcısı */
@@ -184,10 +202,20 @@ export class WifiLanTransport {
   /** Henüz tamamlanmamış TCP bağlantıları — çift bağlantıyı önler */
   private _connecting = new Set<string>();
   /**
-   * Daha önce başarıyla bağlanan peer'ların cache'i.
-   * Bağlantı kopunca tam subnet taraması yapmadan doğrudan bu IP'ye dönülür.
+   * PRİMARY CACHE: userId bazlı peer tracking.
+   * MAC randomization'dan etkilenmez — her zaman userId ile eşleşir.
    */
-  private _knownPeers = new Map<string, { host: string; port: number; userName: string; lastSeen: number }>();
+  private _knownPeers = new Map<string, { host: string; port: number; userName: string; lastSeen: number; macAddress?: string }>();
+  /**
+   * SECONDARY CACHE: MAC adresi ile indeksleme (opsiyonel).
+   * Sadece IP değişikliklerinde yardımcı anahtar olarak kullanılır.
+   * MAC randomization durumunda güvenilmez — userId primary key'dir.
+   */
+  private _knownPeersByMac = new Map<string, { userId: string; userName: string; lastHost: string; lastPort: number; lastSeen: number }>();
+  /** ARP tablosu cache — son tarama zamanı */
+  private _lastArpScanAt = 0;
+  /** ARP tablosu cache — IP → MAC eşleştirmesi */
+  private _arpCache = new Map<string, string>();
   /** Yeniden bağlanma zamanlayıcıları (userId → timer) */
   private _reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Ardışık yeniden bağlanma deneme sayacı (userId → count) */
@@ -225,6 +253,39 @@ export class WifiLanTransport {
     this._userId = userId;
     this._userName = userName;
     this._running = true;
+
+    // Kendi MAC adresimizi al ve randomization kontrolü yap
+    try {
+      if (NativeModules?.NetworkIf?.getWifiMacAddress) {
+        const newMac = await NativeModules.NetworkIf.getWifiMacAddress() || '';
+        
+        // MAC değişikliği tespiti (randomization veya ağ değişimi)
+        if (this._previousMacAddress && this._previousMacAddress !== newMac) {
+          console.warn('[WifiLanTransport] ⚠️ MAC adresi değişti:', this._previousMacAddress, '→', newMac);
+          console.warn('[WifiLanTransport] Not: Rastgele MAC kullanımı peer tracking\'i etkileyebilir');
+          // Eski MAC cache'ini temizle (artık geçersiz)
+          for (const [mac, peer] of this._knownPeersByMac) {
+            if (mac === this._previousMacAddress) {
+              // Eski MAC'i sil ama userId cache'i koru (primary)
+              this._knownPeersByMac.delete(mac);
+              console.log('[WifiLanTransport] Eski MAC cache temizlendi:', mac);
+            }
+          }
+        }
+        
+        this._ownMacAddress = newMac;
+        this._previousMacAddress = newMac;
+        
+        if (this._ownMacAddress) {
+          console.log('[WifiLanTransport] kendi MAC adresi:', this._ownMacAddress);
+        } else {
+          console.warn('[WifiLanTransport] ⚠️ MAC adresi alınamadı - randomization aktif olabilir');
+        }
+      }
+    } catch (e) {
+      console.warn('[WifiLanTransport] MAC adresi alınamadı:', (e as any)?.message);
+    }
+
     // Android'de mDNS multicast paketlerini alabilmek için MulticastLock edin
     await this._acquireMulticastLock();
     await this._startTcpServer();
@@ -236,6 +297,8 @@ export class WifiLanTransport {
       this._lastSubnetScanAt.clear();
       this._doSubnetScan();
     }, SUBNET_SCAN_MS);
+    // ARP tablosu sürekli izleme — IP değişikliklerini yakalamak için
+    this._startArpMonitoring();
     // Uygulama seviyesi kalp atışı — Android idle TCP drop'larını önler
     this._startHeartbeat();
   }
@@ -248,6 +311,10 @@ export class WifiLanTransport {
       clearInterval(this._subnetScanTimer);
       this._subnetScanTimer = null;
     }
+    if (this._arpMonitorTimer) {
+      clearInterval(this._arpMonitorTimer);
+      this._arpMonitorTimer = null;
+    }
     if (this._heartbeatTimer) {
       clearInterval(this._heartbeatTimer);
       this._heartbeatTimer = null;
@@ -257,6 +324,8 @@ export class WifiLanTransport {
     this._reconnectTimers.clear();
     this._reconnectCounts.clear();
     this._lastSubnetScanAt.clear();
+    this._arpCache.clear();
+    this._lastArpScanAt = 0;
 
     for (const peer of this._peers.values()) {
       try { peer.socket?.destroy(); } catch { /* ignore */ }
@@ -294,6 +363,180 @@ export class WifiLanTransport {
     // Manuel tetiklemede cache'i temizle — taze tarama yapılsın
     this._lastSubnetScanAt.clear();
     this._doSubnetScan();
+  }
+
+  /**
+   * Tüm subnet tarama ve peer keşif mekanizmalarını başlatan ana fonksiyon.
+   * Öncelik sırasına göre:
+   * 1. Bilinen peer'lar (userId ve MAC cache'lerinden)
+   * 2. ARP tablosu
+   * 3. DHCP gateway
+   * 4. Subnet taraması
+   */
+  private async _doSubnetScan(): Promise<void> {
+    try {
+      // ── Öncelik 1: PRIMARY - userId bazlı cache (MAC randomization'dan bağımsız) ──────
+      const now = Date.now();
+      
+      // userId bazlı cache'ten bilinen peer'lara doğrudan bağlan
+      for (const [uid, known] of this._knownPeers) {
+        if (this._peers.has(uid) || this._connecting.has(uid)) continue;
+        if ((now - known.lastSeen) > KNOWN_PEER_TTL_MS) continue;
+        if (this._reconnectTimers.has(uid)) continue;
+        
+        // ARP cache'te bu peer'ın MAC'i varsa yeni IP'yi kontrol et
+        let targetIp = known.host;
+        if (known.macAddress) {
+          const cachedIp = this._arpCache.get(known.macAddress);
+          if (cachedIp) targetIp = cachedIp;
+        }
+        
+        console.log('[WifiLanTransport] bilinen peer hızlı tarama (userId):', uid, targetIp, known.macAddress ? `(MAC: ${known.macAddress})` : '(MAC yok)');
+        this._connectToPeer(targetIp, known.port, uid, known.userName);
+      }
+      
+      // ── Öncelik 2: SECONDARY - MAC cache (opsiyonel, userId cache'te yoksa) ──────
+      // MAC randomization durumunda güvenilmez, ama IP değişikliklerinde yardımcı
+      for (const [mac, knownPeer] of this._knownPeersByMac) {
+        const userId = knownPeer.userId;
+        if (this._peers.has(userId) || this._connecting.has(userId)) continue;
+        if ((now - knownPeer.lastSeen) > KNOWN_PEER_TTL_MS) continue;
+        if (this._reconnectTimers.has(userId)) continue;
+        
+        // userId cache'te zaten varsa atla (duplicate)
+        if (this._knownPeers.has(userId)) continue;
+        
+        // ARP cache'te bu MAC'in yeni IP'si var mı?
+        const cachedIp = this._arpCache.get(mac);
+        const targetIp = cachedIp || knownPeer.lastHost;
+        
+        console.log('[WifiLanTransport] bilinen peer hızlı tarama (MAC fallback):', userId, targetIp, `(${mac})`);
+        this._connectToPeer(targetIp, knownPeer.lastPort, userId, knownPeer.userName);
+      }
+
+      // ── Öncelik 3: ARP tablosu (hotspot sağlayıcı tarafı) ────────────
+      // Android, bağlanan her WiFi istemcisini /proc/net/arp tablosuna yazar.
+      // Root gerekmez. Subnet taraması yapılmadan anlık bağlı cihaz listesi elde edilir.
+      const arpEntries = await this._getArpTableWithMac();
+      if (arpEntries.length > 0) {
+        console.log('[WifiLanTransport] ARP tablosundan peer keşfi:', arpEntries.length, 'cihaz');
+        
+        // ARP cache'i güncelle
+        for (const { ip, mac } of arpEntries) {
+          this._arpCache.set(mac, ip);
+        }
+        this._lastArpScanAt = Date.now();
+        
+        // ARP ile bulunan subnet base'lerini hemen işaretle.
+        const stampNow = Date.now();
+        const connectedMacs = new Set<string>();
+        
+        for (const { ip, mac } of arpEntries) {
+          const base = ip.split('.').slice(0, 3).join('.') + '.';
+          this._lastSubnetScanAt.set(base, stampNow);
+          
+          // Bu MAC'i tanıyoruz mu?
+          const knownByMac = this._knownPeersByMac.get(mac);
+          if (knownByMac) {
+            // Bilinen MAC - IP değişmiş olabilir
+            const userId = knownByMac.userId;
+            if (!this._peers.has(userId) && !this._connecting.has(userId)) {
+              console.log(`[WifiLanTransport] ARP: bilinen MAC bulundu: ${userId} → ${ip} (${mac})`);
+              knownByMac.lastHost = ip;
+              knownByMac.lastSeen = stampNow;
+              this._connectToPeer(ip, KAMP_TCP_PORT, userId, knownByMac.userName, SCAN_TIMEOUT_MS);
+              connectedMacs.add(mac);
+            }
+          } else {
+            // Bilinmeyen cihaz - tarama yap
+            this._connectToPeer(ip, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
+          }
+        }
+        
+        // Gateway'i de dene (istemci tarafında hotspot sağlayıcısını bulmak için)
+        const gw = await this._getGatewayIp();
+        if (gw && !arpEntries.some(e => e.ip === gw)) {
+          console.log('[WifiLanTransport] ARP + gateway bağlantısı:', gw);
+          this._connectToPeer(gw, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
+        }
+        return;
+      }
+
+      // ── Öncelik 4: DHCP gateway (hotspot istemci tarafı) ─────────────
+      // Hotspot'a WiFi ile bağlanan cihaz: gateway = hotspot sağlayıcısının IP'si.
+      // Doğrudan bağlanmak için 254 IP taramak gerekmez.
+      const gatewayIp = await this._getGatewayIp();
+      if (gatewayIp) {
+        console.log('[WifiLanTransport] DHCP gateway\'e doğrudan bağlanılıyor:', gatewayIp);
+        this._connectToPeer(gatewayIp, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
+        // Gateway bağlantısı başarılıysa peer'ın handshake'i üzerinden TCP sunucumuz
+        // kendi scan'ini tetikler. Yine de aynı subnet'te başka peer olabilir;
+        // gateway subnet'ini tam tara ama gateway IP'sini atlamadan (-1).
+        this._doSubnetScanOnBase(gatewayIp, -1);
+        return;
+      }
+
+      // ── Öncelik 5: Kendi IP'lerinden subnet taraması (fallback) ──────
+      const ips = await this._getLocalIpsFromNative();
+
+      // Hotspot fallback subnet'leri — kendi IP'miz bu subnet'lerde bilinmiyor olabilir
+      // (örn. hotspot'a WiFi ile bağlanan istemci), bu yüzden -1 (no-skip) geçiyoruz.
+      // Kendine bağlanma girişimleri handshake'teki loopback kontrolüyle engellenir.
+      const HOTSPOT_SEEDS = ['192.168.43.1', '192.168.49.1', '10.0.0.1', '172.20.10.1', '192.168.1.1'];
+
+      if (ips.length > 0) {
+        console.log('[WifiLanTransport] native interface IP\'leri:', ips);
+        const scannedBases = new Set<string>();
+        for (const ip of ips) {
+          const base = ip.split('.').slice(0, 3).join('.') + '.';
+          scannedBases.add(base);
+          this._doSubnetScanOnBase(ip, Number(ip.split('.')[3]));
+        }
+        // Ayrıca bilinen hotspot subnet'lerini de tara (cellular IP aktifken hotspot subnet'i atlanmasın)
+        for (const seed of HOTSPOT_SEEDS) {
+          const base = seed.split('.').slice(0, 3).join('.') + '.';
+          if (!scannedBases.has(base)) {
+            scannedBases.add(base);
+            this._doSubnetScanOnBase(seed, -1); // kendi IP'miz bu subnet'te bilinmiyor
+          }
+        }
+        return;
+      }
+
+      // Native modül başarısız → expo-network ile dene
+      if (!Network) {
+        console.warn('[WifiLanTransport] expo-network modülü yüklenememiş');
+        console.log('[WifiLanTransport] IP tespit edilemedi, fallback subnet\'ler taranıyor');
+        for (const fallback of HOTSPOT_SEEDS) {
+          this._doSubnetScanOnBase(fallback, -1);
+        }
+        return;
+      }
+      const localIp: string = await Network.getIpAddressAsync().catch(() => '');
+      if (localIp && localIp !== '0.0.0.0') {
+        const scannedBases = new Set<string>();
+        const localBase = localIp.split('.').slice(0, 3).join('.') + '.';
+        scannedBases.add(localBase);
+        this._doSubnetScanOnBase(localIp, Number(localIp.split('.')[3]));
+        // expo-network cellular IP döndürmüş olabilir; hotspot subnet'lerini de tara
+        for (const seed of HOTSPOT_SEEDS) {
+          const base = seed.split('.').slice(0, 3).join('.') + '.';
+          if (!scannedBases.has(base)) {
+            scannedBases.add(base);
+            this._doSubnetScanOnBase(seed, -1);
+          }
+        }
+        return;
+      }
+
+      // Son çare: bilinen Android hotspot subnet'leri (kendi IP'miz bilinmiyor → -1)
+      console.log('[WifiLanTransport] IP tespit edilemedi, fallback subnet\'ler taranıyor');
+      for (const fallback of HOTSPOT_SEEDS) {
+        this._doSubnetScanOnBase(fallback, -1);
+      }
+    } catch (e) {
+      console.warn('[WifiLanTransport] alt ağ taraması hatası:', (e as any)?.message);
+    }
   }
 
   // ─── Mesaj gönderme ───────────────────────────────────────────────────────
@@ -363,6 +606,7 @@ export class WifiLanTransport {
           conversationId: HANDSHAKE_CONV,
           text: '',
           timestamp: Date.now(),
+          macAddress: this._ownMacAddress || undefined,
         };
         try { socket.write(JSON.stringify(hs) + '\n'); } catch { /* ignore */ }
 
@@ -378,6 +622,7 @@ export class WifiLanTransport {
               if (msg.conversationId === HANDSHAKE_CONV) {
                 // Karşı tarafın handshake'i geldi — _peers'e kaydet (çift yönlü kullanım için)
                 const uid = msg.senderId;
+                const remoteMac = msg.macAddress || '';
                 resolvedUserId = uid;
                 if (!this._peers.has(uid)) {
                   this._peers.set(uid, {
@@ -385,15 +630,17 @@ export class WifiLanTransport {
                     userName: msg.senderName,
                     host: remoteAddr,
                     port: KAMP_TCP_PORT,
+                    macAddress: remoteMac,
                     socket,
                     buffer: '',
+                    lastSeen: Date.now(),
                   });
                   registeredThisSocket = true;
-                  // Başarılı bağlantıyı cache'e yaz
-                  this._cacheKnownPeer(uid, remoteAddr, KAMP_TCP_PORT, msg.senderName);
+                  // Başarılı bağlantıyı cache'e yaz (hem IP hem MAC bazlı)
+                  this._cacheKnownPeer(uid, remoteAddr, KAMP_TCP_PORT, msg.senderName, remoteMac);
                   this._reconnectCounts.delete(uid);
                   this._notifyPeerChange();
-                  console.log('[WifiLanTransport] gelen peer tanındı:', uid, remoteAddr);
+                  console.log('[WifiLanTransport] gelen peer tanındı:', uid, remoteAddr, remoteMac ? `(MAC: ${remoteMac})` : '');
                   // Bu peer'ın subnet'ini öğrendik — aynı ağdaki diğer cihazları tara
                   // remoteAddr peer'ın IP'sidir, kendi IP'miz değil → -1 (no self-skip)
                   this._doSubnetScanOnBase(remoteAddr, -1);
@@ -449,139 +696,7 @@ export class WifiLanTransport {
     }
   }
 
-  // ─── UDP Broadcast Keşfi ─────────────────────────────────────────────────
-  /**
-   * mDNS'e ek fallback: UDP broadcast üzerinden cihazları keşfet.
-   *
-   * Hotspot + doğrudan WiFi senaryolarında mDNS multicast Android'de
-   * MulticastLock olmadan alınamaz. Bu yöntem 255.255.255.255:KAMP_UDP_PORT
-   * adresine periyodik UDP datagram gönderir; aynı ağdaki cihazlar
-   * bu paketi alarak TCP bağlantısı başlatır.
-   *
-  // ─── Hotspot Subnet Taraması ─────────────────────────────────────────────
-  /**
-   * mDNS'e ek fallback: cihazın IP'sinden alt ağı hesaplar ve aynı
-   * ağdaki .1–.30 IP'lerine kısa süreli TCP bağlantıları dener.
-   *
-   * Android hotspot genellikle 192.168.43.x alt ağını kullanır.
-   * Herhangi bir IP'de TCP sunucusu varsa handshake alırız → peer bulundu.
-   * Tüm bağlantılar paralel açılır; başarısız olanlar 1.5s sonra kapanır.
-   *
-   * Gereksinim: expo-network (getIpAddressAsync)
-   */
-  private async _doSubnetScan(): Promise<void> {
-    if (!this._running) return;
-    try {
-      // ── Öncelik 1: bilinen peer'lara doğrudan yeniden bağlan ──────────
-      const now = Date.now();
-      for (const [uid, known] of this._knownPeers) {
-        if (this._peers.has(uid) || this._connecting.has(uid)) continue;
-        if ((now - known.lastSeen) > KNOWN_PEER_TTL_MS) continue;
-        if (this._reconnectTimers.has(uid)) continue;
-        console.log('[WifiLanTransport] bilinen peer hızlı tarama:', uid, known.host);
-        this._connectToPeer(known.host, known.port, uid, known.userName);
-      }
-
-      // ── Öncelik 2: ARP tablosu (hotspot sağlayıcı tarafı) ────────────
-      // Android, bağlanan her WiFi istemcisini /proc/net/arp tablosuna yazar.
-      // Root gerekmez. Subnet taraması yapılmadan anlık bağlı cihaz listesi elde edilir.
-      const arpIps = await this._getArpPeerIps();
-      if (arpIps.length > 0) {
-        console.log('[WifiLanTransport] ARP tablosundan peer IP\'leri:', arpIps);
-        // ARP ile bulunan subnet base'lerini hemen işaretle.
-        // Peer handshake'i gelince tetiklenecek _doSubnetScanOnBase çağrısı
-        // bu sayede "yakın zamanda tarandı" kontrolüne takılarak atlanır.
-        const stampNow = Date.now();
-        for (const ip of arpIps) {
-          const base = ip.split('.').slice(0, 3).join('.') + '.';
-          this._lastSubnetScanAt.set(base, stampNow);
-          this._connectToPeer(ip, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
-        }
-        // ARP başarılıysa subnet taraması gereksiz; sadece gateway'i de dene (istemci tarafı)
-        const gw = await this._getGatewayIp();
-        if (gw && !arpIps.includes(gw)) {
-          console.log('[WifiLanTransport] ARP + gateway bağlantısı:', gw);
-          this._connectToPeer(gw, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
-        }
-        return;
-      }
-
-      // ── Öncelik 3: DHCP gateway (hotspot istemci tarafı) ─────────────
-      // Hotspot'a WiFi ile bağlanan cihaz: gateway = hotspot sağlayıcısının IP'si.
-      // Doğrudan bağlanmak için 254 IP taramak gerekmez.
-      const gatewayIp = await this._getGatewayIp();
-      if (gatewayIp) {
-        console.log('[WifiLanTransport] DHCP gateway\'e doğrudan bağlanılıyor:', gatewayIp);
-        this._connectToPeer(gatewayIp, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
-        // Gateway bağlantısı başarılıysa peer'ın handshake'i üzerinden TCP sunucumuz
-        // kendi scan'ini tetikler. Yine de aynı subnet'te başka peer olabilir;
-        // gateway subnet'ini tam tara ama gateway IP'sini atlamadan (-1).
-        this._doSubnetScanOnBase(gatewayIp, -1);
-        return;
-      }
-
-      // ── Öncelik 4: Kendi IP'lerinden subnet taraması (fallback) ──────
-      const ips = await this._getLocalIpsFromNative();
-
-      // Hotspot fallback subnet'leri — kendi IP'miz bu subnet'lerde bilinmiyor olabilir
-      // (örn. hotspot'a WiFi ile bağlanan istemci), bu yüzden -1 (no-skip) geçiyoruz.
-      // Kendine bağlanma girişimleri handshake'teki loopback kontrolüyle engellenir.
-      const HOTSPOT_SEEDS = ['192.168.43.1', '192.168.49.1', '10.0.0.1', '172.20.10.1', '192.168.1.1'];
-
-      if (ips.length > 0) {
-        console.log('[WifiLanTransport] native interface IP\'leri:', ips);
-        const scannedBases = new Set<string>();
-        for (const ip of ips) {
-          const base = ip.split('.').slice(0, 3).join('.') + '.';
-          scannedBases.add(base);
-          this._doSubnetScanOnBase(ip, Number(ip.split('.')[3]));
-        }
-        // Ayrıca bilinen hotspot subnet'lerini de tara (cellular IP aktifken hotspot subnet'i atlanmasın)
-        for (const seed of HOTSPOT_SEEDS) {
-          const base = seed.split('.').slice(0, 3).join('.') + '.';
-          if (!scannedBases.has(base)) {
-            scannedBases.add(base);
-            this._doSubnetScanOnBase(seed, -1); // kendi IP'miz bu subnet'te bilinmiyor
-          }
-        }
-        return;
-      }
-
-      // Native modül başarısız → expo-network ile dene
-      if (!Network) {
-        console.warn('[WifiLanTransport] expo-network modülü yüklenememiş');
-        console.log('[WifiLanTransport] IP tespit edilemedi, fallback subnet\'ler taranıyor');
-        for (const fallback of HOTSPOT_SEEDS) {
-          this._doSubnetScanOnBase(fallback, -1);
-        }
-        return;
-      }
-      const localIp: string = await Network.getIpAddressAsync().catch(() => '');
-      if (localIp && localIp !== '0.0.0.0') {
-        const scannedBases = new Set<string>();
-        const localBase = localIp.split('.').slice(0, 3).join('.') + '.';
-        scannedBases.add(localBase);
-        this._doSubnetScanOnBase(localIp, Number(localIp.split('.')[3]));
-        // expo-network cellular IP döndürmüş olabilir; hotspot subnet'lerini de tara
-        for (const seed of HOTSPOT_SEEDS) {
-          const base = seed.split('.').slice(0, 3).join('.') + '.';
-          if (!scannedBases.has(base)) {
-            scannedBases.add(base);
-            this._doSubnetScanOnBase(seed, -1);
-          }
-        }
-        return;
-      }
-
-      // Son çare: bilinen Android hotspot subnet'leri (kendi IP'miz bilinmiyor → -1)
-      console.log('[WifiLanTransport] IP tespit edilemedi, fallback subnet\'ler taranıyor');
-      for (const fallback of HOTSPOT_SEEDS) {
-        this._doSubnetScanOnBase(fallback, -1);
-      }
-    } catch (e) {
-      console.warn('[WifiLanTransport] alt ağ taraması hatası:', (e as any)?.message);
-    }
-  }
+  // ─── ARP tablosu ve yardımcı fonksiyonlar ────────────────────────────────
 
   /**
    * ARP tablosundaki aktif cihaz IP'lerini döndürür (/proc/net/arp).
@@ -854,6 +969,7 @@ export class WifiLanTransport {
             conversationId: HANDSHAKE_CONV,
             text: '',
             timestamp: Date.now(),
+            macAddress: this._ownMacAddress || undefined,
           };
           try { socket.write(JSON.stringify(handshake) + '\n'); } catch { /* ignore */ }
         },
@@ -877,6 +993,7 @@ export class WifiLanTransport {
             const msg = JSON.parse(trimmed) as PeerMessage;
             if (msg.conversationId === HANDSHAKE_CONV) {
               const remoteId = msg.senderId;
+              const remoteMac = msg.macAddress || '';
               if (remoteId === this._userId) {
                 // Kendimize bağlanmışız (loopback) — kapat
                 socket.destroy();
@@ -894,14 +1011,18 @@ export class WifiLanTransport {
                 this._peers.set(remoteId, {
                   userId: remoteId,
                   userName: msg.senderName,
-                  host, port, socket, buffer: '',
+                  host, port, 
+                  macAddress: remoteMac,
+                  socket, 
+                  buffer: '',
+                  lastSeen: Date.now(),
                 });
                 registeredThisSocket = true;
-                // Başarılı bağlantıyı cache'e yaz
-                this._cacheKnownPeer(remoteId, host, port, msg.senderName);
+                // Başarılı bağlantıyı cache'e yaz (hem IP hem MAC bazlı)
+                this._cacheKnownPeer(remoteId, host, port, msg.senderName, remoteMac);
                 this._reconnectCounts.delete(remoteId);
                 this._notifyPeerChange();
-                console.log('[WifiLanTransport] alt ağ taramasında peer bulundu:', remoteId, host);
+                console.log('[WifiLanTransport] alt ağ taramasında peer bulundu:', remoteId, host, remoteMac ? `(MAC: ${remoteMac})` : '');
               } else {
                 // Normal mod: userId mDNS TXT'ten beklenir. Bazı cihazlarda TXT gelmez ve
                 // serviceName (KampDefterim-123) anahtar olarak kullanılır. Handshake gerçek
@@ -918,6 +1039,8 @@ export class WifiLanTransport {
                     }
                     existing.userId = remoteId;
                     existing.userName = msg.senderName;
+                    existing.macAddress = remoteMac;
+                    existing.lastSeen = Date.now();
                     this._peers.set(remoteId, existing);
                     realRemoteId = remoteId;
                     this._notifyPeerChange();
@@ -925,8 +1048,12 @@ export class WifiLanTransport {
                 }
                 const pidForCache = realRemoteId || remoteId || userId;
                 const p = this._peers.get(pidForCache);
-                if (p) p.userName = msg.senderName;
-                this._cacheKnownPeer(pidForCache, host, port, msg.senderName);
+                if (p) {
+                  p.userName = msg.senderName;
+                  p.macAddress = remoteMac;
+                  p.lastSeen = Date.now();
+                }
+                this._cacheKnownPeer(pidForCache, host, port, msg.senderName, remoteMac);
                 this._reconnectCounts.delete(pidForCache);
               }
             } else if (msg.conversationId === HEARTBEAT_CONV) {
@@ -959,19 +1086,34 @@ export class WifiLanTransport {
           this._scheduleReconnect(pid);
           this._notifyPeerChange();
         }
-        if (userId) console.log('[WifiLanTransport] peer bağlantısı kapandı:', userId);
       });
     } catch (e) {
       this._connecting.delete(connectKey);
-      console.warn('[WifiLanTransport] peer bağlantısı kurulamadı:', host, (e as any)?.message);
+      console.warn('[WifiLanTransport] peer bağlantı hatası:', (e as any)?.message);
     }
   }
 
-  // ─── Yardımcılar ──────────────────────────────────────────────────────────
+  // ─── Mesaj gönderme yardımcısı ────────────────────────────────────────────
 
   private _dispatchMessage(msg: PeerMessage, peerId: string): void {
-    for (const h of this._messageHandlers.slice()) {
-      try { h(msg, peerId); } catch { /* ignore */ }
+    // Mesh relay: mesaj TTL'i varsa ve 0'dan büyükse relay yap
+    if (msg.ttl != null && msg.ttl > 0 && msg.relayPath) {
+      // Döngü kontrolü: bu mesajı daha önce relay yaptık mı?
+      if (msg.relayPath.includes(this._userId)) {
+        return; // Döngü tespit edildi, relay yapma
+      }
+      // Relay: mesajı gönderende başka herkese ilet
+      const relayedMsg: PeerMessage = {
+        ...msg,
+        ttl: msg.ttl - 1,
+        relayPath: [...(msg.relayPath || []), this._userId],
+      };
+      this.sendMessageExcept(relayedMsg, peerId).catch(() => {});
+    }
+
+    // Mesaj handler'larını tetikle
+    for (const handler of this._messageHandlers.slice()) {
+      try { handler(msg, peerId); } catch { /* ignore */ }
     }
   }
 
@@ -984,9 +1126,37 @@ export class WifiLanTransport {
 
   // ─── Bilinen peer cache ───────────────────────────────────────────────────
 
-  /** Başarıyla bağlanan peer bilgisini cache'e yaz. */
-  private _cacheKnownPeer(userId: string, host: string, port: number, userName: string): void {
-    this._knownPeers.set(userId, { host, port, userName, lastSeen: Date.now() });
+  /**
+   * Başarıyla bağlanan peer bilgisini cache'e yaz.
+   * PRIMARY: userId bazlı cache (MAC randomization'dan bağımsız)
+   * SECONDARY: MAC bazlı cache (opsiyonel, IP değişikliği desteği için)
+   */
+  private _cacheKnownPeer(userId: string, host: string, port: number, userName: string, macAddress?: string): void {
+    const now = Date.now();
+    
+    // PRIMARY CACHE: userId bazlı (her zaman güvenilir)
+    this._knownPeers.set(userId, { host, port, userName, lastSeen: now, macAddress });
+    
+    // SECONDARY CACHE: MAC bazlı (opsiyonel - MAC randomization durumunda güvenilmez)
+    if (macAddress && macAddress !== '02:00:00:00:00:00') {
+      // Eğer eski bir MAC varsa ve değiştiyse, eski MAC'i temizle
+      const existingPeer = this._knownPeers.get(userId);
+      if (existingPeer?.macAddress && existingPeer.macAddress !== macAddress) {
+        console.log('[WifiLanTransport] ⚠️ Peer MAC değişti:', userId, existingPeer.macAddress, '→', macAddress);
+        this._knownPeersByMac.delete(existingPeer.macAddress);
+      }
+      
+      this._knownPeersByMac.set(macAddress, { 
+        userId, 
+        userName, 
+        lastHost: host, 
+        lastPort: port, 
+        lastSeen: now 
+      });
+      console.log('[WifiLanTransport] peer cache güncellendi:', userId, '(MAC:', macAddress, ') IP:', host);
+    } else {
+      console.log('[WifiLanTransport] peer cache güncellendi:', userId, '(MAC yok) IP:', host);
+    }
   }
 
   /**
@@ -1021,7 +1191,83 @@ export class WifiLanTransport {
       console.log(`[WifiLanTransport] yeniden bağlanılıyor (${attempts + 1}. deneme): ${userId} → ${known.host}`);
       this._connectToPeer(known.host, known.port, userId, known.userName);
     }, delay);
+    
     this._reconnectTimers.set(userId, timer);
+  }
+
+  // ─── ARP tablosu sürekli izleme ──────────────────────────────────────────
+
+  /**
+   * ARP tablosunu periyodik olarak izler ve IP değişikliklerini tespit eder.
+   * Bilinen peer'ların MAC adresleri değişmeden IP'leri değişirse (DHCP renewal),
+   * otomatik olarak yeni IP'ye bağlanır.
+   */
+  private _startArpMonitoring(): void {
+    if (this._arpMonitorTimer) return;
+    
+    this._arpMonitorTimer = setInterval(async () => {
+      if (!this._running) return;
+      
+      try {
+        const now = Date.now();
+        const arpEntries = await this._getArpTableWithMac();
+        
+        if (arpEntries.length === 0) return;
+        
+        // ARP cache'i güncelle
+        for (const { ip, mac } of arpEntries) {
+          this._arpCache.set(mac, ip);
+        }
+        this._lastArpScanAt = now;
+        
+        // PRIMARY: userId bazlı peer'ların IP değişikliklerini kontrol et
+        for (const [userId, knownPeer] of this._knownPeers) {
+          // Bu peer'ın MAC'i varsa ARP cache'te yeni IP'yi kontrol et
+          if (knownPeer.macAddress) {
+            const newIp = this._arpCache.get(knownPeer.macAddress);
+            
+            // Bu MAC'in yeni IP'si var ve eskisinden farklı
+            if (newIp && newIp !== knownPeer.host) {
+              // Bu peer şu anda aktif değilse ve yeniden bağlanma zamanlayıcısı yoksa
+              if (!this._peers.has(userId) && !this._reconnectTimers.has(userId)) {
+                console.log(`[WifiLanTransport] IP değişikliği tespit edildi: ${userId} (${knownPeer.host} → ${newIp}, MAC: ${knownPeer.macAddress})`);
+                
+                // PRIMARY cache'i güncelle
+                knownPeer.host = newIp;
+                knownPeer.lastSeen = now;
+                
+                // SECONDARY cache'i de güncelle
+                const macCached = this._knownPeersByMac.get(knownPeer.macAddress);
+                if (macCached) {
+                  macCached.lastHost = newIp;
+                  macCached.lastSeen = now;
+                }
+                
+                // Yeni IP'ye bağlanmayı dene
+                this._connectToPeer(newIp, knownPeer.port, userId, knownPeer.userName, SCAN_TIMEOUT_MS);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[WifiLanTransport] ARP monitoring hatası:', (e as any)?.message);
+      }
+    }, ARP_MONITOR_INTERVAL_MS);
+  }
+
+  /**
+   * Native modülden ARP tablosunu MAC adresleriyle al.
+   */
+  private async _getArpTableWithMac(): Promise<Array<{ ip: string; mac: string }>> {
+    if (!NativeModules?.NetworkIf?.getArpTableWithMac) {
+      return [];
+    }
+    try {
+      const result = await NativeModules.NetworkIf.getArpTableWithMac();
+      return Array.isArray(result) ? result : [];
+    } catch (e) {
+      return [];
+    }
   }
 
   // ─── Kalp atışı ───────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import { createThemedStyles } from '@/constants/theme/sharedStyles';
 import { emitChatEvent } from '@/lib/chatEvents';
 import { markRead } from '@/lib/readMap';
-import { getMe } from '@/lib/userCommunityApi';
+import { getMe, listCommunityMembers } from '@/lib/userCommunityApi';
 import { offlineTransportManager } from '@/lib/offlineTransport';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
@@ -100,6 +100,8 @@ export default function CommunityChatScreen() {
     Platform.OS === 'android' && (Number(Platform.Version) || 0) >= 35 ? 56 : 8;
   const [isOffline, setIsOffline] = useState(false);
   const [hasWifiPeers, setHasWifiPeers] = useState(false);
+  const [communityMemberIds, setCommunityMemberIds] = useState<string[]>([]);
+  const [hasCommunityPeerConnected, setHasCommunityPeerConnected] = useState(false);
   const isConnected = useNetworkStatus();
   const prevConnectedRef = useRef<boolean | null>(null);
 
@@ -437,6 +439,27 @@ export default function CommunityChatScreen() {
         socket.connect(tokenRef.current || '');
       } catch (e) { console.warn('[CommunityChat] socket init failed', e); }
 
+      // fetch community member ids for routing offline messages to connected members
+      (async () => {
+        try {
+          const members = await listCommunityMembers(Number(communityId));
+          if (Array.isArray(members)) {
+            const ids = members.map((m:any) => String(m?.id ?? m?.user_id ?? m?.userId)).filter(Boolean);
+            setCommunityMemberIds(ids);
+            try { await AsyncStorage.setItem(`@community_members_${communityId}`, JSON.stringify(ids)); } catch (e) { /* ignore */ }
+          }
+        } catch (e) {
+          // fallback to cached member list if available
+          try {
+            const raw = await AsyncStorage.getItem(`@community_members_${communityId}`);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) setCommunityMemberIds(parsed);
+            }
+          } catch (er) { /* ignore */ }
+        }
+      })();
+
       if (mounted) setLoading(false);
     })();
 
@@ -520,6 +543,7 @@ export default function CommunityChatScreen() {
   useEffect(() => {
     if (!communityId) return;
     let unsubMsg: (() => void) | null = null;
+    let unsubPeers: (() => void) | null = null;
     (async () => {
       try {
         // Transport sadece offline modda başlatılır
@@ -560,12 +584,25 @@ export default function CommunityChatScreen() {
             return [peerMsg, ...prev];
           });
         });
+
+        // update hasCommunityPeerConnected whenever peers change
+        const peerSync = (peers: any[]) => {
+          try {
+            const connectedIds = peers.map((p:any) => String(p.userId));
+            const found = communityMemberIds.some((mid) => connectedIds.includes(String(mid)));
+            setHasCommunityPeerConnected(Boolean(found));
+          } catch (e) { setHasCommunityPeerConnected(false); }
+        };
+        // subscribe
+        unsubPeers = offlineTransportManager.onPeersChanged(peerSync);
+        // run initial sync
+        peerSync(offlineTransportManager.peers || []);
       } catch (e) {
         console.warn('[CommunityChat] offline transport init hatası:', e);
       }
     })();
-    return () => { unsubMsg?.(); };
-  }, [isConnected, communityId]);
+    return () => { unsubMsg?.(); if (unsubPeers) unsubPeers(); };
+  }, [isConnected, communityId, communityMemberIds]);
 
   // ─── Online/Offline geçiş yönetimi ────────────────────────────────
   useEffect(() => {
@@ -660,6 +697,11 @@ export default function CommunityChatScreen() {
 
   const handleSend = async () => {
     if (!text.trim()) return;
+    // Eğer çevrimdışı ve toplulukta hiçbir üye hotspot ile bağlı değilse gönderimi engelle
+    if (!isConnected && !hasCommunityPeerConnected) {
+      Alert.alert('Çevrimdışı', 'Toplulukta hotspot ile bağlı kullanıcı yok — mesaj gönderilemiyor.');
+      return;
+    }
     const tempId = 'tmp-' + Date.now();
     const payload: any = { text, community_id: Number(communityId) };
     const optimistic = { id: tempId, text, sender_id: localUserId ?? 'me', created_at: new Date().toISOString(), sending: true };
@@ -729,8 +771,15 @@ export default function CommunityChatScreen() {
       try {
         let queueId: string;
         if (offlineTransportManager.isActive) {
-          // Transport mesajı kuyruğa alır ve peer'lara iletir; ayrıca enqueueMessage çağırma
-          queueId = await offlineTransportManager.sendMessage(`community_${communityId}`, text);
+          // Sadece topluluk üyeleri olan bağlı peer'lara gönder
+          const connectedTargets = (offlineTransportManager.peers || [])
+            .filter((p:any) => communityMemberIds && communityMemberIds.length > 0 ? communityMemberIds.includes(String(p.userId)) : false)
+            .map((p:any) => String(p.userId));
+          queueId = await offlineTransportManager.sendMessage(
+            `community_${communityId}`,
+            text,
+            connectedTargets.length ? (connectedTargets as any) : undefined,
+          );
         } else {
           const { enqueueMessage } = await import('@/lib/offlineChatQueue');
           queueId = await enqueueMessage({
@@ -758,6 +807,8 @@ export default function CommunityChatScreen() {
     }
   };
   // composerKeyboardOffset state'i runtime layout ölçümüne göre yukarıdaki helper'lar tarafından güncellenir.
+
+  const sendDisabled = !isConnected && !hasCommunityPeerConnected;
 
   if (loading) return (
     <KeyboardAvoidingView style={{ flex:1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
@@ -862,9 +913,25 @@ export default function CommunityChatScreen() {
               setTimeout(() => applyAdaptiveComposerOffset('inputFocus+300ms'), 300);
             }}
           />
-          <TouchableOpacity onPress={handleSend} style={{marginLeft:8, alignSelf:'center', paddingHorizontal:12, paddingVertical:8, backgroundColor:colors.primary, borderRadius:8}}>
-            <Text style={{color:'#fff'}}>Gönder</Text>
-          </TouchableOpacity>
+          <View pointerEvents={sendDisabled ? 'none' : 'auto'} style={{ marginLeft: 8, alignSelf: 'center' }}>
+            <TouchableOpacity
+              accessibilityState={{ disabled: sendDisabled }}
+              onPress={sendDisabled ? undefined : handleSend}
+              activeOpacity={sendDisabled ? 1 : 0.85}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 8,
+                backgroundColor: sendDisabled ? colors.border : colors.primary,
+                opacity: sendDisabled ? 0.65 : 1,
+                minWidth: 72,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ color: sendDisabled ? colors.muted : '#fff', fontWeight: '600' }}>{sendDisabled ? 'Gönderilemiyor' : 'Gönder'}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </SafeAreaView>
     </KeyboardAvoidingView>

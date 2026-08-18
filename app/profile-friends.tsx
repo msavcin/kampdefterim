@@ -24,6 +24,7 @@ import { setLargeItemAsync, getLargeItemAsync } from '@/lib/largeStorage';
 import { Friend } from '../types/friend';
 import { useRouter } from 'expo-router';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+import { offlineTransportManager } from '@/lib/offlineTransport';
 
 export default function ProfileFriendsScreen() {
   const { colors } = useTheme();
@@ -49,6 +50,7 @@ export default function ProfileFriendsScreen() {
   const [friendError, setFriendError] = useState<string | null>(null);
   const [friendRequestLoading, setFriendRequestLoading] = useState(false);
   const [friendSearchLoading, setFriendSearchLoading] = useState(false);
+  const [nearbyPeerIds, setNearbyPeerIds] = useState<string[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -77,6 +79,23 @@ export default function ProfileFriendsScreen() {
   useEffect(() => {
     if (isConnected) fetchFriends();
   }, [isConnected]);
+
+  // Yakın peer'ları dinle — hotspot ile bulunan kullanıcıları işaretlemek için
+  useEffect(() => {
+    const sync = (peers: any[]) => {
+      try {
+        setNearbyPeerIds(Array.isArray(peers) ? peers.map((p) => String(p.userId)) : []);
+      } catch (e) {
+        setNearbyPeerIds([]);
+      }
+    };
+    // İlk durum
+    sync(offlineTransportManager.peers || []);
+    const unsub = offlineTransportManager.onPeersChanged(sync);
+    return () => {
+      try { unsub(); } catch {};
+    };
+  }, []);
 
   useEffect(() => {
     fetchFriendRequests(true);
@@ -383,22 +402,35 @@ export default function ProfileFriendsScreen() {
             <Text style={{ color: colors.muted }}>Henüz arkadaşınız yok.</Text>
           ) : (
             <View style={{ marginTop: 8 }}>
-              {friends.map((f) => (
-                <View key={String(f.id)} style={[styles.friendRow, { borderBottomColor: colors.surfaceVariant }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 }}>
-                    <FriendAvatar avatar_url={f.avatar_url} name={f.name || f.username || 'Kullanıcı'} size={48} />
-                    <View style={{ marginLeft: 12, flex: 1 }}>
-                      <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1} ellipsizeMode="tail">{f.name || f.username || 'Kullanıcı'}</Text>
-                      {f.username ? <Text style={{ color: colors.muted }} numberOfLines={1} ellipsizeMode="tail">@{f.username}</Text> : null}
+              {friends.map((f) => {
+                const peerIdStr = f?.id != null ? String(f.id) : null;
+                const isPeerNearby = peerIdStr ? nearbyPeerIds.includes(peerIdStr) : false;
+                const disabledMsg = !isConnected && !isPeerNearby;
+                return (
+                  <View key={String(f.id)} style={[styles.friendRow, { borderBottomColor: colors.surfaceVariant }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                      <FriendAvatar avatar_url={f.avatar_url} name={f.name || f.username || 'Kullanıcı'} size={48} />
+                      <View style={{ marginLeft: 12, flex: 1 }}>
+                        <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1} ellipsizeMode="tail">{f.name || f.username || 'Kullanıcı'}</Text>
+                        {f.username ? <Text style={{ color: colors.muted }} numberOfLines={1} ellipsizeMode="tail">@{f.username}</Text> : null}
+                      </View>
                     </View>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', width: 140, justifyContent: 'flex-end' }}>
-                    <TouchableOpacity onPress={() => { /* durum ikonu (görsel) */ }} style={[styles.iconBtn, { backgroundColor: colors.success + '18' }]}> 
-                      <CheckCircle size={16} color={colors.success} />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleOpenFriendConversation(f)} style={[styles.iconBtn, { backgroundColor: colors.info + '18', marginLeft: 8 }]}>
-                      <Mail size={16} color={colors.info} />
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', width: 140, justifyContent: 'flex-end' }}>
+                      <TouchableOpacity onPress={() => {}} style={[styles.iconBtn, { backgroundColor: isPeerNearby ? colors.success + '18' : colors.surfaceVariant + '11' }]}> 
+                        <CheckCircle size={16} color={isPeerNearby ? colors.success : colors.muted} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (disabledMsg) {
+                            Alert.alert('Çevrimdışı', 'Bu kullanıcı hotspot ile bulunana kadar mesaj gönderilemez.');
+                            return;
+                          }
+                          handleOpenFriendConversation(f);
+                        }}
+                        style={[styles.iconBtn, { backgroundColor: colors.info + '18', marginLeft: 8, opacity: disabledMsg ? 0.45 : 1 }]}
+                      >
+                        <Mail size={16} color={disabledMsg ? colors.muted : colors.info} />
+                      </TouchableOpacity>
                     <TouchableOpacity
                       onPress={async () => {
                         Alert.alert('Arkadaş Sil', 'Silmek istediğinize emin misiniz?', [
@@ -433,7 +465,8 @@ export default function ProfileFriendsScreen() {
                     </TouchableOpacity>
                   </View>
                 </View>
-              ))}
+              );
+            })}
             </View>
           )}
 

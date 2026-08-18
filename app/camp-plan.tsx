@@ -23,6 +23,7 @@ import { getLocationNameFromOSM } from '../lib/osmReverseGeocode';
 import { getAIEvaluation, getAIEvalStatus, AIEvaluationRequest, AIEvaluationResponse, AIEvalStatusResponse } from '../lib/aiEvaluationApi';
 import Markdown from 'react-native-markdown-display';
 import AIEvaluationDashboardModal from '../components/AIEvaluationDashboardModal';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 
 const DRAFT_KEY = 'campPlannerDraft';
 const SAVED_PLANS_KEY = 'campPlannerSavedPlans';
@@ -31,6 +32,7 @@ const PENDING_STEP_KEY = 'campPlanPendingStep';
 const PENDING_OPEN_KEY = 'campPlanPendingOpen';
 const WEATHER_API_KEY = '750db91332eb47c69c8171303262703';
 const WEATHER_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 saat
+const PREMIUM_CACHE_KEY = 'user_premium_status_cache_camp_plan';
 const makeStorageKey = (key: string, userId?: string | null) => (userId ? `${key}:${userId}` : key);
 const weatherCacheKey = (lat: number, lng: number, start?: string | null, end?: string | null) =>
   `weatherCache_${lat.toFixed(4)}_${lng.toFixed(4)}_${start ?? ''}_${end ?? ''}`;
@@ -102,6 +104,7 @@ const makeMapHTML = (lat: number, lng: number) => `<!DOCTYPE html><html><head><m
 export default function CampPlanPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const isConnected = useNetworkStatus();
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<CampPlan>(emptyPlan());
   const [savedPlans, setSavedPlans] = useState<CampPlan[]>([]);
@@ -201,25 +204,59 @@ export default function CampPlanPage() {
     }
   };
 
+  // Network durumu değiştiğinde premium bilgisini güncelle
   useEffect(() => {
+    let mounted = true;
     (async () => {
       try {
+        // Offline ise cache'ten oku
+        if (!isConnected) {
+          try {
+            const cached = await AsyncStorage.getItem(PREMIUM_CACHE_KEY);
+            if (cached !== null) {
+              const parsed = JSON.parse(cached);
+              if (parsed?.user && mounted) {
+                setMe(parsed.user);
+                if (__DEV__) console.log('[camp-plan] Offline: Cache\'ten kullanıcı bilgisi okundu');
+                return;
+              }
+            }
+          } catch (e) {
+            if (__DEV__) console.warn('[camp-plan] Cache okuma hatası:', e);
+          }
+          return;
+        }
+
+        // Online ise API'den çek ve cache'le
         const { getMe } = require('../lib/userCommunityApi');
         const u = await getMe();
+        if (!mounted) return;
         setMe(u);
+        // Cache'e kaydet
+        try {
+          await AsyncStorage.setItem(PREMIUM_CACHE_KEY, JSON.stringify({ user: u, updatedAt: new Date().toISOString() }));
+          if (__DEV__) console.log('[camp-plan] Kullanıcı bilgisi cache\'e kaydedildi');
+        } catch (e) {
+          if (__DEV__) console.warn('[camp-plan] Cache kaydetme hatası:', e);
+        }
       } catch (e) {
+        if (__DEV__) console.warn('[camp-plan] getMe hatası:', e);
+        if (!mounted) return;
         setMe(null);
       }
 
-      // Sayfa açılışında AI değerlendirme hakkı durumunu sorgula
-      try {
-        const s = await getAIEvalStatus();
-        if (s) setAiEvalStatus(s);
-      } catch (e) {
-        // ignore
+      // Sayfa açılışında AI değerlendirme hakkı durumunu sorgula (sadece online'ken)
+      if (isConnected) {
+        try {
+          const s = await getAIEvalStatus();
+          if (s && mounted) setAiEvalStatus(s);
+        } catch (e) {
+          // ignore
+        }
       }
     })();
-  }, []);
+    return () => { mounted = false; };
+  }, [isConnected]);
 
   const themedStyles: any = {
     container: [styles.container, { backgroundColor: theme.colors.background }],
@@ -1021,33 +1058,41 @@ export default function CampPlanPage() {
     const remaining = typeof aiEvalStatus?.remaining === 'number' ? aiEvalStatus!.remaining : undefined;
     const limit = typeof aiEvalStatus?.limit === 'number' ? aiEvalStatus!.limit : undefined;
     const hasQuota = typeof remaining === 'number' ? remaining > 0 : true;
+    
+    // Offline durumda premium kontrolü: isPremium true ise pasif göster, false ise premium ikonu göster
+    const shouldDisable = !isConnected || !isPremium || !hasQuota;
+    const shouldShowPremiumIcon = !isPremium; // Sadece premium değilse ikon göster, offline durumu önemli değil
 
     return (
       <View style={{ marginTop: 10, marginBottom: 8, position: 'relative' }}>
         <TouchableOpacity
           style={[
             { padding: 12, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
-            (!isPremium || !hasQuota)
+            shouldDisable
               ? { backgroundColor: theme.colors.surfaceVariant ?? '#f1f5f9', borderColor: theme.colors.border ?? '#cbd5e1', opacity: 0.6 }
               : { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
           ]}
-          activeOpacity={(!isPremium || !hasQuota) ? 1 : 0.7}
-          disabled={!isPremium || !hasQuota}
+          activeOpacity={shouldDisable ? 1 : 0.7}
+          disabled={shouldDisable}
           onPress={() => {
+            if (!isConnected) { Alert.alert('Çevrimdışı', 'Değerlendirme için internet bağlantısı gerekiyor.'); return; }
             if (!isPremium) { router.push('/premium'); return; }
             if (!hasQuota) return;
             fetchAIEvaluationForPlan(plan);
           }}
         >
-          <Icon name="Sparkles" size={16} color={(!isPremium || !hasQuota) ? theme.colors.muted : '#fff'} />
-          <Text style={{ color: (!isPremium || !hasQuota) ? theme.colors.muted : '#fff', fontSize: 15, marginLeft: 8, fontWeight: '600' }}>
+          <Icon name="Sparkles" size={16} color={shouldDisable ? theme.colors.muted : '#fff'} />
+          <Text style={{ color: shouldDisable ? theme.colors.muted : '#fff', fontSize: 15, marginLeft: 8, fontWeight: '600' }}>
             {`Kamp Defterim ile Değerlendir${typeof remaining === 'number' || typeof limit === 'number' ? ` (Kalan ${remaining ?? '?'} / ${limit ?? 10})` : ''}`}
           </Text>
         </TouchableOpacity>
-        {!isPremium && (
+        {shouldShowPremiumIcon && (
           <View style={[styles.aiEvalPremiumIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]} pointerEvents="none">
             <Icon name="Crown" size={14} color={theme.colors.primary} />
           </View>
+        )}
+        {!isConnected && isPremium && (
+          <Text style={[themedStyles.helpText, { marginTop: 8 }]}>Değerlendirme yapmak için internet bağlantısı gerekiyor.</Text>
         )}
         {!hasQuota && (
           <Text style={[themedStyles.helpText, { marginTop: 8 }]}>Bugünkü değerlendirme kotanız doldu. Yarın tekrar deneyebilirsiniz.</Text>

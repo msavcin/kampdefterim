@@ -9,7 +9,7 @@ import { apiFetch } from '@/lib/apiFetch';
 import { API_URL } from '@/lib/config';
 import { openConversationOrCommunity } from '@/lib/chatNavigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { listCommunities, getMe } from '@/lib/userCommunityApi';
+import { listCommunities, getMe, listCommunityMembers } from '@/lib/userCommunityApi';
 import { createChatSocket } from '@/lib/chatSocket';
 import { getToken } from '@/lib/auth';
 import { offlineTransportManager } from '@/lib/offlineTransport';
@@ -223,8 +223,32 @@ const FriendRow = React.memo(({
   onContinue,
   onStart,
   onDelete,
+  isConnected, // passed from parent
 }: any) => {
-  const conv = convProp ?? useMemo(() => getFriendConversation(item, convIndex, conversations), [item, convIndex, conversations]);
+  const convMemo = useMemo(() => getFriendConversation(item, convIndex, conversations), [item, convIndex, conversations]);
+  const conv = convProp ?? convMemo;
+  const [isWifiNearby, setIsWifiNearby] = useState<boolean>(() => {
+    try {
+      const peers = offlineTransportManager.peers || [];
+      return peers.some((p: any) => (p?.port || 0) !== 0 && String(p?.userId) === String(item?.id));
+    } catch (e) { return false; }
+  });
+
+  useEffect(() => {
+    const sync = (peers: any[]) => {
+      try {
+        const found = Array.isArray(peers) && peers.some((p: any) => (p?.port || 0) !== 0 && String(p?.userId) === String(item?.id));
+        setIsWifiNearby(Boolean(found));
+      } catch (e) { setIsWifiNearby(false); }
+    };
+    sync(offlineTransportManager.peers || []);
+    const unsub = offlineTransportManager.onPeersChanged(sync);
+    return () => { try { unsub(); } catch {} };
+  }, [item?.id]);
+
+  const networkStatusFromHook = useNetworkStatus();
+  const effectiveIsConnected = typeof isConnected !== 'undefined' ? isConnected : networkStatusFromHook;
+  const disabled = !effectiveIsConnected && !isWifiNearby;
 
   return (
     <View style={{flexDirection:'row', alignItems:'center', paddingVertical:8, borderBottomWidth:1, borderColor:colors.border, backgroundColor:colors.surface}}>
@@ -238,16 +262,24 @@ const FriendRow = React.memo(({
       </View>
       {conv ? (
         <View style={{position:'relative'}}>
-          <TouchableOpacity onPress={() => onContinue(conv)} style={{backgroundColor:colors.primary, paddingVertical:8, paddingHorizontal:12, borderRadius:8}}>
-            <Text style={{color:'#fff'}}>Sohbete Devam Et</Text>
+          <TouchableOpacity
+            onPress={() => { if (disabled) { Alert.alert('Çevrimdışı', 'Bu kullanıcı hotspot ile bulunana kadar mesaj gönderilemez.'); return; } onContinue(conv); }}
+            disabled={disabled}
+            style={{backgroundColor: disabled ? colors.surfaceVariant : colors.primary, paddingVertical:8, paddingHorizontal:12, borderRadius:8, opacity: disabled ? 0.6 : 1}}
+          >
+            <Text style={{color: disabled ? colors.muted : '#fff'}}>Sohbete Devam Et</Text>
           </TouchableOpacity>
           {showUnread && (
             <View style={{position:'absolute', top:-5, right:4, width:10, height:10, borderRadius:6, backgroundColor:colors.danger}} />
           )}
         </View>
       ) : (
-        <TouchableOpacity onPress={() => onStart(item)} style={{backgroundColor:colors.primary, paddingVertical:8,paddingHorizontal:12, borderRadius:8}}>
-          <Text style={{color:'#fff'}}>Mesaj Başlat</Text>
+        <TouchableOpacity
+          onPress={() => { if (disabled) { Alert.alert('Çevrimdışı', 'Bu kullanıcı hotspot ile bulunana kadar mesaj gönderilemez.'); return; } onStart(item); }}
+          disabled={disabled}
+          style={{backgroundColor: disabled ? colors.surfaceVariant : colors.primary, paddingVertical:8,paddingHorizontal:12, borderRadius:8, opacity: disabled ? 0.6 : 1}}
+        >
+          <Text style={{color: disabled ? colors.muted : '#fff'}}>Mesaj Başlat</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -260,6 +292,7 @@ const FriendRow = React.memo(({
   onStart,
   conversations,
   showUnread,
+  disabled = false,
 }: any) => {
   const conv = Array.isArray(conversations) ? conversations.find((c:any) => {
     try {
@@ -282,9 +315,25 @@ const FriendRow = React.memo(({
       {showUnread && (
         <View style={{ width: 10, height: 10, borderRadius: 6, backgroundColor: colors.info, marginRight: 8 }} />
       )}
-      <TouchableOpacity onPress={() => onStart(item)} style={{backgroundColor:colors.primary, paddingVertical:8,paddingHorizontal:12, borderRadius:8}}>
-        <Text style={{color:'#fff'}}>{label}</Text>
-      </TouchableOpacity>
+      <View pointerEvents={disabled ? 'none' : 'auto'} style={{ marginLeft: 8 }}>
+        <TouchableOpacity
+          accessibilityState={{ disabled }}
+          onPress={disabled ? undefined : () => onStart(item)}
+          activeOpacity={disabled ? 1 : 0.85}
+          style={{
+            paddingVertical: 8,
+            paddingHorizontal: 12,
+            borderRadius: 8,
+            backgroundColor: disabled ? colors.surfaceVariant : colors.primary,
+            opacity: disabled ? 0.65 : 1,
+            minWidth: 96,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ color: disabled ? colors.muted : '#fff', fontWeight: '600' }}>{label}</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 });
@@ -311,6 +360,8 @@ export default function NewChatScreen() {
   const autoOpenedRecipientConversationRef = useRef(false);
   const [tab, setTab] = useState<'friends'|'communities'>('friends');
   const [friendConvMap, setFriendConvMap] = useState<Record<string, any>>({});
+  const lastRefreshTimeRef = useRef<number>(0);
+  const REFRESH_THROTTLE_MS = 2000; // 2 saniye içinde tekrar yenileme yapma
 
   const emitUnreadUpdated = (totalUnread: number) => {
     if (lastUnreadTotalRef.current !== null && lastUnreadTotalRef.current === totalUnread) return;
@@ -348,14 +399,35 @@ export default function NewChatScreen() {
   const [composerText, setComposerText] = useState('');
   const [sending, setSending] = useState(false);
   const [localUserId, setLocalUserId] = useState<number | string | null>(null);
+  const [communityMemberIdsMap, setCommunityMemberIdsMap] = useState<Record<string, string[]>>({});
+  const [communityHasPeerMap, setCommunityHasPeerMap] = useState<Record<string, boolean>>({});
 
   const refreshConversations = useCallback(async () => {
     try {
       const convRes = await apiFetch(`${API_URL}/chat/conversations`);
       if (!convRes.ok) {
-        setConversations([]);
-        setConvIndex({ byId: new Map(), byUsername: new Map() });
-        return;
+        // API başarısız: önceki state'i koru, sıfırlama!
+        // Cache'den yüklemeyi dene
+        try {
+          const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              // Cache varsa onu kullan, yoksa mevcut state'i koru
+              setConversations(parsed);
+              const byId = new Map<string, any>();
+              parsed.forEach((c: any) => {
+                try {
+                  extractParticipantIds(c).forEach((pid: any) => {
+                    if (pid != null) byId.set(String(pid), c);
+                  });
+                } catch { /* ignore */ }
+              });
+              setConvIndex({ byId, byUsername: new Map() });
+            }
+          }
+        } catch { /* cache yükleme başarısız, mevcut state'i koru */ }
+        return; // Önceki state korundu
       }
       const convData = await convRes.json();
       const arr = Array.isArray(convData) ? convData : [];
@@ -468,7 +540,7 @@ export default function NewChatScreen() {
       try { await AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(arrWithRead)); } catch { /* ignore */ }
     } catch (e) {
       console.warn('[NewChat] refresh conversations error', e);
-      // Offline: önbellekten yükle
+      // Offline veya hata durumu: önbellekten yükle, yoksa mevcut state'i koru
       try {
         const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
         if (cached) {
@@ -487,9 +559,9 @@ export default function NewChatScreen() {
             return;
           }
         }
-      } catch { /* ignore */ }
-      setConversations([]);
-      setConvIndex({ byId: new Map(), byUsername: new Map() });
+      } catch { /* cache yükleme başarısız */ }
+      // Cache de yoksa: önceki state'i koru, sıfırlama!
+      // setConversations([]) kaldırıldı - state korunuyor
     }
   }, []);
 
@@ -519,6 +591,18 @@ export default function NewChatScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Throttle: Son yenilemeden beri çok az zaman geçtiyse atla
+      const now = Date.now();
+      const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
+      
+      if (timeSinceLastRefresh < REFRESH_THROTTLE_MS) {
+        console.log('[NewChat] Focus throttled, skipping refresh (last refresh:', timeSinceLastRefresh, 'ms ago)');
+        // Sadece offline unread map'i güncelle
+        getOfflineUnreadMap().then(setOfflineUnreadMap).catch(() => {});
+        return;
+      }
+      
+      lastRefreshTimeRef.current = now;
       refreshConversations();
       loadFriends();
       getOfflineUnreadMap().then(setOfflineUnreadMap).catch(() => {});
@@ -662,6 +746,7 @@ export default function NewChatScreen() {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      try {
       let mapped: any[] = [];
       try {
         const res = await apiFetch(`${API_URL}/friendships/list`);
@@ -687,8 +772,9 @@ export default function NewChatScreen() {
           }
         } catch { /* ignore */ }
       }
+      let comms: any[] = [];
       try {
-        const comms = await listCommunities();
+        comms = await listCommunities();
         let visibleComms = Array.isArray(comms) ? comms : [];
         // filter to communities the current user is a member of (user.community_id)
         try {
@@ -707,6 +793,20 @@ export default function NewChatScreen() {
           visibleComms = [];
         }
         if (mounted) setCommunities(visibleComms);
+      } catch (err) {
+        // listCommunities failed — fallback to cached communities if available
+        try {
+          const cached = await AsyncStorage.getItem('@chat_communities_cache_v1');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              if (mounted) setCommunities(parsed);
+            }
+          }
+        } catch (cacheErr) {
+          if (__DEV__) console.warn('[NewChat] communities cache load failed', cacheErr);
+        }
+      }
 
         try {
           const convRes = await apiFetch(`${API_URL}/chat/conversations`);
@@ -882,6 +982,131 @@ export default function NewChatScreen() {
     })();
   }, [isConnected]);
 
+  // When network status changes, ensure we detect any previously-started
+  // conversations immediately (from cache when offline) so friend rows
+  // show "Sohbete Devam Et" instead of "Mesaj Başlat".
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        if (!isConnected) {
+          try {
+            const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                if (mounted) {
+                  setConversations(parsed);
+                  const byId = new Map<string, any>();
+                  const byUsername = new Map<string, any>();
+                  const normalize = (s:any) => {
+                    if (!s && s !== 0) return null;
+                    try { return String(s).toLowerCase().replace(/^@/, '').trim(); } catch { return null; }
+                  };
+                  parsed.forEach((c: any) => {
+                    try {
+                      extractParticipantIds(c).forEach((pid: any) => {
+                        if (pid != null) byId.set(String(pid), c);
+                      });
+                      // Also build username index
+                      const seen = new Set<any>();
+                      const walk = (obj:any, depth = 0) => {
+                        if (!obj || depth > 6) return;
+                        if (seen.has(obj)) return;
+                        if (typeof obj === 'object') seen.add(obj);
+                        if (Array.isArray(obj)) {
+                          for (const it of obj) walk(it, depth + 1);
+                          return;
+                        }
+                        if (typeof obj === 'object') {
+                          for (const [k, v] of Object.entries(obj)) {
+                            if (v == null) continue;
+                            const key = String(k).toLowerCase();
+                            if (['username','handle','slug','tag','tag_name','login','name','display_name','full_name'].includes(key)) {
+                              const uname = normalize(v);
+                              if (uname) try { byUsername.set(uname, c); } catch {}
+                              continue;
+                            }
+                            if (typeof v === 'object' || Array.isArray(v)) {
+                              walk(v, depth + 1);
+                              continue;
+                            }
+                          }
+                        }
+                      };
+                      walk(c, 0);
+                    } catch (e) { /* ignore per-conversation parse errors */ }
+                  });
+                  setConvIndex({ byId, byUsername });
+                }
+                return;
+              }
+            }
+          } catch (err) {
+            if (__DEV__) console.warn('[NewChat] load cached conversations failed', err);
+          }
+          // If no cached convs found, still try to refresh from server when available
+          if (isConnected) {
+            try { await refreshConversations(); } catch (e) { /* ignore */ }
+          }
+        } else {
+          try { await refreshConversations(); } catch (e) { /* ignore */ }
+        }
+      } catch (e) {
+        /* ignore outer errors */
+      }
+    })();
+    return () => { mounted = false; };
+  }, [isConnected, refreshConversations]);
+
+  // Fetch community member ids for each visible community so we can detect
+  // whether any member is reachable via offlineTransport peers.
+  useEffect(() => {
+    if (!Array.isArray(communities) || communities.length === 0) {
+      setCommunityMemberIdsMap({});
+      return;
+    }
+    let mounted = true;
+    (async () => {
+      try {
+        const promises = communities.map((c:any) => listCommunityMembers(Number(c.id)).catch(() => []));
+        const results = await Promise.all(promises);
+        const map: Record<string, string[]> = {};
+        for (let i = 0; i < communities.length; i++) {
+          const c = communities[i];
+          const members = results[i];
+          if (Array.isArray(members)) {
+            map[String(c.id)] = members.map((m:any) => String(m?.id ?? m?.user_id ?? m?.userId)).filter(Boolean);
+          } else {
+            map[String(c.id)] = [];
+          }
+        }
+        if (mounted) setCommunityMemberIdsMap(map);
+      } catch (e) {
+        if (mounted) setCommunityMemberIdsMap({});
+      }
+    })();
+    return () => { mounted = false; };
+  }, [communities]);
+
+  // Subscribe to peer changes and update per-community connected status
+  useEffect(() => {
+    const update = (peers: any[]) => {
+      try {
+        const connectedIds = new Set((peers || []).map((p:any) => String(p.userId)));
+        const newMap: Record<string, boolean> = {};
+        for (const [cid, memberIds] of Object.entries(communityMemberIdsMap)) {
+          newMap[cid] = Array.isArray(memberIds) && memberIds.some(mid => connectedIds.has(String(mid)));
+        }
+        setCommunityHasPeerMap(newMap);
+      } catch (e) { setCommunityHasPeerMap({}); }
+    };
+    const unsub = offlineTransportManager.onPeersChanged(update);
+    // run once with current peers
+    try { update(offlineTransportManager.peers || []); } catch (e) { /* ignore */ }
+    return () => { try { unsub(); } catch {} };
+  }, [communityMemberIdsMap]);
+
   async function handleSendFromComposer() {
     if (!composerText.trim()) { Alert.alert('Hata', 'Mesaj boş olamaz.'); return; }
     const payload: any = { text: composerText.trim() };
@@ -988,19 +1213,27 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
           const { enqueueMessage } = await import('@/lib/offlineChatQueue');
           const minId = Math.min(Number(localUserId ?? 0), Number(recipientId));
           const maxId = Math.max(Number(localUserId ?? 0), Number(recipientId));
+          const pendingConvId = `pending_${minId}_${maxId}`;
           await enqueueMessage({
-            conversationId: `pending_${minId}_${maxId}`,
+            conversationId: pendingConvId,
             senderId: String(localUserId ?? ''),
             senderName: '',
+            recipientId: recipientId,
             text: msgText,
             timestamp: Date.now(),
           });
-          Alert.alert(
-            'Kaydedildi',
-            'İnternet bağlantısı yok. Mesaj kaydedildi, bağlantı gelince gönderilecek.',
-          );
+          // Navigate to conversation screen with pending ID
           setComposerText('');
           setSelectedFriend(null);
+          try {
+            await openConversationOrCommunity(router, pendingConvId, { replace: true });
+          } catch (navErr) {
+            console.warn('[NewChat] navigate to pending conv failed', navErr);
+            Alert.alert(
+              'Kaydedildi',
+              'İnternet bağlantısı yok. Mesaj kaydedildi, bağlantı gelince gönderilecek.',
+            );
+          }
           return;
         }
       } catch (queueErr) {
@@ -1308,10 +1541,11 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
         showUnread={showUnread}
         onContinue={handleContinueConversation}
         onStart={handleStartWithFriend}
+        isConnected={isConnected}
         onDelete={handleDeleteConversation}
       />
     );
-  }, [colors, convIndex, conversations, offlineUnreadMap, handleContinueConversation, handleStartWithFriend, handleDeleteConversation, localUserId]);
+  }, [colors, convIndex, conversations, offlineUnreadMap, handleContinueConversation, handleStartWithFriend, handleDeleteConversation, localUserId, isConnected]);
 
   const renderCommunityItem = useCallback(({ item }: { item: any }) => {
     const conv = Array.isArray(conversations) ? conversations.find((c:any) => {
@@ -1322,15 +1556,23 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
     }) : null;
     const showUnread = Boolean(conv && Number(conv?.unread_count) > 0 && !isUnreadFromSelf(conv));
     return (
-      <CommunityRow
-        item={item}
-        colors={colors}
-        showUnread={showUnread}
-        onStart={handleStartWithCommunity}
-        conversations={conversations}
-      />
+        (() => {
+          const communityIdStr = String(item.id);
+          const hasPeer = communityHasPeerMap[communityIdStr] ?? false;
+          const disabled = !isConnected && !hasPeer;
+          return (
+            <CommunityRow
+              item={item}
+              colors={colors}
+              showUnread={showUnread}
+              onStart={handleStartWithCommunity}
+              conversations={conversations}
+              disabled={disabled}
+            />
+          );
+        })()
     );
-  }, [colors, handleStartWithCommunity, conversations, localUserId]);
+  }, [colors, handleStartWithCommunity, conversations, localUserId, isConnected, communityHasPeerMap]);
 
   const communityKeyExtractor = useCallback((item:any, index:number) => String(item.id ?? `community-${index}`), []);
 

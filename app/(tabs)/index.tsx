@@ -1103,6 +1103,7 @@ export default function MapScreen() {
     setSelectedTags(campingTypes.map(t => t.id));
     setSelectedFilters(FILTERS.map(f => f.key));
     setSelectedProvinces([]);
+    setTurkeyWideKeys([]);
     setProvinceAreaList([]);
   };
 
@@ -1558,10 +1559,26 @@ export default function MapScreen() {
         // Offline modda cache'den oku
         try {
           const cachedData = await SecureStore.getItemAsync('cachedUserData');
+          // Ayrıca login/diğer akışlardan saklanan cached premium flag'ini oku
+          let cachedPremium = false;
+          try {
+            const s = await AsyncStorage.getItem('@cached_is_premium');
+            cachedPremium = s === '1';
+          } catch {}
+
           if (cachedData) {
             const userData = JSON.parse(cachedData);
+            // Eğer cached veride isPremium yoksa, cached flag'i uygula
+            if (cachedPremium) {
+              userData.isPremium = true;
+              userData.offline_enabled = userData.offline_enabled ?? true;
+            }
             setUser(userData);
             console.log('[User] Cache\'den kullanıcı bilgileri alındı (offline):', userData);
+          } else if (cachedPremium) {
+            // Sadece premium flag varsa, minimal bir user objesi oluşturup offline erişimi sağla
+            setUser({ isPremium: true, offline_enabled: true, id: null });
+            console.log('[User] Sadece cached premium bulundu; offline erişim için basit user objesi oluşturuldu');
           } else {
             setUser(null);
           }
@@ -5766,6 +5783,44 @@ export default function MapScreen() {
                     </View>
                   )}
 
+                  {/* Kampfire temasında filtre aktifse ve Yakındaki butonu görünmüyorsa, filtre butonunu Konuma Geri Dön ün altına yerleştir */}
+                  {isKampfireTheme && isFilterActive && !showMapMoveButton && (
+                    <View style={styles.kampfireActionItem}>
+                      <Animated.View style={[styles.kampfireActionLabel, { backgroundColor: kampfireActionLabelBg, borderColor: kampfireUiBorder, opacity: kampfireLabelOpacity }]}> 
+                        <Text style={[styles.kampfireActionLabelText, { color: kampfireUiPrimary }]}>Filtre</Text>
+                      </Animated.View>
+                      <TouchableOpacity
+                        style={[
+                          styles.kampfireMapActionButton,
+                          {
+                            backgroundColor: kampfireUiSurface,
+                            borderColor: kampfireUiBorder,
+                          },
+                          isFilterActive && { backgroundColor: colors.primaryLight },
+                          offlineLocked && { opacity: 0.45 },
+                        ]}
+                        onPress={() => {
+                          registerKampfireMapActivity();
+                          handleToggleFilters();
+                        }}
+                        accessibilityLabel="Filtreleri aç"
+                      >
+                        <Filter size={20} color={isFilterActive ? colors.primary : kampfireUiPrimary} />
+                        {isFilterActive && (
+                          <View
+                            style={[
+                              styles.kampfireFilterDot,
+                              {
+                                backgroundColor: colors.warning,
+                                borderColor: kampfireUiSurface,
+                              },
+                            ]}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
                   {showMapMoveButton && (
                     isKampfireTheme ? (
                       <View style={styles.kampfireActionItem}>
@@ -5840,6 +5895,44 @@ export default function MapScreen() {
                         <Text style={{ marginTop: 6, fontSize: 12, color: kampfireUiPrimary, fontWeight: '700' }}>Yakındaki Alanları Göster</Text>
                       </View>
                     )
+                  )}
+
+                  {/* Kampfire temasında filtre aktifse ve Yakındaki butonu görünüyorsa, filtre butonunu Yakındaki'nin altına yerleştir */}
+                  {isKampfireTheme && isFilterActive && showMapMoveButton && (
+                    <View style={styles.kampfireActionItem}>
+                      <Animated.View style={[styles.kampfireActionLabel, { backgroundColor: kampfireActionLabelBg, borderColor: kampfireUiBorder, opacity: kampfireLabelOpacity }]}> 
+                        <Text style={[styles.kampfireActionLabelText, { color: kampfireUiPrimary }]}>Filtre</Text>
+                      </Animated.View>
+                      <TouchableOpacity
+                        style={[
+                          styles.kampfireMapActionButton,
+                          {
+                            backgroundColor: kampfireUiSurface,
+                            borderColor: kampfireUiBorder,
+                          },
+                          isFilterActive && { backgroundColor: colors.primaryLight },
+                          offlineLocked && { opacity: 0.45 },
+                        ]}
+                        onPress={() => {
+                          registerKampfireMapActivity();
+                          handleToggleFilters();
+                        }}
+                        accessibilityLabel="Filtreleri aç"
+                      >
+                        <Filter size={20} color={isFilterActive ? colors.primary : kampfireUiPrimary} />
+                        {isFilterActive && (
+                          <View
+                            style={[
+                              styles.kampfireFilterDot,
+                              {
+                                backgroundColor: colors.warning,
+                                borderColor: kampfireUiSurface,
+                              },
+                            ]}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    </View>
                   )}
                 </View>
               </View>

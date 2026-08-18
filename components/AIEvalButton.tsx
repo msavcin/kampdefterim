@@ -10,9 +10,30 @@ import { useRouter } from 'expo-router';
 import { getMe } from '@/lib/userCommunityApi';
 import { getLastKnownLocationAsync } from '@/lib/largeStorage';
 
+const PREMIUM_CACHE_KEY = 'user_premium_status_cache';
+
 let premiumCache: boolean | null = null;
 let premiumPromise: Promise<boolean> | null = null;
-const ensurePremium = async (): Promise<boolean> => {
+const ensurePremium = async (isConnected: boolean): Promise<boolean> => {
+  // Online değilse cache'ten oku
+  if (!isConnected) {
+    try {
+      const cached = await AsyncStorage.getItem(PREMIUM_CACHE_KEY);
+      if (cached !== null) {
+        const parsed = JSON.parse(cached);
+        if (parsed?.isPremium !== undefined) {
+          if (__DEV__) console.log('[AIEvalButton] Offline: Cache\'ten premium durumu okundu:', parsed.isPremium);
+          return parsed.isPremium;
+        }
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('[AIEvalButton] Cache okuma hatası:', e);
+    }
+    // Cache yoksa false döndür
+    return false;
+  }
+
+  // Online ise API'den çek ve cache'le
   if (premiumCache !== null) return premiumCache;
   if (premiumPromise) return premiumPromise;
   premiumPromise = (async () => {
@@ -21,8 +42,16 @@ const ensurePremium = async (): Promise<boolean> => {
       const prem = !!(u?.isPremium || u?.is_premium || u?.offline_enabled || u?.user?.is_premium || u?.user?.offline_enabled);
       premiumCache = prem;
       premiumPromise = null;
+      // Cache'e kaydet
+      try {
+        await AsyncStorage.setItem(PREMIUM_CACHE_KEY, JSON.stringify({ isPremium: prem, updatedAt: new Date().toISOString() }));
+        if (__DEV__) console.log('[AIEvalButton] Premium durumu cache\'e kaydedildi:', prem);
+      } catch (e) {
+        if (__DEV__) console.warn('[AIEvalButton] Cache kaydetme hatası:', e);
+      }
       return prem;
     } catch (e) {
+      if (__DEV__) console.warn('[AIEvalButton] Premium kontrol hatası:', e);
       premiumPromise = null;
       premiumCache = false;
       return false;
@@ -112,20 +141,27 @@ export default function AIEvalButton({ campingArea, campingAreaImage = null, pla
     return () => { mounted = false; };
   }, [campingArea]);
 
+  // Network durumu değiştiğinde premium kontrolünü yeniden yap
   useEffect(() => {
     let mounted = true;
+    // Premium cache'i temizle, yeniden sorgulanacak
+    if (isConnected) {
+      premiumCache = null;
+      premiumPromise = null;
+    }
     (async () => {
       try {
-        const prem = await ensurePremium();
+        const prem = await ensurePremium(isConnected);
         if (!mounted) return;
         setIsPremium(prem);
       } catch (e) {
+        if (__DEV__) console.warn('[AIEvalButton] Premium durumu alınamadı:', e);
         if (!mounted) return;
         setIsPremium(false);
       }
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [isConnected]);
 
   const prepareCampObj = () => {
     return {
@@ -254,6 +290,10 @@ export default function AIEvalButton({ campingArea, campingAreaImage = null, pla
       } catch (e) { return false; }
     })();
 
+  // Offline durumda premium kontrolü: isPremium true ise pasif göster, false ise premium ikonu göster
+  const shouldDisable = !isConnected || !isPremium || loading;
+  const shouldShowPremiumIcon = !isPremium; // Sadece premium değilse ikon göster
+
   return (
     <>
       <View style={{ position: 'relative' }}>
@@ -275,10 +315,12 @@ export default function AIEvalButton({ campingArea, campingAreaImage = null, pla
                   style={[
                     styles.button,
                     fullWidth && { width: '100%' },
-                    !isPremium ? { backgroundColor: colors.surfaceVariant ?? '#f1f5f9', borderColor: colors.border ?? '#cbd5e1', opacity: 0.9 } : { backgroundColor: colors.primary, borderColor: colors.primary },
+                    shouldDisable ? { backgroundColor: colors.surfaceVariant ?? '#f1f5f9', borderColor: colors.border ?? '#cbd5e1', opacity: 0.6 } : { backgroundColor: colors.primary, borderColor: colors.primary },
                   ]}
-                  activeOpacity={isPremium ? 0.7 : 0.9}
+                  activeOpacity={shouldDisable ? 1 : 0.7}
+                  disabled={shouldDisable}
                   onPress={() => {
+                    if (!isConnected) { Alert.alert('Çevrimdışı', 'Değerlendirme için internet bağlantısı gerekiyor.'); return; }
                     if (!isPremium) { router.push('/premium'); return; }
                     handleEvaluate();
                   }}
@@ -287,44 +329,52 @@ export default function AIEvalButton({ campingArea, campingAreaImage = null, pla
                     <ActivityIndicator color="#fff" />
                   ) : (
                     <>
-                      <Sparkles size={16} color={isPremium ? '#fff' : colors.muted} />
-                      <Text style={[styles.label, { color: isPremium ? '#fff' : colors.muted }]}>Yeniden Değerlendir</Text>
+                      <Sparkles size={16} color={shouldDisable ? colors.muted : '#fff'} />
+                      <Text style={[styles.label, { color: shouldDisable ? colors.muted : '#fff' }]}>Yeniden Değerlendir</Text>
                     </>
                   )}
                 </TouchableOpacity>
-                {!isPremium && (
+                {shouldShowPremiumIcon && (
                   <View style={[styles.premiumIcon, { backgroundColor: colors.surface, borderColor: colors.border }]} pointerEvents="none">
                     <Crown size={14} color={colors.primary} />
                   </View>
+                )}
+                {!isConnected && isPremium && (
+                  <Text style={{ marginTop: 8, color: colors.muted, fontSize: 12 }}>Değerlendirme yapmak için internet bağlantısı gerekiyor.</Text>
                 )}
               </View>
             )}
           </View>
         ) : (
-          <TouchableOpacity
-            style={[
-              styles.button,
-              fullWidth && { width: '100%' },
-              !isPremium ? { backgroundColor: colors.surfaceVariant ?? '#f1f5f9', borderColor: colors.border ?? '#cbd5e1', opacity: 0.9 } : { backgroundColor: colors.primary, borderColor: colors.primary },
-            ]}
-            activeOpacity={!isPremium || loading || !isConnected ? 0.9 : 0.7}
-            disabled={!isPremium || loading || !isConnected}
-            onPress={handleEvaluate}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Sparkles size={16} color={(!isPremium || loading || !isConnected) ? colors.muted : '#fff'} />
-                <Text style={[styles.label, { color: (!isPremium || loading || !isConnected) ? colors.muted : '#fff' }]}>Kamp Defterim ile Değerlendir</Text>
-              </>
+          <>
+            <TouchableOpacity
+              style={[
+                styles.button,
+                fullWidth && { width: '100%' },
+                shouldDisable ? { backgroundColor: colors.surfaceVariant ?? '#f1f5f9', borderColor: colors.border ?? '#cbd5e1', opacity: 0.6 } : { backgroundColor: colors.primary, borderColor: colors.primary },
+              ]}
+              activeOpacity={shouldDisable ? 1 : 0.7}
+              disabled={shouldDisable}
+              onPress={handleEvaluate}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Sparkles size={16} color={shouldDisable ? colors.muted : '#fff'} />
+                  <Text style={[styles.label, { color: shouldDisable ? colors.muted : '#fff' }]}>Kamp Defterim ile Değerlendir</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            {shouldShowPremiumIcon && (
+              <View style={[styles.premiumIcon, { backgroundColor: colors.surface, borderColor: colors.border }]} pointerEvents="none">
+                <Crown size={14} color={colors.primary} />
+              </View>
             )}
-          </TouchableOpacity>
-        )}
-        {!isPremium && (
-          <View style={[styles.premiumIcon, { backgroundColor: colors.surface, borderColor: colors.border }]} pointerEvents="none">
-            <Crown size={14} color={colors.primary} />
-          </View>
+            {!isConnected && isPremium && (
+              <Text style={{ marginTop: 8, color: colors.muted, fontSize: 12 }}>Değerlendirme yapmak için internet bağlantısı gerekiyor.</Text>
+            )}
+          </>
         )}
       </View>
 

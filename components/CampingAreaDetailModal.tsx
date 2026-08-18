@@ -1316,6 +1316,51 @@ export default function CampingAreaDetailModal({
                   )}
                 </View>
               </View>
+
+              {/* Google AI Overview - SerpAPI zengin verileri */}
+              {(campingArea as any).aiOverview?.aiOverview && (
+                <View style={{
+                  backgroundColor: scheme === 'dark' ? colors.surface : colors.background,
+                  padding: 12,
+                  borderRadius: 10,
+                  marginBottom: 12,
+                  borderWidth: 1,
+                  borderColor: colors.border
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 6 }}>
+                    <Globe size={16} color={colors.primary} />
+                    <Text style={{ fontWeight: '600', color: colors.text, fontSize: 13 }}>
+                      Google AI Özeti
+                    </Text>
+                  </View>
+                  <Text style={{
+                    color: colors.textSecondary,
+                    lineHeight: 20,
+                    fontSize: 13
+                  }}>
+                    {(campingArea as any).aiOverview.aiOverview}
+                  </Text>
+                  {(campingArea as any).aiOverview.relatedQuestions && 
+                   (campingArea as any).aiOverview.relatedQuestions.length > 0 && (
+                    <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
+                      <Text style={{ fontWeight: '600', color: colors.text, fontSize: 12, marginBottom: 6 }}>
+                        Sıkça Sorulan Sorular
+                      </Text>
+                      {(campingArea as any).aiOverview.relatedQuestions.map((q: string, idx: number) => (
+                        <Text key={`q_${idx}`} style={{
+                          color: colors.textSecondary,
+                          fontSize: 12,
+                          marginTop: 4,
+                          lineHeight: 18
+                        }}>
+                          • {q}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+
               <View style={{
                 backgroundColor: scheme === 'dark' ? colors.surfaceVariant : colors.primaryLight + '15',
                 padding: 14,

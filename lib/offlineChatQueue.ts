@@ -70,11 +70,14 @@ export async function getPendingMessages(): Promise<OfflineQueueMessage[]> {
   );
 }
 
-/** Konuşmaya ait tüm offline mesajları döner (en yeniden eskiye). */
+/** Konuşmaya ait tüm offline mesajları döner (en yeniden eskiye). 
+ * NOT: Sadece henüz senkronize edilmemiş (synced = 0) mesajlar döndürülür.
+ * Senkronize edilen mesajlar artık sunucuda olduğu için tekrar gösterilmesine gerek yoktur.
+ */
 export async function getLocalMessages(conversationId: string): Promise<OfflineQueueMessage[]> {
   const db = await getDb();
   return db.getAllAsync<OfflineQueueMessage>(
-    'SELECT * FROM offline_messages WHERE conversationId = ? ORDER BY timestamp DESC',
+    'SELECT * FROM offline_messages WHERE conversationId = ? AND synced = 0 ORDER BY timestamp DESC',
     [conversationId],
   );
 }
@@ -89,4 +92,22 @@ export async function markMessageSynced(id: string): Promise<void> {
 export async function markPeerDelivered(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE offline_messages SET peerDelivered = 1 WHERE id = ?', [id]);
+}
+
+/** Sunucuya senkronize edilen mesajları sil (artık gerek yok). */
+export async function deleteSyncedMessages(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM offline_messages WHERE synced = 1');
+}
+
+/** Belirli bir mesajı sil. */
+export async function deleteMessage(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM offline_messages WHERE id = ?', [id]);
+}
+
+/** Konuşmaya ait tüm offline mesajları temizle (senkronizasyon sonrası). */
+export async function clearConversationMessages(conversationId: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM offline_messages WHERE conversationId = ? AND synced = 1', [conversationId]);
 }

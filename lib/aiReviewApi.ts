@@ -26,6 +26,16 @@ export interface CampingAreaReviewEvaluation {
     website?: string;
     phone?: string;
   };
+  /**
+   * Google AI Overview verisi (SerpAPI'den gelen zengin bilgiler)
+   * Backend'den gelir: knowledge_graph, ai_overview, related_questions
+   */
+  aiOverview?: {
+    /** Ana AI Overview metni (structured text_blocks'lardan oluşturulmuş) */
+    aiOverview?: string;
+    /** Sıkça sorulan sorular (AI Overview tipindekiler) */
+    relatedQuestions?: string[];
+  };
 }
 
 export interface ParsedAIReview {

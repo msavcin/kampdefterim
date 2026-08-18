@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Tabs, useRouter } from 'expo-router';
-import { getMe } from '../../lib/userCommunityApi';
+import { getMe, listCommunities } from '../../lib/userCommunityApi';
+import { apiFetch } from '../../lib/apiFetch';
+import { API_URL } from '../../lib/config';
 import { checkAndHandleAppVersion, compareVersions, getCurrentAppVersion } from '../../lib/appVersion';
 import { getDatabase } from '../../lib/database';
 import {
@@ -253,10 +255,70 @@ export default function TabLayout() {
             } catch {
               /* ignore */
             }
-          } catch (e) {
+            } catch (e) {
             // remote fetch failed - keep cached values
             if (__DEV__) console.warn('[TabLayout] remote getMe hata:', e);
           }
+            // Ayrıca sohbet için kişiler, topluluklar ve konuşmaları önbelleğe al
+            try {
+              const FRIENDS_CACHE_KEY = '@chat_friends_cache_v1';
+              const CONVERSATIONS_CACHE_KEY = '@conversations_cache_v1';
+              const COMMUNITIES_CACHE_KEY = '@chat_communities_cache_v1';
+
+              // Arkadaş listesini çek ve cache'le
+              try {
+                const friendsRes = await apiFetch(`${API_URL}/friendships/list`);
+                if (friendsRes && friendsRes.ok) {
+                  const friendsData = await friendsRes.json();
+                  const mapped = Array.isArray(friendsData)
+                    ? friendsData.map((f: any) => {
+                        const idFromTag = typeof f.tag === 'string' && f.tag.startsWith('#') ? Number(f.tag.replace('#', '')) : undefined;
+                        const idCandidate = f.user_id ?? f.id ?? idFromTag;
+                        const resolvedId = typeof idCandidate !== 'undefined' && idCandidate !== null ? Number(idCandidate) : undefined;
+                        return { id: resolvedId, username: f.username, name: f.name || '', avatar_url: f.avatar_url || '' };
+                      })
+                    : [];
+                  try { await AsyncStorage.setItem(FRIENDS_CACHE_KEY, JSON.stringify(mapped)); } catch {}
+                }
+              } catch (err) {
+                if (__DEV__) console.warn('[TabLayout] friends prefetch failed', err);
+              }
+
+              // Konuşmaları önbelleğe al
+              try {
+                const convRes = await apiFetch(`${API_URL}/chat/conversations`);
+                if (convRes && convRes.ok) {
+                  const convData = await convRes.json();
+                  if (Array.isArray(convData)) {
+                    try { await AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(convData)); } catch {}
+                  }
+                }
+              } catch (err) {
+                if (__DEV__) console.warn('[TabLayout] conversations prefetch failed', err);
+              }
+
+              // Toplulukları çek ve kullanıcının üyelik durumuna göre filtreleyip cache'le
+              try {
+                const comms = await listCommunities();
+                let visibleComms = Array.isArray(comms) ? comms : [];
+                try {
+                  const me2 = await getMe().catch(() => null);
+                  const userCommId = me2?.community_id ?? null;
+                  if (userCommId) {
+                    visibleComms = visibleComms.filter((c: any) => Number(c?.id) === Number(userCommId));
+                  } else {
+                    visibleComms = [];
+                  }
+                } catch (err) {
+                  visibleComms = [];
+                }
+                try { await AsyncStorage.setItem(COMMUNITIES_CACHE_KEY, JSON.stringify(visibleComms)); } catch {}
+              } catch (err) {
+                if (__DEV__) console.warn('[TabLayout] communities prefetch failed', err);
+              }
+            } catch (err) {
+              if (__DEV__) console.warn('[TabLayout] chat prefetch genel hata', err);
+            }
         }
       } catch (e) {
         if (__DEV__) console.warn('[TabLayout] network check hata:', e);

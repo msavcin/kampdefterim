@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform } from 'react-native';
 import FriendAvatar from './FriendAvatar';
+import ThemedIcon from './ThemedIcon';
 import { useTheme } from './ThemeProvider';
 
 /** Mesaj zaman damgasını HH:mm veya "Dün HH:mm" veya "GG.AA HH:mm" formatında döner. */
@@ -43,12 +44,14 @@ export default function MessageBubble({
   onDelete,
   senderName,
   senderAvatarUrl,
+  isOffline,
 }: {
   message: any;
   isMe: boolean;
   onDelete?: (id: any) => void;
   senderName?: string;
   senderAvatarUrl?: string;
+  isOffline?: boolean;
 }) {
   const { colors } = useTheme();
   const isDeleted = !!(message?.is_deleted || message?.deleted || message?.isDeleted);
@@ -63,11 +66,33 @@ export default function MessageBubble({
   };
 
   const rawText = message?.text ?? message?.body ?? message?.content ?? message?.message ?? '';
-  let cleanText: any = rawText;
+  let cleanText: string = '';
+  const sanitize = (s: string) => {
+    try { s = s.normalize?.('NFC') ?? s; } catch { /* ignore */ }
+    s = s.replace(/[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028\u2029\u202F\u2060\uFEFF]/g, '');
+    return s.replace(/\s+/g, ' ').trim();
+  };
+
   if (typeof rawText === 'string') {
-    try { cleanText = rawText.normalize?.('NFC') ?? rawText; } catch (e) { cleanText = rawText; }
-    cleanText = cleanText.replace(/[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028\u2029\u202F\u2060\uFEFF]/g, '');
-    cleanText = cleanText.replace(/\s+/g, ' ').trim();
+    cleanText = sanitize(rawText);
+  } else if (rawText && typeof rawText === 'object') {
+    // Eğer text alanı nesne olarak geliyorsa içindeki olası metin alanlarını dene
+    const inner = (rawText as any).text ?? (rawText as any).body ?? (rawText as any).content ?? (rawText as any).message ?? null;
+    if (typeof inner === 'string') {
+      cleanText = sanitize(inner);
+    } else {
+      // Medya veya meta içeren mesajlar için kullanıcıya gösterilecek kısa placeholder
+      if (Array.isArray(message?.attachments) && message.attachments.length > 0) {
+        cleanText = '[Medya]';
+      } else if (message?.meta && Object.keys(message.meta || {}).length > 0) {
+        cleanText = '[İçerik]';
+      } else {
+        // Son çare: boş string (render hatasını önlemek için)
+        cleanText = '';
+      }
+    }
+  } else {
+    cleanText = '';
   }
 
   const messageSender = message?.sender ?? message?.from ?? message?.user ?? message?.author ?? message?.participant;
@@ -124,14 +149,21 @@ export default function MessageBubble({
               {cleanText}
             </Text>
           )}
-          {timeStr ? (
-            <Text
-              allowFontScaling={false}
-              style={[styles.timeText, { color: isMe ? 'rgba(255,255,255,0.65)' : colors.muted, textAlign: isMe ? 'right' : 'left' }]}
-            >
-              {timeStr}
-            </Text>
-          ) : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+            {timeStr ? (
+              <Text
+                allowFontScaling={false}
+                style={[styles.timeText, { color: isMe ? 'rgba(255,255,255,0.65)' : colors.muted }]}
+              >
+                {timeStr}
+              </Text>
+            ) : null}
+            {isOffline ? (
+              <View style={{ marginLeft: 6 }}>
+                <ThemedIcon name="WifiOff" size={12} color={isMe ? 'rgba(255,255,255,0.65)' : colors.muted} />
+              </View>
+            ) : null}
+          </View>
         </View>
       </TouchableOpacity>
     </View>

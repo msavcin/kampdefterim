@@ -25,6 +25,8 @@ import {
   getLocalMessages,
   markPeerDelivered,
   OfflineQueueMessage,
+  deleteMessage,
+  deleteSyncedMessages,
 } from './offlineChatQueue';
 import { emitChatEvent } from './chatEvents';
 import { apiFetch } from './apiFetch';
@@ -132,7 +134,7 @@ class OfflineTransportManager {
    * @param recipientId Diğer kullanıcının ID'si (sunucu sync için zorunlu)
    * @returns Kuyruktaki mesajın yerel ID'si
    */
-  async sendMessage(conversationId: string, text: string, recipientId?: number | string | null): Promise<string> {
+  async sendMessage(conversationId: string, text: string, recipientId?: number | string | Array<number | string> | null): Promise<string> {
     if (!text.trim()) throw new Error('Mesaj boş olamaz');
 
     const msg: PeerMessage = {
@@ -150,22 +152,41 @@ class OfflineTransportManager {
     this._trackSeen(msg.id);
 
     // Önce yerel kaydet
+    const _recipientForQueue = Array.isArray(recipientId) ? (recipientId.length ? recipientId[0] : null) : (recipientId ?? null);
     const queueId = await enqueueMessage({
       conversationId: msg.conversationId,
       senderId: msg.senderId,
       senderName: msg.senderName,
-      recipientId: recipientId ?? null,
+      recipientId: _recipientForQueue as number | string | null,
       text: msg.text,
       timestamp: msg.timestamp,
     });
 
     // Peer'lara ilet
     if (this._active) {
-      const delivered = await this._wifi.sendMessage(msg);
-      if (delivered) {
-        await markPeerDelivered(queueId).catch(() => { /* ignore */ });
-      } else {
-        console.log('[OfflineTransport] aktif peer yok, mesaj sadece kuyrukta saklandı');
+      try {
+        // recipientId param may be a single id or an array of ids (targets)
+        if (Array.isArray(recipientId)) {
+          const targets = recipientId.map((t) => (t == null ? null : String(t))).filter(Boolean) as string[];
+          if (targets.length === 0) {
+            const deliveredAny = await this._wifi.sendMessage(msg);
+            if (deliveredAny) await markPeerDelivered(queueId).catch(() => {});
+          } else {
+            const results = await Promise.all(targets.map((tid) => this._wifi.sendMessage(msg, String(tid)).catch(() => false)));
+            if (results.some(Boolean)) await markPeerDelivered(queueId).catch(() => {});
+            else console.log('[OfflineTransport] hedef peer(lar) bulunamadı, mesaj kuyrukta saklandı');
+          }
+        } else if (recipientId != null) {
+          const delivered = await this._wifi.sendMessage(msg, String(recipientId));
+          if (delivered) await markPeerDelivered(queueId).catch(() => {});
+          else console.log('[OfflineTransport] hedef peer bulunamadı, mesaj kuyrukta saklandı');
+        } else {
+          const delivered = await this._wifi.sendMessage(msg);
+          if (delivered) await markPeerDelivered(queueId).catch(() => {});
+          else console.log('[OfflineTransport] aktif peer yok, mesaj sadece kuyrukta saklandı');
+        }
+      } catch (e) {
+        console.warn('[OfflineTransport] peer iletimi sırasında hata:', e);
       }
     }
 
@@ -247,6 +268,8 @@ class OfflineTransportManager {
           });
           if (res.ok) {
             await markMessageSynced(msg.id);
+            // Sunucuya başarıyla gönderilen mesajı lokalde sil (artık gerek yok)
+            await deleteMessage(msg.id).catch(() => { /* ignore */ });
           } else {
             console.warn('[OfflineTransport] sync başarısız:', res.status, msg.id);
           }
@@ -254,6 +277,10 @@ class OfflineTransportManager {
           console.warn('[OfflineTransport] mesaj sync hatası:', msg.id, (e as any)?.message);
         }
       }
+
+      // Senkronizasyon tamamlandı, tüm synced=1 mesajları temizle
+      await deleteSyncedMessages().catch(() => { /* ignore */ });
+      console.log('[OfflineTransport] senkronize edilen mesajlar temizlendi');
     } catch (e) {
       console.warn('[OfflineTransport] syncPendingToServer hatası:', e);
     }

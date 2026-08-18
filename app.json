@@ -7,7 +7,7 @@
       "ios",
       "web"
     ],
-    "version": "1.3.26",
+    "version": "1.3.27",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "kampdefterim",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.spondylus.kampdefterim",
-      "buildNumber": "1.3.26",
+      "buildNumber": "1.3.27",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Harita ve kamp alanlarını görmek için konum izni gereklidir.",
         "NSPhotoLibraryUsageDescription": "Kamp alanı fotoğrafları eklemek için fotoğraf galerisi erişimi gerekli.",
@@ -43,7 +43,7 @@
         "com.android.vending.BILLING"
       ],
       "package": "com.spondylus.boltexponativewind",
-      "versionCode": 63,
+      "versionCode": 64,
       "blockedPermissions": [
         "android.permission.ACTIVITY_RECOGNITION"
       ],

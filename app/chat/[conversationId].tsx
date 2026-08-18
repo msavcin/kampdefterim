@@ -771,23 +771,18 @@ export default function ChatScreen() {
             return true;
           } catch { return true; }
         }).filter((m: any) => !isDeleteControlMessage(m)).map(normalizeMessage);
-        setMessages(prev => {
-          const serverIds = new Set(
-            filtered.map((m: any) => { const mid = getMessageId(m); return mid != null ? String(mid) : null; }).filter(Boolean),
-          );
-          // Sunucuda olmayan yerel mesajları (peer veya hâlâ bekleyen) koru
-          const localOnly = prev.filter((m: any) => {
-            const mid = getMessageId(m);
-            const midStr = mid != null ? String(mid) : null;
-            if (!midStr || midStr.startsWith('tmp-')) return false;
-            return !serverIds.has(midStr);
-          });
-          return sortDesc([...filtered, ...localOnly]);
-        });
+        
+        // Senkronizasyon sonrası: Sadece sunucudan gelen güncel mesajları göster
+        // Lokal offline mesajlar artık silindiği için (synced=1 olanlar temizlendi)
+        // getLocalMessages() sadece henüz gönderilmemiş (synced=0) mesajları döndürür
+        setMessages(sortDesc(filtered));
+        
+        // Offline kuyruğunu yeniden yükle - sadece henüz gönderilmemiş mesajlar gelir
+        await mergeOfflineQueueMessages();
       } catch { /* yenileme başarısız olsa mevcut listeyi koru */ }
     });
     return unsub;
-  }, [conversationId]);
+  }, [conversationId, mergeOfflineQueueMessages]);
 
   // ─── Çevrimdışı transport entegrasyonu ───────────────────────────────────────
   // İnternet yoksa transport başlatılır; bu konuşmaya gelen peer mesajları dinlenir.
@@ -1054,6 +1049,25 @@ export default function ChatScreen() {
       // API artık conversation_id olabilir; logu hata değil bilgi olarak bırak.
       console.info('[Chat] send payload has conversation_id only, no recipient_id determined yet', { conversationId: payload.conversation_id, conversationMeta, recipientIdFromMeta, inferredRecipient });
     }
+    // Eğer çevrimdışıysak ve alıcı belirlenmişse, alıcı hotspot ile bulunana kadar mesaj gönderimini engelle
+    if (!isConnected) {
+      const recipientToCheck = payload.recipient_id ?? null;
+      if (recipientToCheck != null) {
+        try {
+          const peerIds = (offlineTransportManager.peers || []).map((p: any) => String(p.userId));
+          const found = peerIds.includes(String(recipientToCheck));
+          if (!found) {
+            Alert.alert('Çevrimdışı', 'Bu kullanıcı hotspot ile bulunana kadar mesaj gönderilemez.');
+            return;
+          }
+        } catch (e) {
+          // hatalı durumda güvenli davranış: gönderimi engelle
+          Alert.alert('Çevrimdışı', 'Bu kullanıcı hotspot ile bulunana kadar mesaj gönderilemez.');
+          return;
+        }
+      }
+    }
+
     const optimistic = { id: tempId, text, sender_id: localUserId ?? 'me', created_at: new Date().toISOString(), sending: true, conversation_id: payload.conversation_id, recipient_id: payload.recipient_id };
     setMessages(prev => [optimistic, ...prev]);
     setText('');
@@ -1287,15 +1301,19 @@ export default function ChatScreen() {
             shouldScrollRef.current = false;
           }}
           keyExtractor={(m:any, index:number) => String(getMessageId(m) ?? `msg-${index}`)}
-          renderItem={({ item }) => (
-            <MessageBubble
-              message={item}
-              isMe={String(item.sender_id) === String(localUserId) || String(item.sender_id) === 'me'}
-              onDelete={handleDelete}
-              senderName={getSenderInfo(item).name}
-              senderAvatarUrl={getSenderInfo(item).avatar_url}
-            />
-          )}
+          renderItem={({ item }) => {
+            const isOfflineMsg = !!(item?.offline_peer || (item?.synced != null && !item.synced));
+            return (
+              <MessageBubble
+                message={item}
+                isMe={String(item.sender_id) === String(localUserId) || String(item.sender_id) === 'me'}
+                onDelete={handleDelete}
+                senderName={getSenderInfo(item).name}
+                senderAvatarUrl={getSenderInfo(item).avatar_url}
+                isOffline={isOfflineMsg}
+              />
+            );
+          }}
         />
 
         <View
