@@ -713,7 +713,8 @@ export default function CampingAreaDetailModal({
       }
       body += `\n`;
     } else {
-      body += `Kamp Türü: ${getCampingTypeLabel(campingArea.type)}\n`;
+      // Önce type alanı, sonra tags.type, yoksa fallback
+      body += `Kamp Türü: ${getCampingTypeLabel(campingArea.type || (campingArea.tags && campingArea.tags.type) || 'campground')}\n`;
     }
     // Olanaklar seçiliyse detay ekle
     if (errorChecks['Olanaklar']) {
@@ -866,9 +867,9 @@ export default function CampingAreaDetailModal({
     const title = campingArea.name || 'Kamp Alanı';
     const lines: string[] = [`🏕️ ${title}`];
 
-    // Kamp türü
+    // Kamp türü - önce type alanı, sonra tags.type, yoksa fallback
     const typeLabel = getCampingTypeLabel(
-      (campingArea.tags && campingArea.tags.type) ? campingArea.tags.type : campingArea.type
+      campingArea.type || (campingArea.tags && campingArea.tags.type) || 'campground'
     );
     if (typeLabel) lines.push(`📌 ${typeLabel}`);
 
@@ -1156,9 +1157,12 @@ export default function CampingAreaDetailModal({
                 <Text style={[styles.title, { color: colors.text }]}>{campingArea.name ? String(campingArea.name) : ''}</Text>
                 <View style={[styles.typeChip, { backgroundColor: getCampingAreaBgColor(campingArea) }]}> 
                   <Text style={[styles.typeText, { color: 'white' }]}>{
-                    (campingArea.tags && campingArea.tags.type)
-                      ? String(getCampingTypeLabel(campingArea.tags.type))
-                      : (campingArea.type ? String(getCampingTypeLabel(campingArea.type)) : '')
+                    // Önce doğrudan type alanına bak, sonra tags.type, en son fallback
+                    String(getCampingTypeLabel(
+                      campingArea.type || 
+                      (campingArea.tags && campingArea.tags.type) || 
+                      'campground'
+                    ))
                   }</Text>
                 </View>
                 <View style={[styles.userSubmittedChip, { backgroundColor: colors.accent + '15' }]}>

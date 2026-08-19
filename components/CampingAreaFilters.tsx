@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Check, CheckSquare, Square, Map, Crown } from 'lucide-react-native';
-import { campingTypes } from '../lib/categories';
+import { useCampingTypes } from '../lib/categories';
 import type { CampingArea } from '../lib/database';
 import { valilikIdToProvinceName } from '../lib/provinceMap';
 import { useTheme } from './ThemeProvider';
@@ -78,6 +78,7 @@ export default function CampingAreaFilters({
   isPremium = false,
 }: Props & { userId?: string | number }) {
   const { colors } = useTheme();
+  const campingTypes = useCampingTypes();
   const [provinceQuery, setProvinceQuery] = React.useState('');
   const themed = createThemedStyles(colors);
   const router = useRouter();

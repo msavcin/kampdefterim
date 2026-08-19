@@ -1,9 +1,10 @@
 // Kamp türü seçim ekranı için ikon renkleri (sadece Add/Edit modal)
+// currentColor kullanarak tema moduna uyumlu hale getirildi
 export const CAMP_TYPE_ICON_COLORS: Record<string, { fill: string; stroke: string }> = {
-  bungalow: { fill: '#000', stroke: 'none' },
-  accommodation: { fill: '#000', stroke: 'none' },
-  hiking_road: { fill: '#000', stroke: 'none' },
-  caravan_site: { fill: '#000', stroke: 'none' },
+  bungalow: { fill: 'currentColor', stroke: 'none' },
+  accommodation: { fill: 'currentColor', stroke: 'none' },
+  hiking_road: { fill: 'currentColor', stroke: 'none' },
+  caravan_site: { fill: 'currentColor', stroke: 'none' },
   // Diğer türler için ekleme yapabilirsiniz
 };
 
@@ -12,11 +13,13 @@ export function getCampingTypeIcon(
   type: MarkerType,
   options?: SVGStandardizeOptions
 ): string {
-  // Eğer listede yoksa varsayılan renkleri uygula
-  const colorOpts = CAMP_TYPE_ICON_COLORS[type] || { fill: 'none', stroke: '#000' };
+  // Eğer listede yoksa varsayılan renkleri uygula - currentColor ile tema uyumlu
+  const colorOpts = CAMP_TYPE_ICON_COLORS[type] || { fill: 'none', stroke: 'currentColor' };
   return getSVGIcon(type, { ...colorOpts, ...options });
 }
 // Kamp türü ikon renkleri (tek noktadan yönetim)
+// Harita marker'ları için beyaz renkler korundu (arka planları renkli olduğundan)
+// Diğer kullanımlar için currentColor ile dinamik renk desteği
 export const TYPE_COLORS: Record<string, { fill: string; stroke: string }> = {
   campground: { fill: 'none', stroke: '#fff' },
   caravan_site: { fill: '#fff', stroke: 'none' },
@@ -29,11 +32,11 @@ export const TYPE_COLORS: Record<string, { fill: string; stroke: string }> = {
   touristic_place: { fill: 'none', stroke: '#fff' },
   parking: { fill: 'none', stroke: '#fff' },
   restaurant: { fill: 'none', stroke: '#fff'},
-  zorluk_seviyesi: { fill: 'none', stroke: '#000' },
-  etkinlik_turu: { fill: 'none', stroke: '#000' },
-  etkinlik_tarihi: { fill: 'none', stroke: '#000' },
-  etkinlik_suresi: { fill: 'none', stroke: '#000' },
-  etkinlik_yeri: { fill: 'none', stroke: '#000' },
+  zorluk_seviyesi: { fill: 'none', stroke: 'currentColor' },
+  etkinlik_turu: { fill: 'none', stroke: 'currentColor' },
+  etkinlik_tarihi: { fill: 'none', stroke: 'currentColor' },
+  etkinlik_suresi: { fill: 'none', stroke: 'currentColor' },
+  etkinlik_yeri: { fill: 'none', stroke: 'currentColor' },
 
   private_campground: { fill: '#fff', stroke: 'none' },
   shared_campground: { fill: '#fff', stroke: 'none' },
@@ -111,7 +114,7 @@ const DEFAULT_SVG_OPTIONS: Required<SVGStandardizeOptions> = {
   width: 20,
   height: 20,
   fill: 'transparent',
-  stroke: '#000',
+  stroke: 'currentColor', // Tema moduna uyumlu renk
 };
 
 export function standardizeSVG(svg: string, options?: SVGStandardizeOptions): string {
@@ -119,6 +122,8 @@ export function standardizeSVG(svg: string, options?: SVGStandardizeOptions): st
   let out = svg;
   out = out.replace(/width="[^"]*"/, `width="${opts.width}"`);
   out = out.replace(/height="[^"]*"/, `height="${opts.height}"`);
+  // currentColor değerlerini önce çözümle (HTML string olarak embed edildiğinde çözümlenemez)
+  out = out.replace(/currentColor/g, opts.stroke || opts.fill || 'currentColor');
   // fill ve stroke'u tüm attribute'larda değiştir
   out = out.replace(/fill="[^"]*"/g, `fill="${opts.fill}"`);
   out = out.replace(/stroke="[^"]*"/g, `stroke="${opts.stroke}"`);

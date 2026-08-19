@@ -591,11 +591,13 @@ export async function syncAll({ userId, onProgress }: { userId?: number; onProgr
   await syncPendingChanges(userId, onProgress);
   // 4. Yorum değerlendirmeleri
   await syncRatings();
-  // 5. Kullanıcı hakları / feature entitlement sync
+  // 5. Kamp türleri katalog sync (offline kullanım için lokal cache)
+  // await syncCampingTypes(); // TODO: Implement syncCampingTypes function
+  // 6. Kullanıcı hakları / feature entitlement sync
   await syncFeatureEntitlements();
-  // 6. Duyuru delta sync
+  // 7. Duyuru delta sync
   await syncAnnouncements();
-  // 7. Kamp alanı delta sync (userId ile birlikte arkadaş erişim temizliği)
+  // 8. Kamp alanı delta sync (userId ile birlikte arkadaş erişim temizliği)
   await syncCampingAreas(userId !== undefined ? String(userId) : undefined);
 }
 

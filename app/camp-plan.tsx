@@ -10,7 +10,7 @@ import { getLastKnownLocationAsync } from '../lib/largeStorage';
 import CustomDatePicker, { formatDateTR } from '../components/CustomDatePicker';
 import DateRangePicker from '../components/DateRangePicker';
 import { SvgXml } from 'react-native-svg';
-import { campingTypes, getCampingTypeLabel, getCampingTypeIcon } from '../lib/categories';
+import { getCampingTypeLabel, getCampingTypeIcon, useCampingTypes } from '../lib/categories';
 import { getDatabase } from '../lib/database';
 import { fetchOpenMeteoForecast, evaluateOpenMeteoForecast } from '../lib/openMeteo';
 import CampingAreaDetailModal from '../components/CampingAreaDetailModal';
@@ -103,6 +103,7 @@ const makeMapHTML = (lat: number, lng: number) => `<!DOCTYPE html><html><head><m
 
 export default function CampPlanPage() {
   const router = useRouter();
+  const campingTypes = useCampingTypes();
   const insets = useSafeAreaInsets();
   const isConnected = useNetworkStatus();
   const [stepIndex, setStepIndex] = useState(0);
@@ -1668,8 +1669,9 @@ export default function CampPlanPage() {
                   if (typeof n === 'string') {
                     if (n.startsWith('<svg')) {
                       const iconColor = selected ? theme.colors.primary : theme.colors.text;
-                      // SVG rengini tema rengine uyarla
+                      // SVG rengini tema rengine uyarla (currentColor dahil)
                       const svgXml = n
+                        .replace(/currentColor/g, iconColor)
                         .replace(/fill=['"]#[0-9a-fA-F]{6}['"]|fill=['"]black['"]|fill=['"]#000['"]/gi, `fill="${iconColor}"`)
                         .replace(/stroke=['"]#[0-9a-fA-F]{6}['"]|stroke=['"]black['"]|stroke=['"]#000['"]/gi, `stroke="${iconColor}"`);
                       return <SvgXml xml={svgXml} width={18} height={18} />;

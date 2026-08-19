@@ -110,6 +110,17 @@ export async function getMe() {
   return res.json();
 }
 
+export async function updateUserPreferences(preferences: any) {
+  const res = await apiFetch(`${API_URL}/users/me`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preferences }),
+  });
+  // Return parsed JSON or throw on non-OK
+  const text = await res.text();
+  try { return JSON.parse(text); } catch (e) { return text; }
+}
+
 export async function deleteAccount() {
   const token = await getToken();
   const res = await fetch(`${API_URL}/users/me`, {

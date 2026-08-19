@@ -11,6 +11,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { offlineTransportManager } from '@/lib/offlineTransport';
 import { getMe } from '@/lib/userCommunityApi';
 import { emitChatEvent } from '@/lib/chatEvents';
+import { hydrateCampingTypesFromCache, syncCampingTypes } from '@/lib/campingTypesApi';
 import * as SecureStore from 'expo-secure-store';
 
 export default function RootLayout() {
@@ -22,6 +23,19 @@ export default function RootLayout() {
   const [shouldRedirect, setShouldRedirect] = useState<null | 'login' | 'tabs'>(null);
   const isConnected = useNetworkStatus();
   const prevConnectedRef = useRef<boolean | null>(null);
+
+  // Kamp türleri uygulama açılışında önce lokal cache'den yüklenir; online ise sunucuyla eşitlenir.
+  useEffect(() => {
+    (async () => {
+      await hydrateCampingTypesFromCache();
+      if (isConnected) await syncCampingTypes();
+    })().catch((error) => console.warn('[Layout] kamp türleri başlatılamadı:', error));
+  }, []);
+
+  useEffect(() => {
+    if (!isConnected) return;
+    syncCampingTypes().catch((error) => console.warn('[Layout] kamp türleri online sync hatası:', error));
+  }, [isConnected]);
 
   // ─── Global offline → online kurtarma ──────────────────────────────────────
   // Bağlantı geri geldiğinde, hangi ekranda olunursa olsun bekleyen

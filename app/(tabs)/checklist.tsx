@@ -24,11 +24,13 @@ import {
   CheckCircle2
 } from 'lucide-react-native';
 import { getSVGIcon } from '../icons/svgIcons';
+import { getCampingTypeIcon } from '../../lib/categories';
 import { Modal } from 'react-native';
 import AddChecklistItemModal from '../../components/AddChecklistItemModal';
 import { getToken } from '../../lib/auth';
 import { API_URL } from '../../lib/config';
 import { getMe } from '../../lib/userCommunityApi';
+import { getAppConfig } from '../../lib/adminSettingsApi';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 // AsyncStorage yerine SecureStore kullanımı
@@ -104,7 +106,7 @@ export default function ChecklistScreen({ navigation }: any) {
   const [seasonIdMap, setSeasonIdMap] = useState<Record<string, number>>({});
   const [campingTypeIdMap, setCampingTypeIdMap] = useState<Record<string, number>>({});
   const [selectedSeason, setSelectedSeason] = useState<string>('spring');
-  const [selectedCampingType, setSelectedCampingType] = useState<string>('tent');
+  const [selectedCampingType, setSelectedCampingType] = useState<string>('campground');
   
       // Ekranın sağ ve solundan kaydırınca geri gitmeyi engelle
       useFocusEffect(
@@ -538,15 +540,23 @@ export default function ChecklistScreen({ navigation }: any) {
         const me = await getMe();
         setUserRole(me.role || '');
 
-        // Kod eşlemesi için map oluştur
+        // Kod eşlemesi için map oluştur (hem raw hem canonical id'leri ekle)
         const seasonMap: Record<string, number> = {};
         const campingTypeMap: Record<string, number> = {};
         // Kod: 'spring', 'summer' vs. (backend'de code veya slug varsa)
         seasonsData.forEach((s: any) => {
           seasonMap[s.code || s.slug || s.name.toLowerCase()] = s.id;
         });
+        // typesData içindeki legacy kodları canonical değerlere eşle (ör: tent -> campground)
         typesData.forEach((t: any) => {
-          campingTypeMap[t.code || t.slug || t.name.toLowerCase()] = t.id;
+          const rawId = t.code || t.slug || String(t.name || '').toLowerCase();
+          const canonical = rawId === 'tent' ? 'campground'
+            : rawId === 'caravan' ? 'caravan_site'
+            : rawId === 'nature' ? 'hiking_road'
+            : rawId === 'bungalov' ? 'bungalow'
+            : rawId;
+          campingTypeMap[rawId] = t.id;
+          campingTypeMap[canonical] = t.id;
         });
 
         // Frontend için
@@ -587,43 +597,79 @@ export default function ChecklistScreen({ navigation }: any) {
             color: s.color || color,
           };
         }));
-        setCampingTypes(typesData.map((t: any) => {
-          const id = t.code || t.slug || t.name.toLowerCase();
-          let iconKey: 'campground' | 'caravan_site' | 'hiking_road' | 'bungalow';
-          let displayName = t.name;
-
-          // Kamp türüne göre svgIcons.ts'deki anahtarı eşleştir
-          switch (id) {
-            case 'tent':
-              iconKey = 'campground';
-              displayName = 'Çadır Kampı';
+        const normalizedCampingTypes = typesData.map((t: any) => {
+          const rawId = t.code || t.slug || String(t.name || '').toLowerCase();
+          const canonical = rawId === 'tent' ? 'campground'
+            : rawId === 'caravan' ? 'caravan_site'
+            : rawId === 'nature' ? 'hiking_road'
+            : rawId === 'bungalov' ? 'bungalow'
+            : rawId;
+          let displayName = t.name || t.label || canonical;
+          switch (canonical) {
+            case 'campground':
+              displayName = 'Kamp Alanı';
               break;
-            case 'caravan':
-              iconKey = 'caravan_site';
-              displayName = 'Karavan Kampı';
+            case 'caravan_site':
+              displayName = 'Karavan Alanı';
               break;
-            case 'nature':
-              iconKey = 'hiking_road';
-              displayName = 'Doğa Yürüyüşü';
+            case 'hiking_road':
+              displayName = 'Yürüyüş Parkuru';
               break;
-            case 'bungalov':
-              iconKey = 'bungalow';
+            case 'bungalow':
               displayName = 'Bungalov';
               break;
-            default:
-              iconKey = 'campground';
           }
 
-          // getSVGIcon fonksiyonunu döndür
-          const icon = (props: any) => getSVGIcon(iconKey, props);
+          const rawSvg = t.svg || t.iconSvg || null;
+          const icon = (props: any = {}) => {
+            const baseSvg = rawSvg || getCampingTypeIcon(canonical, props) || getSVGIcon('campground', props);
+            if (typeof baseSvg !== 'string' || !baseSvg.startsWith('<svg')) return getSVGIcon('campground', props);
+            let out = baseSvg;
+            if (props.width) out = /width=["'][^"']*["']/.test(out) ? out.replace(/width=["'][^"']*["']/, `width="${props.width}"`) : out.replace(/<svg\b/, `<svg width="${props.width}"`);
+            if (props.height) out = /height=["'][^"']*["']/.test(out) ? out.replace(/height=["'][^"']*["']/, `height="${props.height}"`) : out.replace(/<svg\b/, `<svg height="${props.height}"`);
+            const color = props.stroke || props.fill || t.color || '#059669';
+            out = out.replace(/currentColor/g, color);
+            return out;
+          };
 
           return {
-            id,
+            id: canonical,
             name: displayName,
             icon,
             color: t.color || '#059669',
           };
-        }));
+        });
+
+        // Kullanıcı tercihi: önce kullanıcı prefs, sonra global admin ayarı, sonra SecureStore fallback
+        let visibleMap: Record<string, boolean> | null = null;
+        try {
+          if (me && me.preferences && typeof me.preferences === 'object' && me.preferences.checklist_visible_types) {
+            visibleMap = me.preferences.checklist_visible_types;
+          } else {
+            // Try global admin app-config
+            try {
+              const appCfg = await getAppConfig();
+              if (appCfg && appCfg.checklist_visible_types) {
+                visibleMap = appCfg.checklist_visible_types;
+              }
+            } catch (e) {
+              // ignore
+            }
+            if (!visibleMap) {
+              const vis = await SecureStorage.getItem('checklist_visible_types');
+              if (vis) visibleMap = JSON.parse(vis);
+            }
+          }
+        } catch (e) {
+          visibleMap = null;
+        }
+
+        const filteredTypes = visibleMap ? normalizedCampingTypes.filter((nt: any) => (visibleMap[nt.id] === undefined ? true : !!visibleMap[nt.id])) : normalizedCampingTypes;
+
+        setCampingTypes(filteredTypes);
+        if (filteredTypes.length > 0 && !filteredTypes.some((t: CampingType) => t.id === selectedCampingType)) {
+          setSelectedCampingType(filteredTypes[0].id);
+        }
         setSeasonIdMap(seasonMap);
         setCampingTypeIdMap(campingTypeMap);
       } catch (e: any) {

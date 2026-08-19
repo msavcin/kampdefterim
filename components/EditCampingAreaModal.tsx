@@ -1,7 +1,7 @@
 
 
 import { syncAll } from '@/lib/syncManager';
-import { campingTypes, getCampingTypeLabel, getCampingTypeIcon, getCampingAreaBgColor } from '@/lib/categories';
+import { getCampingTypeLabel, getCampingTypeIcon, getCampingAreaBgColor, useCampingTypes } from '@/lib/categories';
 import { TYPE_COLORS } from '../app/icons/svgIcons';
 import { SvgXml } from 'react-native-svg';
 
@@ -118,6 +118,7 @@ const priceRanges = [
 
 export default function EditCampingAreaModal({ visible, onClose, campingArea, onSuccess, currentUserId }: EditCampingAreaModalProps) {
   const { colors } = useTheme();
+  const dynamicCampingTypes = useCampingTypes();
   const isConnected = useNetworkStatus();
   // Hazır saat dilimi şablonları
   const timeOptions = [
@@ -131,7 +132,7 @@ export default function EditCampingAreaModal({ visible, onClose, campingArea, on
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    type: campingTypes[0]?.id || 'campground',
+    type: dynamicCampingTypes[0]?.id || 'campground',
     amenities: [] as string[],
     website: '',
     phone: '',
@@ -321,10 +322,10 @@ useEffect(() => {
       ...prev,
       name: campingArea.name || '',
       description: campingArea.description || '',
-      // type alanı: kayıttaki değer varsa ve campingTypes dizisinde varsa onunla aç
-      type: (campingType && campingTypes.some(t => t.id === campingType)
+      // type alanı: kayıttaki değer varsa ve aktif kamp türleri dizisinde varsa onunla aç
+      type: (campingType && dynamicCampingTypes.some(t => t.id === campingType)
         ? campingType
-        : campingTypes[0]?.id || 'campground'),
+        : dynamicCampingTypes[0]?.id || 'campground'),
       amenities: Array.isArray(campingArea.amenities) ? campingArea.amenities : [],
       website: campingArea.website || '',
       phone: campingArea.phone || '',
@@ -345,7 +346,7 @@ useEffect(() => {
       friends: friendsList,
     }));
   }
-}, [campingArea, visible]);
+}, [campingArea, visible, dynamicCampingTypes]);
 
   const toggleAmenity = (amenityId: string) => {
     setFormData(prev => ({
@@ -999,7 +1000,7 @@ useEffect(() => {
           <View style={[styles.section, { backgroundColor: colors.surface }]}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Kamp Türü</Text>
             <View style={styles.typeGrid}>
-              {campingTypes.map((type) => (
+              {dynamicCampingTypes.map((type) => (
                 <TouchableOpacity
                   key={type.id}
                   style={[

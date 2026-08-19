@@ -50,23 +50,31 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
       });
-      if (refreshRes.ok) {
-        const data = await refreshRes.json();
-        const newToken = data?.token ?? null;
-        if (newToken) await saveToken(newToken);
-        const newRefresh = data?.refreshToken ?? data?.refresh_token ?? null;
-        if (newRefresh) await saveRefreshToken(newRefresh);
-        // Orijinal isteği yeni token ile tekrar dene (eğer yeni token geldiyse)
-        if (typeof headers === 'object') {
-          if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
-        }
-        init.headers = headers;
-        if (newToken) {
-          response = await fetch(input, init);
-          if (response.status !== 401) {
-            return response;
+      // Log refresh cevap içeriği (debug için)
+      try {
+        const refreshText = await refreshRes.text();
+        if (__DEV__) console.log('[apiFetch] refresh response:', refreshRes.status, refreshText);
+        if (refreshRes.ok) {
+          let data: any = null;
+          try { data = JSON.parse(refreshText); } catch (e) { data = null; }
+          const newToken = data?.token ?? null;
+          if (newToken) await saveToken(newToken);
+          const newRefresh = data?.refreshToken ?? data?.refresh_token ?? null;
+          if (newRefresh) await saveRefreshToken(newRefresh);
+          // Orijinal isteği yeni token ile tekrar dene (eğer yeni token geldiyse)
+          if (typeof headers === 'object') {
+            if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
+          }
+          init.headers = headers;
+          if (newToken) {
+            response = await fetch(fetchInput, init);
+            if (response.status !== 401) {
+              return response;
+            }
           }
         }
+      } catch (e) {
+        if (__DEV__) console.warn('[apiFetch] refresh token parsing hata:', e);
       }
     }
     // Refresh başarısızsa logout yapılmaz, response döndürülür
@@ -81,9 +89,12 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
       });
-      if (__DEV__) console.log('[apiFetch] 403 refresh yanıtı:', refreshRes.status);
-      if (refreshRes.ok) {
-          const data = await refreshRes.json();
+      try {
+        const refreshText = await refreshRes.text();
+        if (__DEV__) console.log('[apiFetch] 403 refresh response:', refreshRes.status, refreshText);
+        if (refreshRes.ok) {
+          let data: any = null;
+          try { data = JSON.parse(refreshText); } catch (e) { data = null; }
           const newToken = data?.token ?? null;
           if (newToken) {
             await saveToken(newToken);
@@ -96,11 +107,14 @@ export async function apiFetch(input: RequestInfo, init: RequestInit = {}): Prom
             if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
           }
           init.headers = headers;
-          response = await fetch(input, init);
+          response = await fetch(fetchInput, init);
           if (__DEV__) console.log('[apiFetch] 403 retry yanıtı:', response.status);
           // Yine 403 gelirse direkt döndür (gerçek yetki hatası)
           return response;
         }
+      } catch (e) {
+        if (__DEV__) console.warn('[apiFetch] 403 refresh parsing hata:', e);
+      }
     }
   }
   return response;

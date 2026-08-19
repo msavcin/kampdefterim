@@ -176,6 +176,21 @@ export async function getAppRuntimeSettings(): Promise<AppRuntimeSettings> {
   }
 }
 
+/**
+ * Get raw app config map from server (includes admin-set values like checklist_visible_types)
+ */
+export async function getAppConfig(): Promise<Record<string, any>> {
+  try {
+    const response = await apiFetch('/admin/app-config', { method: 'GET' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    return data?.settings || {};
+  } catch (error) {
+    console.warn('[AdminSettings] getAppConfig fallback empty:', error);
+    return {};
+  }
+}
+
 export async function getAppPermissionsSettings(): Promise<AppPermissionsSettings> {
   return getAppRuntimeSettings();
 }

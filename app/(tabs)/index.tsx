@@ -14,7 +14,7 @@ function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-import { campingTypes, getCampingTypeLabel, getCampingAreaBgColor } from '../../lib/categories';
+import { getCampingTypeLabel, getCampingTypeIcon, getCampingAreaBgColor, useCampingTypes } from '../../lib/categories';
 import { filterCampingAreasByUser } from '../../lib/accessControl';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 
@@ -158,6 +158,7 @@ const KAMPFIRE_USER_ACTIVITY_MESSAGE_TYPES = new Set([
 export default function MapScreen() {
     const insets = useSafeAreaInsets();
     const { colors, scheme, themeVariantId, isKampfireTheme } = useTheme();
+    const campingTypes = useCampingTypes();
     // Son sorgulanan konumu saklamak için ref
     const lastQueriedLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
     // AppState'te alınan en son konum bilgisi (lokasyon butonu için hızlı erişim)
@@ -1812,7 +1813,19 @@ export default function MapScreen() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [provinceAreaList, setProvinceAreaList] = useState<CampingArea[]>([]);
   // Artık filtreler merkezi kategori yönetiminden geliyor
-  const [selectedTags, setSelectedTags] = useState(campingTypes.map(t => t.id));
+  const campingTypeIds = useMemo(() => campingTypes.map(t => t.id), [campingTypes]);
+  const [selectedTags, setSelectedTags] = useState(campingTypeIds);
+  const previousCampingTypeIdsRef = useRef<string[]>(campingTypeIds);
+
+  useEffect(() => {
+    const previousIds = previousCampingTypeIdsRef.current;
+    previousCampingTypeIdsRef.current = campingTypeIds;
+    setSelectedTags(prev => {
+      const wasAllSelected = previousIds.length > 0 && previousIds.every(id => prev.includes(id));
+      const cleaned = prev.filter(id => campingTypeIds.includes(id));
+      return wasAllSelected ? campingTypeIds : cleaned;
+    });
+  }, [campingTypeIds]);
 
   // Refs to store previous filter/map state when entering camp-plan select mode
   const prevSelectedTagsRef = useRef<any[] | null>(null);
@@ -3022,8 +3035,11 @@ export default function MapScreen() {
         return getSVGIcon('shared_campground');
       }
     }
-    // Diğer tüm kullanıcılar için type varsa ilgili ikon, yoksa default ikon döndür
-    return getSVGIcon((type as MarkerType) || 'default');
+    // Diğer tüm kullanıcılar için dinamik kamp türü SVG'si; harita marker'ları için beyaz renk
+    const dynamicIcon = getCampingTypeIcon(type || '', { color: '#fff' });
+    return (typeof dynamicIcon === 'string' && dynamicIcon.startsWith('<svg'))
+      ? dynamicIcon
+      : getSVGIcon((type as MarkerType) || 'default');
   };
 
   const getTypeLabel = (type: string) => {

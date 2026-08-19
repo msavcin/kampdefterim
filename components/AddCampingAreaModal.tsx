@@ -1,5 +1,5 @@
 import { SvgXml } from 'react-native-svg';
-import { campingTypes, getCampingTypeLabel, getCampingTypeIcon } from '@/lib/categories';
+import { getCampingTypeLabel, getCampingTypeIcon, useCampingTypes } from '@/lib/categories';
 import { TYPE_COLORS } from '../app/icons/svgIcons';
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, Alert, Platform, ActivityIndicator } from 'react-native';
@@ -349,6 +349,7 @@ const styles = StyleSheet.create({
 
 export default function AddCampingAreaModal({ visible, onClose, initialLocation, onSuccess, user, isGuest = false, remainingAreas = Infinity, guestLimit = 10 }: AddCampingAreaModalProps) {
   const { colors } = useTheme();
+  const dynamicCampingTypes = useCampingTypes();
   const isConnected = useNetworkStatus();
   const [userCommunityId, setUserCommunityId] = useState<number | undefined>(undefined);
   useEffect(() => {
@@ -378,7 +379,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
     description: '',
     latitude: '',
     longitude: '',
-    type: 'campground' as 'campground' | 'caravan_site' | 'recreation' | 'picnic',
+    type: 'campground' as string,
     amenities: [] as string[],
     website: '',
     phone: '',
@@ -436,7 +437,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
         description: '',
         latitude: initialLocation ? initialLocation.latitude.toFixed(6) : '',
         longitude: initialLocation ? initialLocation.longitude.toFixed(6) : '',
-        type: 'campground',
+        type: dynamicCampingTypes[0]?.id || 'campground',
         amenities: [],
         website: '',
         phone: '',
@@ -458,7 +459,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
       setAllFriends([]);
       setFriendsError(null);
     }
-  }, [visible, initialLocation]);
+  }, [visible, initialLocation, dynamicCampingTypes]);
   const toggleAmenity = (amenityId: string) => {
     setFormData(prev => ({
       ...prev,
@@ -1261,7 +1262,7 @@ export default function AddCampingAreaModal({ visible, onClose, initialLocation,
           <View style={[styles.section, { backgroundColor: colors.surface }]}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Kamp Türü</Text>
             <View style={styles.typeGrid}>
-              {campingTypes.map((type) => (
+              {dynamicCampingTypes.map((type) => (
                 <TouchableOpacity
                   key={type.id}
                   style={[
