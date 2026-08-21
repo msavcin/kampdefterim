@@ -13,18 +13,21 @@ const probeInternet = async (): Promise<boolean> => {
   try {
     const controller = new AbortController();
     const timerId = setTimeout(() => controller.abort(), 1500); // Timeout 1.5 saniye
-    await fetch(API_URL, { method: 'HEAD', signal: controller.signal, cache: 'no-cache' });
+    const res = await fetch(`${API_URL}/users/me`, { method: 'HEAD', signal: controller.signal, cache: 'no-cache' });
     clearTimeout(timerId);
-    return true; // Herhangi bir HTTP yanıtı internet erişimi olduğunu gösterir
+    // Ağ katmanı yanıt verdiyse (401 dahil) gerçek internet var.
+    // Captive portal HTML 200 de gelebilir; yine de host'a ulaşılmıştır.
+    return res.status > 0;
   } catch {
     return false;
   }
 };
 
 export function useNetworkStatus(onOnline?: () => void) {
-  // null: henüz bilinmiyor (ilk checkNetwork tamamlanmadı) — dışarıya true olarak yansır
+  // null: henüz bilinmiyor. Hotspot'ta WiFi varken internet yoktur;
+  // bilinmeyen durumu online saymak premium kullanıcıyı "Premium Ol"a düşürür.
   const [_isConnected, setIsConnected] = useState<boolean | null>(null);
-  const isConnected = _isConnected ?? true;
+  const isConnected = _isConnected ?? false;
   const onOnlineRef = useRef(onOnline);
   const lastStateRef = useRef<boolean | null>(null);
   // Probe'u çok sık çalıştırmamak için son probe zamanını takip et
@@ -55,7 +58,7 @@ export function useNetworkStatus(onOnline?: () => void) {
           console.log('[NetInfo] İnternet kontrolü sonucu:', connected);
         } else {
           // Son durumu kullan
-          connected = lastStateRef.current ?? true;
+          connected = lastStateRef.current ?? false;
           console.log('[NetInfo] Son durum kullanılıyor:', connected);
         }
       }
@@ -72,7 +75,7 @@ export function useNetworkStatus(onOnline?: () => void) {
       lastStateRef.current = connected;
     } catch (e) {
       console.log('[NetInfo] Kontrol hatası:', e);
-      setIsConnected(true); // Hata olursa online varsay
+      setIsConnected(false);
     }
   };
 
@@ -93,6 +96,7 @@ export function useNetworkStatus(onOnline?: () => void) {
 
     // 2 saniyede bir network kontrolü (hotspot → gerçek internet geçişini hızlı yakala)
     const interval = setInterval(() => {
+      lastProbeRef.current = 0;
       checkNetwork();
     }, 2000);
 

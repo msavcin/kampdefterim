@@ -216,8 +216,11 @@ export default function MapScreen() {
     let cancelled = false;
     (async () => {
       try {
+        const { loadEntitlementsCache } = require('@/lib/offlinePremiumCache');
+        const cachedEnt = await loadEntitlementsCache();
+        if (cachedEnt) setFeatureEntitlements(cachedEnt);
         const settings = await getAppRuntimeSettings();
-        const entitlements = await getMyFeatureEntitlements().catch(() => DEFAULT_FEATURE_ENTITLEMENTS);
+        const entitlements = await getMyFeatureEntitlements();
         const entitlementLimit = entitlements.camping_area_limit?.limitValue;
         if (!cancelled) {
           setFeatureEntitlements(entitlements);
@@ -1458,13 +1461,27 @@ export default function MapScreen() {
     // Kullanıcı ve community_members rolünü ve arkadaş listesini çek
     (async () => {
       try {
+        const { loadCachedUser, isValidUserPayload, computeIsPremium, savePremiumFlag } = require('@/lib/offlinePremiumCache');
+        const cachedUser = await loadCachedUser();
+        if (cachedUser) {
+          setUser((prev: any) => ({ ...(prev ?? {}), ...cachedUser }));
+        }
+
         const token = await getToken();
         if (!token) {
-          setUser(null);
-          setCommunityMember(null);
+          if (!cachedUser) {
+            setUser(null);
+            setCommunityMember(null);
+          }
+          return;
+        }
+        if (!isConnected) {
           return;
         }
         const userData = await getMe(); // users tablosu (isPremium, offline_enabled, offline_radius_km içerir)
+        if (!isValidUserPayload(userData)) {
+          throw new Error('getMe geçersiz yanıt');
+        }
         
         // Offline ayarlarını logla
         if (__DEV__) {
@@ -1517,10 +1534,13 @@ export default function MapScreen() {
         const mergedUser = {
           ...userData,
           friends,
+          isPremium: !!(userData?.isPremium || userData?.is_premium || resolvedOfflineEnabled),
+          is_premium: !!(userData?.is_premium || userData?.isPremium || resolvedOfflineEnabled),
           offline_enabled: resolvedOfflineEnabled,
           offline_radius_km: resolvedOfflineRadiusKm,
         };
         setUser(mergedUser);
+        try { await savePremiumFlag(computeIsPremium(mergedUser)); } catch {}
         
         // Kullanıcı bilgilerini cache'le (offline kullanım için)
         if (userData) {

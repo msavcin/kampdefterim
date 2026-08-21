@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import useTokenAutoLogout from '@/hooks/useTokenAutoLogout';
-import { View, Alert } from 'react-native';
+import { View, Alert, AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ThemeProvider from '../components/ThemeProvider';
@@ -41,17 +41,40 @@ export default function RootLayout() {
   // Bağlantı geri geldiğinde, hangi ekranda olunursa olsun bekleyen
   // offline mesajları sunucuya iletir ve transport'u durdurur.
   useEffect(() => {
+    const startOfflineTransport = async () => {
+      let userId = '';
+      let userName = 'Kullanıcı';
+      try {
+        const cached = await SecureStore.getItemAsync('localUser');
+        if (cached) {
+          const u = JSON.parse(cached);
+          userId = String(u?.id ?? u?.user_id ?? '');
+          userName = String(u?.name ?? u?.username ?? userName);
+        }
+      } catch { /* ignore */ }
+      if (!userId) return;
+      console.log('[Layout] offline transport başlatılıyor');
+      await offlineTransportManager.start(userId, userName);
+      offlineTransportManager.triggerSubnetScan();
+    };
+
     if (prevConnectedRef.current === null) {
       prevConnectedRef.current = isConnected;
+      if (!isConnected) startOfflineTransport().catch(() => {});
       return;
     }
     const wasOffline = !prevConnectedRef.current;
+    const nowOnline = isConnected;
     prevConnectedRef.current = isConnected;
-    if (!isConnected || !wasOffline) return;
+
+    if (!nowOnline) {
+      startOfflineTransport().catch((e) => console.warn('[Layout] offline transport hatası:', e));
+      return;
+    }
+    if (!wasOffline) return;
 
     (async () => {
       try {
-        // Kullanıcı ID'sini bul: önce SecureStore, sonra API
         let userId = '';
         try {
           const cached = await SecureStore.getItemAsync('localUser');
@@ -64,17 +87,23 @@ export default function RootLayout() {
           const me = await getMe().catch(() => null);
           if (me) userId = String(me?.id ?? me?.user_id ?? '');
         }
-        // Bekleyen mesajları sunucuya ilet
         await offlineTransportManager.syncPendingToServer(userId || undefined);
-        // Transport'u durdur (artık online)
         await offlineTransportManager.stop();
-        // Chat ekranlarına sync tamamlandığını bildir
         emitChatEvent({ type: 'offline_sync_complete' });
         console.log('[Layout] offline→online recovery tamamlandı');
       } catch (e) {
         console.warn('[Layout] online recovery hatası:', e);
       }
     })();
+  }, [isConnected]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && !isConnected) {
+        offlineTransportManager.triggerSubnetScan();
+      }
+    });
+    return () => { try { sub.remove(); } catch { /* ignore */ } };
   }, [isConnected]);
 
   useEffect(() => {

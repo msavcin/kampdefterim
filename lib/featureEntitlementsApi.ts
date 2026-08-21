@@ -107,9 +107,19 @@ export async function getMyFeatureEntitlements(): Promise<FeatureEntitlementMap>
     const response = await apiFetch('/feature-entitlements/me', { method: 'GET' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    return normalizeMap(data.entitlements);
+    const mapped = normalizeMap(data.entitlements);
+    try {
+      const { saveEntitlementsCache } = require('./offlinePremiumCache');
+      await saveEntitlementsCache(mapped);
+    } catch {}
+    return mapped;
   } catch (error) {
     if (__DEV__) console.warn('[FeatureEntitlements] getMy fallback:', error);
+    try {
+      const { loadEntitlementsCache } = require('./offlinePremiumCache');
+      const cached = await loadEntitlementsCache();
+      if (cached) return cached;
+    } catch {}
     return DEFAULT_FEATURE_ENTITLEMENTS;
   }
 }

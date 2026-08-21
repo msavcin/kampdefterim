@@ -28,6 +28,11 @@ import { getOfflineUnreadMap, clearOfflineUnread } from '@/lib/offlineUnread';
 const DELETED_KEY = '@chat_deleted_v1';
 const FRIENDS_CACHE_KEY = '@chat_friends_cache_v1';
 const CONVERSATIONS_CACHE_KEY = '@conversations_cache_v1';
+import { loadFriendConvMap, saveFriendConvLink } from '@/lib/chatFriendConvMap';
+
+function conversationIdOf(c: any) {
+  return c?.id ?? c?.conversation_id ?? c?.conversation?.id ?? null;
+}
 
 async function loadDeletedMap() {
   try {
@@ -114,8 +119,18 @@ const normalizeIndexKey = (value:any) => {
   try { return String(value).toLowerCase().replace(/^@/, '').trim(); } catch { return String(value || '').toLowerCase(); }
 };
 
-function getFriendConversation(friend:any, convIndex:any, conversations:any[]) {
+function getFriendConversation(friend:any, convIndex:any, conversations:any[], friendConvMap?: Record<string, any>) {
   const idCandidate = friend.id ?? friend.user_id ?? friend.recipient_id ?? (typeof friend.tag === 'string' ? (friend.tag.startsWith('#') ? Number(friend.tag.replace('#','')) : friend.tag) : undefined);
+  if (friendConvMap && idCandidate != null) {
+    const mappedId = friendConvMap[String(idCandidate)] ?? friendConvMap[String(friend.username ?? '')];
+    if (mappedId) {
+      const mappedConv = Array.isArray(conversations)
+        ? conversations.find((c: any) => String(c?.id ?? c?.conversation_id ?? c?.conversation?.id) === String(mappedId))
+        : null;
+      if (mappedConv && !isCommunityConversationObj(mappedConv)) return mappedConv;
+      return { id: mappedId, recipient_id: idCandidate, other_user_id: idCandidate };
+    }
+  }
   if (typeof idCandidate !== 'undefined' && idCandidate !== null) {
     const byId = convIndex?.byId;
     if (byId) {
@@ -224,20 +239,21 @@ const FriendRow = React.memo(({
   onStart,
   onDelete,
   isConnected, // passed from parent
+  friendConvMap,
 }: any) => {
-  const convMemo = useMemo(() => getFriendConversation(item, convIndex, conversations), [item, convIndex, conversations]);
+  const convMemo = useMemo(() => getFriendConversation(item, convIndex, conversations, friendConvMap), [item, convIndex, conversations, friendConvMap]);
   const conv = convProp ?? convMemo;
   const [isWifiNearby, setIsWifiNearby] = useState<boolean>(() => {
     try {
       const peers = offlineTransportManager.peers || [];
-      return peers.some((p: any) => (p?.port || 0) !== 0 && String(p?.userId) === String(item?.id));
+      return peers.some((p: any) => String(p?.userId) === String(item?.id));
     } catch (e) { return false; }
   });
 
   useEffect(() => {
     const sync = (peers: any[]) => {
       try {
-        const found = Array.isArray(peers) && peers.some((p: any) => (p?.port || 0) !== 0 && String(p?.userId) === String(item?.id));
+        const found = Array.isArray(peers) && peers.some((p: any) => String(p?.userId) === String(item?.id));
         setIsWifiNearby(Boolean(found));
       } catch (e) { setIsWifiNearby(false); }
     };
@@ -360,6 +376,7 @@ export default function NewChatScreen() {
   const autoOpenedRecipientConversationRef = useRef(false);
   const [tab, setTab] = useState<'friends'|'communities'>('friends');
   const [friendConvMap, setFriendConvMap] = useState<Record<string, any>>({});
+  const [persistedFriendConvMap, setPersistedFriendConvMap] = useState<Record<string, string>>({});
   const lastRefreshTimeRef = useRef<number>(0);
   const REFRESH_THROTTLE_MS = 2000; // 2 saniye içinde tekrar yenileme yapma
 
@@ -565,29 +582,44 @@ export default function NewChatScreen() {
     }
   }, []);
 
+  const applyFriendsCache = useCallback(async () => {
+    try {
+      const cached = await AsyncStorage.getItem(FRIENDS_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) setFriends(parsed);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   const loadFriends = useCallback(async () => {
+    if (!isConnected) {
+      await applyFriendsCache();
+      return;
+    }
     try {
       const res = await apiFetch(`${API_URL}/friendships/list`);
+      if (!res.ok) {
+        await applyFriendsCache();
+        return;
+      }
       const data = await res.json();
-      const mapped = Array.isArray(data) ? data.map((f:any) => {
+      if (!Array.isArray(data)) {
+        await applyFriendsCache();
+        return;
+      }
+      const mapped = data.map((f:any) => {
         const idFromTag = typeof f.tag === 'string' && f.tag.startsWith('#') ? Number(f.tag.replace('#','')) : undefined;
         const idCandidate = f.user_id ?? f.id ?? idFromTag;
         const resolvedId = typeof idCandidate !== 'undefined' && idCandidate !== null ? Number(idCandidate) : undefined;
         return { id: resolvedId, username: f.username, name: f.name || '', avatar_url: f.avatar_url || '' };
-      }) : [];
+      });
       setFriends(mapped);
       try { await AsyncStorage.setItem(FRIENDS_CACHE_KEY, JSON.stringify(mapped)); } catch { /* ignore */ }
     } catch {
-      // Offline/hata durumunda cache'den yükle
-      try {
-        const cached = await AsyncStorage.getItem(FRIENDS_CACHE_KEY);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) setFriends(parsed);
-        }
-      } catch { /* ignore */ }
+      await applyFriendsCache();
     }
-  }, []);
+  }, [isConnected, applyFriendsCache]);
 
   useFocusEffect(
     useCallback(() => {
@@ -670,14 +702,7 @@ export default function NewChatScreen() {
                   byId.set(key, { ...value, unread_count: 0 });
                 }
               }
-              for (const [key, value] of prev.byUsername.entries()) {
-                const id = value?.id ?? value?.conversation_id ?? value?.conversation?.id;
-                if (String(id) === String(convId)) {
-                  byUsername.set(key, { ...value, unread_count: 0 });
-                }
-              }
-              return { byId, byUsername };
-            } catch (err) {
+        } catch (err) {
               return prev;
             }
           });
@@ -732,7 +757,7 @@ export default function NewChatScreen() {
           try {
             const key = String(f.id ?? f.username ?? f.name ?? '');
             if (!key) continue;
-            const conv = getFriendConversation(f, convIndex, conversations);
+            const conv = getFriendConversation(f, convIndex, conversations, persistedFriendConvMap);
             if (conv) map[key] = conv;
           } catch (e) { /* ignore per-friend errors */ }
         }
@@ -741,36 +766,105 @@ export default function NewChatScreen() {
         setFriendConvMap({});
       }
     } catch (e) { setFriendConvMap({}); }
-  }, [friends, conversations, convIndex]);
+  }, [friends, conversations, convIndex, persistedFriendConvMap]);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
       let mapped: any[] = [];
+      // Önce cache — hotspot'ta API asılı kalmasın, liste hemen açılsın
       try {
-        const res = await apiFetch(`${API_URL}/friendships/list`);
-        const data = await res.json();
-        mapped = Array.isArray(data) ? data.map((f:any) => {
-          const idFromTag = typeof f.tag === 'string' && f.tag.startsWith('#') ? Number(f.tag.replace('#','')) : undefined;
-          const idCandidate = f.user_id ?? f.id ?? idFromTag;
-          const resolvedId = typeof idCandidate !== 'undefined' && idCandidate !== null ? Number(idCandidate) : undefined;
-          return { id: resolvedId, username: f.username, name: f.name || '', avatar_url: f.avatar_url || '' };
-        }) : [];
-        if (mounted) setFriends(mapped);
-        try { await AsyncStorage.setItem(FRIENDS_CACHE_KEY, JSON.stringify(mapped)); } catch { /* ignore */ }
-      } catch {
-        // Offline/hata durumunda cache'den yükle
+        const cached = await AsyncStorage.getItem(FRIENDS_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && mounted) {
+            mapped = parsed;
+            setFriends(parsed);
+          }
+        }
+      } catch { /* ignore */ }
+      try {
+        const cachedConv = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
+        const parsed = cachedConv ? JSON.parse(cachedConv) : [];
+        let list = Array.isArray(parsed) ? parsed : [];
+        const friendMap = await loadFriendConvMap();
+        if (mounted) setPersistedFriendConvMap(friendMap);
         try {
-          const cached = await AsyncStorage.getItem(FRIENDS_CACHE_KEY);
-          if (cached) {
+          const { listOfflineConversationHints } = await import('@/lib/offlineChatQueue');
+          const hints = await listOfflineConversationHints();
+          const extras = hints.map((h) => ({
+            id: h.conversationId,
+            recipient_id: h.recipientId,
+            other_user_id: h.recipientId,
+            updated_at: h.timestamp,
+          }));
+          for (const [fid, cid] of Object.entries(friendMap)) {
+            extras.push({ id: cid, recipient_id: fid, other_user_id: fid, updated_at: Date.now() });
+          }
+          const seen = new Set(list.map((c: any) => String(c?.id ?? c?.conversation_id ?? c?.conversation?.id ?? '')).filter(Boolean));
+          for (const c of extras) {
+            if (!c.id || seen.has(String(c.id))) continue;
+            seen.add(String(c.id));
+            list.push(c);
+          }
+        } catch { /* ignore offline hints */ }
+        if (mounted && list.length > 0) {
+          setConversations(list);
+          const byId = new Map<string, any>();
+          const byUsername = new Map<string, any>();
+          list.forEach((c: any) => {
+            try {
+              extractParticipantIds(c).forEach((pid: any) => { if (pid != null) byId.set(String(pid), c); });
+              if (c?.recipient_id != null) byId.set(String(c.recipient_id), c);
+              if (c?.other_user_id != null) byId.set(String(c.other_user_id), c);
+            } catch { /* ignore */ }
+          });
+          for (const [fid, cid] of Object.entries(friendMap)) {
+            const found = list.find((c: any) => String(c?.id ?? c?.conversation_id) === String(cid));
+            if (found) byId.set(String(fid), found);
+          }
+          setConvIndex({ byId, byUsername });
+        }
+      } catch { /* ignore */ }
+      try {
+        const cachedMe = await SecureStore.getItemAsync('localUser');
+        if (cachedMe) {
+          const u = JSON.parse(cachedMe);
+          const cachedId = u?.id ?? u?.user_id ?? null;
+          if (cachedId != null) setLocalUserId(cachedId);
+        }
+      } catch { /* ignore */ }
+      if (mounted) setLoading(false);
+
+      if (!isConnected) {
+        try {
+          const cached = await AsyncStorage.getItem('@chat_communities_cache_v1');
+          if (cached && mounted) {
             const parsed = JSON.parse(cached);
-            if (Array.isArray(parsed) && mounted) {
-              mapped = parsed;
-              setFriends(parsed);
-            }
+            if (Array.isArray(parsed)) setCommunities(parsed);
           }
         } catch { /* ignore */ }
+        return;
+      }
+
+      try {
+        const res = await apiFetch(`${API_URL}/friendships/list`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            mapped = data.map((f:any) => {
+              const idFromTag = typeof f.tag === 'string' && f.tag.startsWith('#') ? Number(f.tag.replace('#','')) : undefined;
+              const idCandidate = f.user_id ?? f.id ?? idFromTag;
+              const resolvedId = typeof idCandidate !== 'undefined' && idCandidate !== null ? Number(idCandidate) : undefined;
+              return { id: resolvedId, username: f.username, name: f.name || '', avatar_url: f.avatar_url || '' };
+            });
+            if (mounted) setFriends(mapped);
+            try { await AsyncStorage.setItem(FRIENDS_CACHE_KEY, JSON.stringify(mapped)); } catch { /* ignore */ }
+          }
+        }
+      } catch {
+        // cache zaten yüklendi
       }
       let comms: any[] = [];
       try {
@@ -917,14 +1011,10 @@ export default function NewChatScreen() {
               }
             }
           } else {
-            if (mounted) {
-              setConversations([]);
-              setConvIndex({ byId: new Map(), byUsername: new Map() });
-            }
+            // API başarısız: cache/önceki liste kalsın
           }
         } catch (e) {
           console.warn('[NewChat] fetch conversations error', e);
-          if (mounted) { setConversations([]); setConvIndex({ byId: new Map(), byUsername: new Map() }); }
         }
 
         if (mounted && initialRecipientId) {
@@ -1298,6 +1388,18 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
       // ignore
     }
     try { await AsyncStorage.setItem(LAST_OPENED_KEY, String(convId)); } catch (e) { }
+    try {
+      const pids = extractParticipantIds(conv);
+      for (const pid of pids) {
+        if (localUserId != null && String(pid) === String(localUserId)) continue;
+        await saveFriendConvLink(pid, convId);
+        setPersistedFriendConvMap((prev) => ({ ...prev, [String(pid)]: String(convId) }));
+      }
+      if (conv?.recipient_id != null) {
+        await saveFriendConvLink(conv.recipient_id, convId);
+        setPersistedFriendConvMap((prev) => ({ ...prev, [String(conv.recipient_id)]: String(convId) }));
+      }
+    } catch { /* ignore */ }
     // Offline unread sayacını temizle ve kırmızı noktayı kaldır
     try {
       await clearOfflineUnread(String(convId));
@@ -1307,16 +1409,18 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
         return next;
       });
     } catch (e) { /* ignore */ }
-    try { await openConversationOrCommunity(router, convId, { replace: true }); } catch (e) { console.warn('[NewChat] openConversationOrCommunity failed', e); }
-  }, [router]);
+    try { await openConversationOrCommunity(router, convId, { replace: true, skipRemote: !isConnected }); } catch (e) { console.warn('[NewChat] openConversationOrCommunity failed', e); }
+  }, [router, isConnected, localUserId]);
 
   const handleOpenFriendConversation = useCallback(async (friend: any) => {
     if (!friend?.id) return false;
 
-    const existingConv = getFriendConversation(friend, convIndex, conversations);
+    const existingConv = getFriendConversation(friend, convIndex, conversations, persistedFriendConvMap);
     const convId = existingConv?.id ?? existingConv?.conversation_id ?? existingConv?.conversation?.id;
     if (convId) {
-      await openConversationOrCommunity(router, convId, { replace: true });
+      await saveFriendConvLink(friend.id, convId);
+      setPersistedFriendConvMap((prev) => ({ ...prev, [String(friend.id)]: String(convId) }));
+      await openConversationOrCommunity(router, convId, { replace: true, skipRemote: !isConnected });
       return true;
     }
 
@@ -1526,7 +1630,7 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
 
   const renderFriendItem = useCallback(({ item }: { item: any }) => {
     // resolve conversation from latest state each render to keep unread in sync
-    const conv = getFriendConversation(item, convIndex, conversations);
+    const conv = getFriendConversation(item, convIndex, conversations, persistedFriendConvMap);
     const onlineUnread = Boolean(conv && Number(conv?.unread_count) > 0 && !isUnreadFromSelf(conv));
     const convId = conv ? String(conv?.id ?? conv?.conversation_id ?? conv?.conversation?.id ?? '') : '';
     const offlineUnread = convId ? (offlineUnreadMap[convId] || 0) > 0 : false;
@@ -1542,10 +1646,11 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
         onContinue={handleContinueConversation}
         onStart={handleStartWithFriend}
         isConnected={isConnected}
+        friendConvMap={persistedFriendConvMap}
         onDelete={handleDeleteConversation}
       />
     );
-  }, [colors, convIndex, conversations, offlineUnreadMap, handleContinueConversation, handleStartWithFriend, handleDeleteConversation, localUserId, isConnected]);
+  }, [colors, convIndex, conversations, offlineUnreadMap, handleContinueConversation, handleStartWithFriend, handleDeleteConversation, localUserId, isConnected, persistedFriendConvMap]);
 
   const renderCommunityItem = useCallback(({ item }: { item: any }) => {
     const conv = Array.isArray(conversations) ? conversations.find((c:any) => {
@@ -1616,7 +1721,7 @@ const recipientId = payload.actualRecipientId ?? (selectedFriend?.id ? Number(se
             data={filteredFriends}
             keyExtractor={(item, index) => String(item.id ?? item.username ?? `friend-${index}`)}
             renderItem={renderFriendItem}
-            extraData={{ conversations, convIndex, localUserId }}
+            extraData={{ conversations, convIndex, localUserId, persistedFriendConvMap }}
             style={{ flex: 1 }}
             contentContainerStyle={{ flexGrow: 1, paddingBottom: 16 }}
           />

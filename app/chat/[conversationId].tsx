@@ -466,6 +466,11 @@ export default function ChatScreen() {
       try {
         if (conversationId) {
           await AsyncStorage.setItem(LAST_OPENED_KEY, String(conversationId));
+          try {
+            const { saveFriendConvLink } = await import('@/lib/chatFriendConvMap');
+            const paramsAny = params as any;
+            if (paramsAny.recipientId) await saveFriendConvLink(paramsAny.recipientId, conversationId);
+          } catch { /* ignore */ }
           try { emitChatEvent({ type: 'chat_viewed' }); } catch (e) { }
           // Ekran açıldığında bu konuşmanın offline unread'ini temizle (badge sıfırla)
           clearOfflineUnread(String(conversationId)).catch(() => {});
@@ -483,7 +488,7 @@ export default function ChatScreen() {
         } catch (e) { /* ignore conversation meta fetch failures */ }
       }
 
-      // Önce önbellekten yükle — internet olmasa bile önceki yazışmalar hemen görünür
+      // Önce yerel geçmiş — internet olmasa bile son yazışmalar hemen görünür
       if (conversationId) {
         try {
           const cachedRaw = await AsyncStorage.getItem(`@chat_msgs_v1_${conversationId}`);
@@ -491,10 +496,35 @@ export default function ChatScreen() {
             const cached: any[] = JSON.parse(cachedRaw);
             if (Array.isArray(cached) && cached.length > 0) {
               setMessages(cached);
-              setLoading(false); // önbellek varsa spinner'ı hemen kapat
+              setLoading(false);
             }
           }
         } catch { /* ignore cache errors */ }
+        try {
+          const { getLocalMessages } = await import('@/lib/offlineChatQueue');
+          const local = await getLocalMessages(String(conversationId));
+          if (local.length && mounted) {
+            const mapped = local.map((q: any) => ({
+              id: q.id,
+              text: q.text,
+              sender_id: q.senderId,
+              sender_name: q.senderName,
+              created_at: new Date(q.timestamp).toISOString(),
+              recipient_id: q.recipientId,
+              offline_peer: Number(q.synced) === 0,
+            }));
+            setMessages((prev: any[]) => {
+              const byId = new Map<string, any>();
+              for (const m of prev) {
+                const mid = getMessageId(m);
+                if (mid != null) byId.set(String(mid), m);
+              }
+              for (const m of mapped) byId.set(String(m.id), m);
+              return sortDesc(Array.from(byId.values()));
+            });
+            setLoading(false);
+          }
+        } catch { /* ignore sqlite hydrate */ }
       }
 
       try {
@@ -514,6 +544,24 @@ export default function ChatScreen() {
             return true;
           } catch (e) { return true; }
         });
+        try {
+          const { upsertSyncedMessage } = await import('@/lib/offlineChatQueue');
+          for (const m of arr) {
+            const mid = getMessageId(m);
+            if (mid == null || String(mid).startsWith('tmp-')) continue;
+            const t = m?.created_at ?? m?.createdAt ?? m?.timestamp;
+            const ts = typeof t === 'number' ? t : Date.parse(String(t)) || Date.now();
+            await upsertSyncedMessage({
+              id: String(mid),
+              conversationId: String(conversationId),
+              senderId: String(m.sender_id ?? m.senderId ?? ''),
+              senderName: String(m.sender_name ?? m.senderName ?? ''),
+              recipientId: m.recipient_id ?? m.recipientId ?? null,
+              text: String(m.text ?? m.body ?? ''),
+              timestamp: ts,
+            });
+          }
+        } catch { /* ignore persist */ }
         try {
             const raw = await AsyncStorage.getItem(DELETED_KEY);
             const deletedMap = raw ? JSON.parse(raw) : { conversations: {}, participants: {}, messages: {} };
@@ -1100,6 +1148,21 @@ export default function ChatScreen() {
       }
       const normalizedSaved = normalizeMessage(saved);
       console.log('[Chat] send response saved', normalizedSaved);
+      try {
+        const persistId = getMessageId(normalizedSaved);
+        if (persistId != null) {
+          const { upsertSyncedMessage } = await import('@/lib/offlineChatQueue');
+          await upsertSyncedMessage({
+            id: String(persistId),
+            conversationId: String(conversationId),
+            senderId: String(normalizedSaved?.sender_id ?? localUserId ?? ''),
+            senderName: String(normalizedSaved?.sender_name ?? ''),
+            recipientId: payload.recipient_id ?? null,
+            text: String(normalizedSaved?.text ?? payload.text ?? ''),
+            timestamp: Date.parse(String(normalizedSaved?.created_at ?? '')) || Date.now(),
+          });
+        }
+      } catch { /* ignore */ }
       if (isEmptyMessage(normalizedSaved)) {
         setMessages(prev => prev.filter(m => String(getMessageId(m)) !== String(tempId)));
       } else {
@@ -1242,7 +1305,26 @@ export default function ChatScreen() {
           <View>
             <Text style={themed.screenHeaderTitle}>Sohbet</Text>
           </View>
-          <TouchableOpacity onPress={() => router.push('/new')} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
+          <TouchableOpacity onPress={async () => {
+            try {
+              const { saveFriendConvLink } = await import('@/lib/chatFriendConvMap');
+              const other = conversationMeta?.recipient_id
+                ?? conversationMeta?.other_user_id
+                ?? conversationMeta?.other_user?.id
+                ?? conversationMeta?.recipient?.id
+                ?? null;
+              if (other != null) await saveFriendConvLink(other, conversationId);
+              else if (localUserId != null && Array.isArray(conversationMeta?.participants)) {
+                for (const p of conversationMeta.participants) {
+                  const pid = typeof p === 'object' ? (p?.user_id ?? p?.id) : p;
+                  if (pid != null && String(pid) !== String(localUserId)) {
+                    await saveFriendConvLink(pid, conversationId);
+                  }
+                }
+              }
+            } catch { /* ignore */ }
+            try { router.replace('/new' as any); } catch { router.push('/new'); }
+          }} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
             <View style={{ alignItems: 'center' }}>
               <ThemedIcon name="Menu" size="md" context="primary" style={{ marginBottom: 2 }} />
               <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 12 }}>Menü</Text>

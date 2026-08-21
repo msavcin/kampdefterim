@@ -427,13 +427,10 @@ export class WifiLanTransport {
         }
         this._lastArpScanAt = Date.now();
         
-        // ARP ile bulunan subnet base'lerini hemen işaretle.
         const stampNow = Date.now();
         const connectedMacs = new Set<string>();
         
         for (const { ip, mac } of arpEntries) {
-          const base = ip.split('.').slice(0, 3).join('.') + '.';
-          this._lastSubnetScanAt.set(base, stampNow);
           
           // Bu MAC'i tanıyoruz mu?
           const knownByMac = this._knownPeersByMac.get(mac);
@@ -458,6 +455,14 @@ export class WifiLanTransport {
         if (gw && !arpEntries.some(e => e.ip === gw)) {
           console.log('[WifiLanTransport] ARP + gateway bağlantısı:', gw);
           this._connectToPeer(gw, KAMP_TCP_PORT, '', '', SCAN_TIMEOUT_MS);
+        }
+        // ARP sadece "şu an görünen" IP'leri verir. İnternetsiz router / AP isolation
+        // olmayan LAN'da diğer istemciler ARP'ta henüz yoksa taramayı kesmeyelim.
+        const bases = new Set<string>();
+        for (const { ip } of arpEntries) bases.add(ip.split('.').slice(0, 3).join('.') + '.');
+        if (gw) bases.add(gw.split('.').slice(0, 3).join('.') + '.');
+        for (const base of bases) {
+          this._doSubnetScanOnBase(base + '1', -1);
         }
         return;
       }

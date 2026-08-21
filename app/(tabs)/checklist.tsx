@@ -547,16 +547,33 @@ export default function ChecklistScreen({ navigation }: any) {
         seasonsData.forEach((s: any) => {
           seasonMap[s.code || s.slug || s.name.toLowerCase()] = s.id;
         });
-        // typesData içindeki legacy kodları canonical değerlere eşle (ör: tent -> campground)
+        // typesData içindeki legacy kodları canonical değerlere eşle
+        // tent/legacy_1 -> campground, caravan/legacy_2 -> caravan_site, nature/legacy_3 -> hiking_road
+        const typeAliasGroups: Record<string, string[]> = {
+          tent: ['tent', 'campground', 'legacy_1', '1'],
+          campground: ['tent', 'campground', 'legacy_1', '1'],
+          caravan: ['caravan', 'caravan_site', 'legacy_2', '2'],
+          caravan_site: ['caravan', 'caravan_site', 'legacy_2', '2'],
+          nature: ['nature', 'hiking_road', 'legacy_3', '3'],
+          hiking_road: ['nature', 'hiking_road', 'legacy_3', '3'],
+        };
         typesData.forEach((t: any) => {
-          const rawId = t.code || t.slug || String(t.name || '').toLowerCase();
+          const rawId = String(t.code || t.slug || t.name || '').toLowerCase();
           const canonical = rawId === 'tent' ? 'campground'
             : rawId === 'caravan' ? 'caravan_site'
             : rawId === 'nature' ? 'hiking_road'
             : rawId === 'bungalov' ? 'bungalow'
             : rawId;
-          campingTypeMap[rawId] = t.id;
-          campingTypeMap[canonical] = t.id;
+          const keys = new Set<string>([
+            rawId,
+            canonical,
+            String(t.id),
+            ...(typeAliasGroups[rawId] || []),
+            ...(typeAliasGroups[canonical] || []),
+          ]);
+          keys.forEach((k) => {
+            if (k) campingTypeMap[k] = t.id;
+          });
         });
 
         // Frontend için

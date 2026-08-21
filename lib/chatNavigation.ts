@@ -27,39 +27,54 @@ async function resolveConversationMeta(convId: string | number) {
   return null;
 }
 
-export async function openConversationOrCommunity(router: RouterLike, convId: string | number, opts?: { replace?: boolean }) {
+export async function openConversationOrCommunity(router: RouterLike, convId: string | number, opts?: { replace?: boolean; skipRemote?: boolean }) {
   console.log('[openConversationOrCommunity] open', convId, 'opts', opts);
   const doReplace = opts?.replace !== false;
+
+  const goConversation = () => {
+    if (doReplace) {
+      try { router.replace({ pathname: '/chat/[conversationId]', params: { conversationId: String(convId) } }); return true; } catch (e) { console.warn('[openConversationOrCommunity] replace conversation failed', e); }
+      try { router.replace(`/chat/${convId}`); return true; } catch (e) { console.warn('[openConversationOrCommunity] replace conversation fallback failed', e); }
+    } else {
+      try { router.push({ pathname: '/chat/[conversationId]', params: { conversationId: String(convId) } }); return true; } catch (e) { console.warn('[openConversationOrCommunity] push conversation failed', e); }
+      try { router.push(`/chat/${convId}`); return true; } catch (e) { console.warn('[openConversationOrCommunity] push conversation fallback failed', e); }
+    }
+    return false;
+  };
+
+  const goCommunity = (communityId: string | number) => {
+    if (doReplace) {
+      try { router.replace({ pathname: '/chat/community/[communityId]', params: { communityId: String(communityId) } }); return true; } catch (e) { console.warn('[openConversationOrCommunity] replace community failed', e); }
+      try { router.replace(`/chat/community/${communityId}`); return true; } catch (e) { console.warn('[openConversationOrCommunity] replace community fallback failed', e); }
+    } else {
+      try { router.push({ pathname: '/chat/community/[communityId]', params: { communityId: String(communityId) } }); return true; } catch (e) { console.warn('[openConversationOrCommunity] push community failed', e); }
+      try { router.push(`/chat/community/${communityId}`); return true; } catch (e) { console.warn('[openConversationOrCommunity] push community fallback failed', e); }
+    }
+    return false;
+  };
+
+  // Offline / hotspot: API asılı kalmasın — sohbet ekranına hemen git
+  if (opts?.skipRemote) {
+    goConversation();
+    return;
+  }
+
   try {
-    const meta = await resolveConversationMeta(convId);
-    const foundConvId = meta?.id ?? meta?.conversation_id ?? meta?.conversation?.id ?? null;
+    const meta = await Promise.race([
+      resolveConversationMeta(convId),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 700)),
+    ]);
     const communityId = meta?.community_id ?? (meta?.community && meta.community.id) ?? null;
     if (communityId) {
-      if (doReplace) {
-        console.log('[openConversationOrCommunity] replace community', communityId);
-        try { router.replace({ pathname: '/chat/community/[communityId]', params: { communityId: String(communityId) } }); return; } catch (e) { console.warn('[openConversationOrCommunity] replace community failed', e); }
-        try { router.replace(`/chat/community/${communityId}`); return; } catch (e) { console.warn('[openConversationOrCommunity] replace community fallback failed', e); }
-      } else {
-        console.log('[openConversationOrCommunity] push community', communityId);
-        try { router.push({ pathname: '/chat/community/[communityId]', params: { communityId: String(communityId) } }); return; } catch (e) { console.warn('[openConversationOrCommunity] push community failed', e); }
-        try { router.push(`/chat/community/${communityId}`); return; } catch (e) { console.warn('[openConversationOrCommunity] push community fallback failed', e); }
-      }
+      goCommunity(communityId);
+      return;
     }
-
-    // fallback: open conversation screen
-    if (doReplace) {
-      console.log('[openConversationOrCommunity] replace conversation', convId);
-      try { router.replace({ pathname: '/chat/[conversationId]', params: { conversationId: String(convId) } }); return; } catch (e) { console.warn('[openConversationOrCommunity] replace conversation failed', e); }
-      try { router.replace(`/chat/${convId}`); return; } catch (e) { console.warn('[openConversationOrCommunity] replace conversation fallback failed', e); }
-    } else {
-      console.log('[openConversationOrCommunity] push conversation', convId);
-      try { router.push({ pathname: '/chat/[conversationId]', params: { conversationId: String(convId) } }); return; } catch (e) { console.warn('[openConversationOrCommunity] push conversation failed', e); }
-      try { router.push(`/chat/${convId}`); return; } catch (e) { console.warn('[openConversationOrCommunity] push conversation fallback failed', e); }
-    }
+    goConversation();
   } catch (e) {
-    // final fallback
-    if (opts?.replace !== false) try { router.replace('/chat'); } catch (err) { }
-    else try { router.push('/chat'); } catch (err) { }
+    if (!goConversation()) {
+      if (opts?.replace !== false) try { router.replace('/chat'); } catch (err) { }
+      else try { router.push('/chat'); } catch (err) { }
+    }
   }
 }
 

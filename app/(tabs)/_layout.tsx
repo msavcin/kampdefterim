@@ -32,6 +32,7 @@ import { incrementOfflineUnread, clearAllOfflineUnread } from '../../lib/offline
 import { emitChatEvent } from '../../lib/chatEvents';
 import { getAppRuntimeSettings } from '../../lib/adminSettingsApi';
 import { DEFAULT_FEATURE_ENTITLEMENTS, getMyFeatureEntitlements } from '../../lib/featureEntitlementsApi';
+import { loadEntitlementsCache } from '../../lib/offlinePremiumCache';
 
 export default function TabLayout() {
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -205,6 +206,10 @@ export default function TabLayout() {
               await AsyncStorage.setItem('@cached_is_premium', premium ? '1' : '0');
               await AsyncStorage.setItem('@cached_user_role', role || '');
             } catch {}
+            try {
+              const cachedEnt = await loadEntitlementsCache();
+              if (cachedEnt) setFeatureEntitlements(cachedEnt);
+            } catch {}
           } catch (e) {
             // ignore parse errors
           }
@@ -237,17 +242,21 @@ export default function TabLayout() {
             const role = me?.role || (me?.user?.role ?? null);
             const premium = !!(
               me?.is_premium ||
+              me?.isPremium ||
               me?.user?.is_premium ||
               me?.offline_enabled ||
-              me?.user?.offline_enabled
+              me?.user?.offline_enabled ||
+              me?.subscription_is_active
             );
-            setUserRole(role);
-            setIsPremium(premium);
+            if (me?.id) {
+              setUserRole(role);
+              setIsPremium(premium);
+            }
             try {
               const entitlements = await getMyFeatureEntitlements();
               setFeatureEntitlements(entitlements);
             } catch {
-              setFeatureEntitlements(DEFAULT_FEATURE_ENTITLEMENTS);
+              // Varsayılanlara düşme — cache'deki yetkiler kalsın
             }
             try {
               await AsyncStorage.setItem('@cached_is_premium', premium ? '1' : '0');

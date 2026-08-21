@@ -13,7 +13,7 @@ import ThemedIcon from '@/components/ThemedIcon';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/components/ThemeProvider';
 import { createThemedStyles } from '@/constants/theme/sharedStyles';
-import { emitChatEvent } from '@/lib/chatEvents';
+import { emitChatEvent, onChatEvent } from '@/lib/chatEvents';
 import { markRead } from '@/lib/readMap';
 import { getMe, listCommunityMembers } from '@/lib/userCommunityApi';
 import { offlineTransportManager } from '@/lib/offlineTransport';
@@ -62,6 +62,25 @@ const isDeleteControlMessage = (item:any) => {
 const getControlTarget = (item:any) => {
   return item?.metadata?.target_message_id ?? item?.meta?.control?.target_message_id ?? item?.meta?.control?.targetMessageId ?? item?.target_message_id ?? item?.targetMessageId ?? null;
 };
+
+async function persistCommunityHistory(conversationKey: string, arr: any[]) {
+  if (!conversationKey || !Array.isArray(arr) || arr.length === 0) return;
+  try {
+    const { upsertSyncedMessage } = await import('@/lib/offlineChatQueue');
+    for (const m of arr) {
+      const mid = getMessageId(m);
+      if (mid == null || String(mid).startsWith('tmp-')) continue;
+      await upsertSyncedMessage({
+        id: String(mid),
+        conversationId: conversationKey,
+        senderId: String(m.sender_id ?? m.senderId ?? ''),
+        senderName: String(m.sender_name ?? m.senderName ?? ''),
+        text: String(m.text ?? m.body ?? ''),
+        timestamp: getMsgTime(m) || Date.now(),
+      });
+    }
+  } catch { /* ignore */ }
+}
 
 export default function CommunityChatScreen() {
   const params = useLocalSearchParams();
@@ -306,14 +325,67 @@ export default function CommunityChatScreen() {
       } catch (e) { /* ignore friend lookup failures */ }
 
       try {
+        // Yerel geçmiş — internet yoksa da son yazışmalar görünsün
+        try {
+          const cachedRaw = await AsyncStorage.getItem(`@chat_msgs_v1_community_${communityId}`);
+          if (cachedRaw && mounted) {
+            const cached: any[] = JSON.parse(cachedRaw);
+            if (Array.isArray(cached) && cached.length > 0) {
+              setMessages(sortDesc(cached.map(normalizeMessage)));
+              setLoading(false);
+            }
+          }
+        } catch { /* ignore */ }
+        try {
+          const { getLocalMessages } = await import('@/lib/offlineChatQueue');
+          const localKeys = [`community_${communityId}`, String(communityId)];
+          const buckets = await Promise.all(localKeys.map((k) => getLocalMessages(k)));
+          const local = buckets.flat();
+          if (local.length && mounted) {
+            const mapped = local.map((q: any) => ({
+              id: q.id,
+              text: q.text,
+              sender_id: q.senderId,
+              sender_name: q.senderName,
+              created_at: new Date(q.timestamp).toISOString(),
+              offline_peer: Number(q.synced) === 0,
+            }));
+            setMessages((prev: any[]) => {
+              const byId = new Map<string, any>();
+              for (const m of prev) {
+                const mid = getMessageId(m);
+                if (mid != null) byId.set(String(mid), m);
+              }
+              for (const m of mapped) byId.set(String(m.id), m);
+              return sortDesc(Array.from(byId.values()));
+            });
+            setLoading(false);
+          }
+        } catch { /* ignore sqlite hydrate */ }
+
         // membership check: ensure current user belongs to this community
         try {
           const me = await getMe().catch(() => null);
-          if (!me || !me.community_id || Number(me.community_id) !== Number(communityId)) {
+          let memberCommunityId = me?.community_id ?? null;
+          if (memberCommunityId == null) {
+            try {
+              const cached = await SecureStore.getItemAsync('localUser');
+              if (cached) {
+                const u = JSON.parse(cached);
+                memberCommunityId = u?.community_id ?? u?.communityId ?? null;
+                const cachedId = u?.id ?? u?.user_id ?? null;
+                if (cachedId != null && mounted) setLocalUserId(cachedId);
+              }
+            } catch { /* ignore */ }
+          } else if (me?.id != null && mounted) {
+            setLocalUserId(me.id ?? me.user_id ?? me.userId ?? null);
+          }
+          if (memberCommunityId != null && Number(memberCommunityId) !== Number(communityId)) {
             Alert.alert('Erişim reddedildi', 'Bu topluluğa erişim izniniz yok.');
             try { router.back(); } catch { router.replace('/'); }
             return;
           }
+          // Üyelik doğrulanamadı (offline) → cache varsa devam et, kullanıcıyı atma
         } catch (e) { /* ignore */ }
 
         // try to find canonical conversation for this community via dedicated endpoint
@@ -334,6 +406,8 @@ export default function CommunityChatScreen() {
                   const data2 = await res2.json();
                   const arr2 = Array.isArray(data2) ? data2.map(normalizeMessage) : [];
                   if (mounted) setMessages(sortDesc(arr2));
+                  await persistCommunityHistory(`community_${communityId}`, arr2);
+                  if (convStr) await persistCommunityHistory(convStr, arr2);
                 }
               } catch (e) { console.warn('[CommunityChat] fetch conv messages failed', e); }
             }
@@ -348,6 +422,7 @@ export default function CommunityChatScreen() {
               const data = await res.json();
               const arr = Array.isArray(data) ? data.map(normalizeMessage) : [];
               if (mounted) setMessages(sortDesc(arr));
+              await persistCommunityHistory(`community_${communityId}`, arr);
             }
           } catch (e) {
             console.warn('[CommunityChat] fetch messages error', e);
@@ -508,7 +583,8 @@ export default function CommunityChatScreen() {
         getOfflineLocalMsgs(cacheKey),
         getOfflineLocalMsgs(String(communityId)),
       ]);
-      const queueMsgs = [...q1, ...q2];
+      const q3 = convId ? await getOfflineLocalMsgs(String(convId)) : [];
+      const queueMsgs = [...q1, ...q2, ...q3];
       if (!queueMsgs.length) return;
       const normalized = queueMsgs.map((q: any) => ({
         id: q.id,
@@ -516,7 +592,7 @@ export default function CommunityChatScreen() {
         sender_id: q.senderId,
         sender_name: q.senderName,
         created_at: new Date(q.timestamp).toISOString(),
-        offline_peer: true,
+        offline_peer: Number(q.synced) === 0,
       }));
       setMessages(prev => {
         const existingIds = new Set(
@@ -527,7 +603,7 @@ export default function CommunityChatScreen() {
         return sortDesc([...prev, ...newOnes]);
       });
     } catch { /* ignore */ }
-  }, [communityId]);
+  }, [communityId, convId]);
 
   useEffect(() => {
     mergeOfflineQueueMessages();
@@ -538,6 +614,37 @@ export default function CommunityChatScreen() {
       mergeOfflineQueueMessages();
     }
   }, [isConnected, mergeOfflineQueueMessages]);
+
+  useEffect(() => {
+    if (!communityId) return;
+    const unsub = onChatEvent(async (e) => {
+      if (e.type !== 'offline_sync_complete') return;
+      try {
+        const currentConvId = convIdRef.current;
+        let arr: any[] = [];
+        if (currentConvId) {
+          const refreshRes = await apiFetch(`${API_URL}/chat/conversations/${currentConvId}/messages?limit=50`);
+          if (refreshRes && refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            arr = Array.isArray(refreshData) ? refreshData.map(normalizeMessage) : [];
+          }
+        } else {
+          const refreshRes = await apiFetch(`${API_URL}/chat/messages?community_id=${communityId}&limit=50`);
+          if (refreshRes && refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            arr = Array.isArray(refreshData) ? refreshData.map(normalizeMessage) : [];
+          }
+        }
+        if (arr.length) {
+          setMessages(sortDesc(arr));
+          await persistCommunityHistory(`community_${communityId}`, arr);
+          if (currentConvId) await persistCommunityHistory(String(currentConvId), arr);
+        }
+        await mergeOfflineQueueMessages();
+      } catch { /* mevcut listeyi koru */ }
+    });
+    return unsub;
+  }, [communityId, mergeOfflineQueueMessages]);
 
   // ─── Çevrimdışı transport entegrasyonu ─────────────────────────────────
   useEffect(() => {
@@ -679,6 +786,8 @@ export default function CommunityChatScreen() {
               const refreshData = await refreshRes.json();
               const arr = Array.isArray(refreshData) ? refreshData.map(normalizeMessage) : [];
               setMessages(sortDesc(arr));
+              await persistCommunityHistory(`community_${communityId}`, arr);
+              await persistCommunityHistory(String(currentConvId), arr);
             }
           } else {
             const refreshRes = await apiFetch(`${API_URL}/chat/messages?community_id=${communityId}&limit=50`);
@@ -686,6 +795,7 @@ export default function CommunityChatScreen() {
               const refreshData = await refreshRes.json();
               const arr = Array.isArray(refreshData) ? refreshData.map(normalizeMessage) : [];
               setMessages(sortDesc(arr));
+              await persistCommunityHistory(`community_${communityId}`, arr);
             }
           }
         } catch { /* yenileme başarısız olsa mevcut listeyi koru */ }
@@ -717,6 +827,10 @@ export default function CommunityChatScreen() {
       if (!res.ok) throw new Error(`send failed: ${res.status} ${bodyText}`);
       const saved = bodyText ? JSON.parse(bodyText) : null;
       const normalizedSaved = normalizeMessage(saved);
+      try {
+        await persistCommunityHistory(`community_${communityId}`, [normalizedSaved]);
+        if (convIdRef.current) await persistCommunityHistory(String(convIdRef.current), [normalizedSaved]);
+      } catch { /* ignore */ }
       setMessages(prev => {
         try {
           const savedId = getMessageId(normalizedSaved);
@@ -746,6 +860,8 @@ export default function CommunityChatScreen() {
               const d3 = await res3.json();
               const arr3 = Array.isArray(d3) ? d3.map(normalizeMessage) : [];
               setMessages(sortDesc(arr3));
+              await persistCommunityHistory(`community_${communityId}`, arr3);
+              await persistCommunityHistory(convStr, arr3);
             }
           } catch (err) { /* ignore */ }
         }

@@ -63,22 +63,67 @@ export async function enqueueMessage(
 }
 
 /** Henüz sunucuya iletilmemiş mesajları döner (en eskiden yeniye). */
-export async function getPendingMessages(): Promise<OfflineQueueMessage[]> {
+export async function listOfflineConversationHints(): Promise<
+  { conversationId: string; recipientId: number | string | null; timestamp: number }[]
+> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<any>(
+    `SELECT conversationId, recipientId, MAX(timestamp) AS timestamp
+     FROM offline_messages
+     GROUP BY conversationId`,
+  );
+  return (rows || []).map((r) => ({
+    conversationId: String(r.conversationId),
+    recipientId: r.recipientId ?? null,
+    timestamp: Number(r.timestamp) || 0,
+  }));
+}
+
+/** Henüz sunucuya iletilmemiş mesajları döner (en eskiden yeniye). */
+export async function listPendingMessages(): Promise<OfflineQueueMessage[]> {
   const db = await getDb();
   return db.getAllAsync<OfflineQueueMessage>(
     'SELECT * FROM offline_messages WHERE synced = 0 ORDER BY timestamp ASC',
   );
 }
 
-/** Konuşmaya ait tüm offline mesajları döner (en yeniden eskiye). 
- * NOT: Sadece henüz senkronize edilmemiş (synced = 0) mesajlar döndürülür.
- * Senkronize edilen mesajlar artık sunucuda olduğu için tekrar gösterilmesine gerek yoktur.
- */
+export const getPendingMessages = listPendingMessages;
+
+/** Konuşmanın yerel geçmişi: hem bekleyen hem sunucuya eşitlenmiş mesajlar. */
 export async function getLocalMessages(conversationId: string): Promise<OfflineQueueMessage[]> {
+  const db = await getDb();
+  return db.getAllAsync<OfflineQueueMessage>(
+    'SELECT * FROM offline_messages WHERE conversationId = ? ORDER BY timestamp DESC',
+    [conversationId],
+  );
+}
+
+/** Sadece henüz sunucuya gitmemiş kuyruk. */
+export async function getPendingForConversation(conversationId: string): Promise<OfflineQueueMessage[]> {
   const db = await getDb();
   return db.getAllAsync<OfflineQueueMessage>(
     'SELECT * FROM offline_messages WHERE conversationId = ? AND synced = 0 ORDER BY timestamp DESC',
     [conversationId],
+  );
+}
+
+/** Sunucudan / online gönderimden gelen mesajı yerel geçmişe yazar (id korur). */
+export async function upsertSyncedMessage(msg: {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderName?: string;
+  recipientId?: number | string | null;
+  text: string;
+  timestamp: number;
+}): Promise<void> {
+  const db = await getDb();
+  const recipientId = msg.recipientId != null ? Number(msg.recipientId) : null;
+  await db.runAsync(
+    `INSERT OR REPLACE INTO offline_messages
+       (id, conversationId, senderId, senderName, text, timestamp, synced, peerDelivered, recipientId)
+     VALUES (?,?,?,?,?,?,1,1,?)`,
+    [String(msg.id), msg.conversationId, String(msg.senderId ?? ''), msg.senderName ?? '', msg.text ?? '', msg.timestamp, recipientId],
   );
 }
 
@@ -94,10 +139,9 @@ export async function markPeerDelivered(id: string): Promise<void> {
   await db.runAsync('UPDATE offline_messages SET peerDelivered = 1 WHERE id = ?', [id]);
 }
 
-/** Sunucuya senkronize edilen mesajları sil (artık gerek yok). */
+/** Eski davranış: eşitlenenleri silmek geçmişi yok ediyordu. Artık no-op. */
 export async function deleteSyncedMessages(): Promise<void> {
-  const db = await getDb();
-  await db.runAsync('DELETE FROM offline_messages WHERE synced = 1');
+  // Yerel sohbet geçmişi korunur.
 }
 
 /** Belirli bir mesajı sil. */

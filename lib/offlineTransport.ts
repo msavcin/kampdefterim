@@ -25,7 +25,6 @@ import {
   getLocalMessages,
   markPeerDelivered,
   OfflineQueueMessage,
-  deleteMessage,
   deleteSyncedMessages,
 } from './offlineChatQueue';
 import { emitChatEvent } from './chatEvents';
@@ -88,7 +87,8 @@ class OfflineTransportManager {
 
   async start(userId: string, userName: string): Promise<void> {
     if (this._active) {
-      console.log('[OfflineTransport] zaten aktif, atlanıyor');
+      console.log('[OfflineTransport] zaten aktif, tarama yenileniyor');
+      this._wifi.triggerSubnetScan();
       return;
     }
     this._userId = userId;
@@ -268,8 +268,6 @@ class OfflineTransportManager {
           });
           if (res.ok) {
             await markMessageSynced(msg.id);
-            // Sunucuya başarıyla gönderilen mesajı lokalde sil (artık gerek yok)
-            await deleteMessage(msg.id).catch(() => { /* ignore */ });
           } else {
             console.warn('[OfflineTransport] sync başarısız:', res.status, msg.id);
           }
